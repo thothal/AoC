@@ -11,7 +11,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 
 ## ToC
 
-- [ ] Day 1
+- [x] [Day 1](2021/Task 1/task1.html)
 - [ ] Day 2
 - [ ] Day 3
 - [ ] Day 4
