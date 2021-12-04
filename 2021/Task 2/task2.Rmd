@@ -108,7 +108,7 @@ data_2 <- GET("https://adventofcode.com/2021/day/2/input",
   set_names(c("command", "amount"))
 ```
 
-# Puzzle Day 1
+# Puzzle Day 2
 
 ## Part 1
 
