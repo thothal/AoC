@@ -4,6 +4,10 @@ author:
   name: "Thorn Thaler"
   email: "thorn.thaler@thothal.at"
 date: "2021-12-2"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), tools::file_path_sans_ext(basename(inputFile)))
+   
+   rmarkdown::render(inputFile, encoding = encoding, output_file = o_file, output_dir = here::here("docs")) })
 output: 
   rmdformats::downcute:
     highlight: tango
