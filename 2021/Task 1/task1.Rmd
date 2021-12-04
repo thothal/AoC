@@ -9,7 +9,6 @@ output:
     highlight: tango
     use_bookdown: TRUE
     mathjax: NULL
-    self_contained: FALSE
     lightbox: TRUE
     gallery: TRUE
 editor_options: 
