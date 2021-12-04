@@ -1,0 +1,26 @@
+---
+title: "Advent of Code - Solutions"
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "2021-12-2"
+knit: (function(inputFile, encoding) {
+   rmarkdown::render(inputFile, encoding = encoding, output_file = "index.html", output_dir = here::here("docs")) })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 2021
+
+* [Task 1](2021_task1.html)

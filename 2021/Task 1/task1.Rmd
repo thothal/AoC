@@ -1,11 +1,34 @@
 ---
-title: "Task 1"
+title: '`r paste("<span>Task 1 <span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
   name: "Thorn Thaler"
   email: "thorn.thaler@thothal.at"
 date: "2021-12-2"
 knit: (function(inputFile, encoding) {
-   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), tools::file_path_sans_ext(basename(inputFile)))
+   year <- format(Sys.Date(), "%Y");
+   o_file <- sprintf("%s_%s", year, tools::file_path_sans_ext(basename(inputFile)));
+   day <- as.numeric(gsub(".*(\\d+)$", "\\1", o_file));
+   rm <- readLines(here::here("README.md"));
+   line <- grep(paste0("Day ", day, "([^0-9]?$|\\])"), rm);
+   rm[line] <- sprintf("- [x] [Day %i](https://thothal.github.io/AoC/%s.html)", day, o_file);
+   cat(rm, file = here::here("README.md"), sep = "\n");
+   index <- readLines(here::here("index.Rmd"));
+   
+   if (!any(grepl(paste0(o_file, ".html"), index, fixed = TRUE))) {
+      rx <- if (day > 1) sprintf("%s_task%i.html", year, day - 1) else sprintf("# %s", year);
+      line <- grep(rx, index, fixed = TRUE);
+      new_line <- sprintf("* [Task %i](%s.html)", day, o_file);
+      
+      if (day == 1) {
+         new_line <- c("", new_line);
+      }
+      
+
+      index <- c(index[seq(1, line)], new_line, if(line < length(index)) index[(line + 1):length(index)]);
+      cat(index, file = here::here("index.Rmd"), sep = "\n");
+      rmarkdown::render(here::here("index.Rmd"), encoding = encoding, output_file = here::here("docs", "index"));
+      
+   }
    
    rmarkdown::render(inputFile, encoding = encoding, output_file = o_file, output_dir = here::here("docs")) })
 output: 
@@ -22,6 +45,10 @@ editor_options:
 ```{css custom-css, echo = FALSE}
 .page-content  .figure {
   width: 100%;
+}
+
+.back {
+  font-size: 2rem;
 }
 
 .day-desc {
