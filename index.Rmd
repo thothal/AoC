@@ -25,3 +25,4 @@ knitr::opts_chunk$set(echo = TRUE)
 
 * [Task 1](2021_task1.html)
 * [Task 2](2021_task2.html)
+* [Task 3](2021_task3.html)
