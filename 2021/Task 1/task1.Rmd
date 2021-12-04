@@ -1,5 +1,5 @@
 ---
-title: "Task 1"
+title: '`r paste("<span>Task 1 <span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
   name: "Thorn Thaler"
   email: "thorn.thaler@thothal.at"
@@ -22,6 +22,10 @@ editor_options:
 ```{css custom-css, echo = FALSE}
 .page-content  .figure {
   width: 100%;
+}
+
+.back {
+  font-size: 2rem;
 }
 
 .day-desc {

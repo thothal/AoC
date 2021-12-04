@@ -11,7 +11,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 
 ## ToC
 
-- [x] [Day 1](2021/Task%201/task1.html)
+- [x] [Day 1](https://thothal.github.io/AoC/2021_task1.html)
 - [ ] Day 2
 - [ ] Day 3
 - [ ] Day 4
