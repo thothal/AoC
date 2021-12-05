@@ -1,9 +1,11 @@
 ---
-title: '`r paste("<span>Task 3 <span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+params:
+   task_nr: 3
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
   name: "Thorn Thaler"
   email: "thorn.thaler@thothal.at"
-date: "2021-12-4"
+date: "`r Sys.Date()`"
 knit: (function(inputFile, encoding) {
    year <- format(Sys.Date(), "%Y");
    o_file <- sprintf("%s_%s", year, tools::file_path_sans_ext(basename(inputFile)));
@@ -44,18 +46,18 @@ editor_options:
 
 ```{css custom-css, echo = FALSE}
 .page-content  .figure {
-  width: 100%;
+width: 100%;
 }
 
 .back {
-  font-size: 2rem;
+font-size: 2rem;
 }
 
 .day-desc {
-  border: 2px dotted;
-  border-radius: 6px;
-  border-color: var(--blockquote-border-color);
-  padding: 0 20px;
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
 }
 ```
 
@@ -64,13 +66,13 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
 ## Define a function to write text in typewriter font
 tt <- function(x) {
-  if (knitr::is_latex_output()) {
-    sprintf("\\texttt{%s}", as.character(x))
-  } else if (knitr::is_html_output()) {
-    sprintf("<tt>%s</tt>", as.character(x))
-  } else {
-    x
-  }
+   if (knitr::is_latex_output()) {
+      sprintf("\\texttt{%s}", as.character(x))
+   } else if (knitr::is_html_output()) {
+      sprintf("<tt>%s</tt>", as.character(x))
+   } else {
+      x
+   }
 }
 ```
 
@@ -82,10 +84,12 @@ First we need to load the required libraries.
 
 ```{r libs, warning = FALSE}
 library(httr)
+library(xml2)
 library(magrittr)
 library(tibble)
 library(dplyr)
 library(stringr)
+library(purrr)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -93,35 +97,69 @@ library(stringr)
 
 ```{r get-data, cache=FALSE}
 session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
-puzzle_3 <- GET("https://adventofcode.com/2021/day/3",
-                session_cookie) %>% 
-  content(encoding = "UTF-8") %>% 
-  xml_find_all("///article") %>% 
-  lapply(as.character)
-
-data_3 <- GET("https://adventofcode.com/2021/day/3/input",
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
               session_cookie) %>% 
-  content(encoding = "UTF-8") %>% 
-  read.table(text = .) %>% 
-  as_tibble() %>% 
-  set_names("status_code")
+   content(encoding = "UTF-8") %>% 
+   xml_find_all("///article") %>% 
+   lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+                   session_cookie) %>% 
+   content(encoding = "UTF-8") %>% 
+   read.table(text = ., colClasses = "character") %>% 
+   as_tibble() %>% 
+   set_names("status_code")
 ```
 
-# Puzzle Day 3
+# Puzzle Day `r params$task_nr`
 
 ## Part 1
 
 ### Description
 
 ```{r show-puzzle-a, echo = FALSE, results = "asis"}
-cat(puzzle_3[[1]])
+cat(puzzle[[1]])
 ```
 
 ### Solution
 
+We pad all binary numbers from left with `r tt("0")`'s and transform the data
+into a matrix where each column represents a digit of the binary code.^[This 
+step is strictly speaking not necessary as, if readed in als character, all
+numbers are properly formtted. Only if readed in as numbers (which is the
+default if `read.table` is not told otherwise) we see unequal length. However,
+we keep this code to play it safe.] 
+Since, we  padded all numbers to the maximum length, all items will be properly 
+filled. 
+
+Then we can simply calculate the column sum to determine the bit. We will code 
+the bits with `logicals` which makes the negation easy (*N.B.* Integers would 
+have been likewise easy to use). The last step is then to calculate the decimal
+representation (with the highest bit on the left).
 
 ```{r solution-a}
-data_3
+digits <- max(nchar(puzzle_data$status_code))
+n <- NROW(puzzle_data)
+puzzle_data <- puzzle_data %>% 
+   mutate(status_code = str_pad(as.character(status_code), digits, pad = "0"))
+bin_matrix <- puzzle_data %>% 
+   pull(status_code) %>% 
+   str_split_fixed(boundary("character"), digits) %>% 
+   as.numeric() %>% 
+   matrix(n, digits) %>%
+   `colnames<-`(paste0("V", seq_len(digits)))
+ones <- bin_matrix %>% 
+   colSums()
+
+gamma <- ones > round(n / 2, 0)
+epsilon <- !gamma
+
+bin2dec <- function(x) {
+   sum(x * 2 ^ seq(length(x) - 1, 0, -1))
+}
+
+bin2dec(gamma) * bin2dec(epsilon)
 
 ```
 
@@ -129,15 +167,59 @@ data_3
 
 ### Description
 
-```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle_3) > 1}
-cat(puzzle_3[[2]])
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
 ```
 
 ### Solution
 
+We will use `purrr::reduce` to apply the filtering function to the columns of 
+the matrix (which is back-transformed to a `tibble` to make use of the list like 
+structure). The filtering function is a binary function with parameters `cond` 
+and `col`.^[Technically it also takes a third parameter `type`, indicating 
+whether we filter for  majority or minority.]
+* `cond` is a logical vector of length `NROW(data)` indicating whether 
+a certain row is still in the race.
+* `col` is simply the next column to investigate.
 
-```{r solution-b, eval = length(puzzle_3) > 1}
-data_3 
+The function stops early (using `rlang::done`), if there is only one valid item
+in the list. We make again use of the fact that `TRUE == 1` and `FALSE == 0`.
+
+```{r solution-b, eval = length(puzzle) > 1}
+col_filter <- function(cond, col, type = c("majority", "minority")) {
+   if (sum(cond) > 1) {
+      ## are there more than one cndidates
+      type <- match.arg(type)
+      ## how many 1s are there among the candidates
+      k <- sum(col[cond])
+      n <- length(col[cond])
+      ## for which bit should we filter:
+      ## - if there are more ones than zeros (k >= n - k) and we want to go 
+      ##   for the majority than it should be 1
+      ## - if there are less ones than zero (k < n - k) and we want to go 
+      ##   for the majority than it should be 0
+      goal <- switch(type, majority = (k >= n - k), minority = (k < n - k))
+      new_cond <- rep(FALSE, length(col))
+      ## candidates stay candidates if the have the right bit
+      new_cond[cond] <- col[cond] == goal
+      new_cond
+   } else {
+      done(cond)
+   }
+}
+
+oxygen <- bin_matrix %>% 
+   as_tibble() %>% 
+   reduce(col_filter, .init = rep(TRUE, NROW(.))) %>% 
+   `[`(bin_matrix, .) %>% 
+   bin2dec()
+co2 <- bin_matrix %>% 
+   as_tibble() %>% 
+   reduce(col_filter, type = "minority", .init = rep(TRUE, NROW(.))) %>% 
+   `[`(bin_matrix, .) %>% 
+   bin2dec()
+
+oxygen * co2
 ```
 
 

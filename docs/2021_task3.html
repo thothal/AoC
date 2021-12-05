@@ -6,6 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
+        <meta name="date" content="2021-12-05" />
     
     <title>Task 3   </title>
 
@@ -143,7 +144,7 @@
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2021-12-4</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2021-12-05</p>
            
 
    
@@ -153,18 +154,18 @@
 <div class="page-content has-page-title">
 <style type="text/css">
 .page-content  .figure {
-  width: 100%;
+width: 100%;
 }
 
 .back {
-  font-size: 2rem;
+font-size: 2rem;
 }
 
 .day-desc {
-  border: 2px dotted;
-  border-radius: 6px;
-  border-color: var(--blockquote-border-color);
-  padding: 0 20px;
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
 }
 </style>
 <div id="setup" class="section level1" number="1">
@@ -177,25 +178,25 @@ library(xml2)
 library(magrittr)
 library(tibble)
 library(dplyr)
-library(tidyr)</code></pre>
+library(stringr)
+library(purrr)</code></pre>
 </div>
 <div id="retrieve-data-from-aoc" class="section level2" number="1.2">
 <h2><span class="header-section-number">1.2</span> Retrieve Data from <tt>AoC</tt></h2>
 <pre class="r"><code>session_cookie &lt;- set_cookies(session = keyring::key_get(&quot;AoC-GitHub-Cookie&quot;))
-puzzle_3 &lt;- GET(&quot;https://adventofcode.com/2021/day/3&quot;,
-                session_cookie) %&gt;% 
-  content(encoding = &quot;UTF-8&quot;) %&gt;% 
-  xml_find_all(&quot;///article&quot;) %&gt;% 
-  lapply(as.character)
-
-data_3 &lt;- GET(&quot;https://adventofcode.com/2021/day/3/input&quot;,
+base_url &lt;- paste0(&quot;https://adventofcode.com/2021/day/&quot;, params$task_nr)
+puzzle &lt;- GET(base_url,
               session_cookie) %&gt;% 
-  content(encoding = &quot;UTF-8&quot;) %&gt;% 
-  read.table(text = .) %&gt;% 
-  as_tibble() %&gt;% 
-  set_names(c(&quot;command&quot;, &quot;amount&quot;))</code></pre>
-<pre><code>## Warning: The `value` argument of `names&lt;-` must have the same length as `x` as of tibble 3.0.0.
-## `names` must have length 1, not 2.</code></pre>
+   content(encoding = &quot;UTF-8&quot;) %&gt;% 
+   xml_find_all(&quot;///article&quot;) %&gt;% 
+   lapply(as.character)
+
+puzzle_data &lt;- GET(paste0(base_url, &quot;/input&quot;),
+                   session_cookie) %&gt;% 
+   content(encoding = &quot;UTF-8&quot;) %&gt;% 
+   read.table(text = ., colClasses = &quot;character&quot;) %&gt;% 
+   as_tibble() %&gt;% 
+   set_names(&quot;status_code&quot;)</code></pre>
 </div>
 </div>
 <div id="puzzle-day-3" class="section level1" number="2">
@@ -255,47 +256,182 @@ Use the binary numbers in your diagnostic report to calculate the gamma rate and
 </div>
 <div id="solution" class="section level3" number="2.1.2">
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
-<p>In order to solve this puzzle we have to sum all <em>forward</em> lines to get a final
-<code>x</code> position. Likewise we have to som all <em>down</em> lines and substract the sum
-of the <em>up</em> lines to get <code>y</code>:</p>
-<pre class="r"><code>data_3</code></pre>
-<pre><code>## # A tibble: 1,000 x 1
-##         command
-##           &lt;dbl&gt;
-##  1  11111111100
-##  2 100001011111
-##  3  11010010010
-##  4 100110110110
-##  5   1000110001
-##  6 110010001010
-##  7 110000010010
-##  8  10110100110
-##  9    101000110
-## 10 100101010010
-## # ... with 990 more rows</code></pre>
+<p>We pad all binary numbers from left with <tt>0</tt>’s and transform the data
+into a matrix where each column represents a digit of the binary code.<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>
+Since, we padded all numbers to the maximum length, all items will be properly
+filled.</p>
+<p>Then we can simply calculate the column sum to determine the bit. We will code
+the bits with <code>logicals</code> which makes the negation easy (<em>N.B.</em> Integers would
+have been likewise easy to use). The last step is then to calculate the decimal
+representation (with the highest bit on the left).</p>
+<pre class="r"><code>digits &lt;- max(nchar(puzzle_data$status_code))
+n &lt;- NROW(puzzle_data)
+puzzle_data &lt;- puzzle_data %&gt;% 
+   mutate(status_code = str_pad(as.character(status_code), digits, pad = &quot;0&quot;))
+bin_matrix &lt;- puzzle_data %&gt;% 
+   pull(status_code) %&gt;% 
+   str_split_fixed(boundary(&quot;character&quot;), digits) %&gt;% 
+   as.numeric() %&gt;% 
+   matrix(n, digits) %&gt;%
+   `colnames&lt;-`(paste0(&quot;V&quot;, seq_len(digits)))
+ones &lt;- bin_matrix %&gt;% 
+   colSums()
+
+gamma &lt;- ones &gt; round(n / 2, 0)
+epsilon &lt;- !gamma
+
+bin2dec &lt;- function(x) {
+   sum(x * 2 ^ seq(length(x) - 1, 0, -1))
+}
+
+bin2dec(gamma) * bin2dec(epsilon)</code></pre>
+<pre><code>## [1] 2250414</code></pre>
 </div>
 </div>
 <div id="part-2" class="section level2" number="2.2">
 <h2><span class="header-section-number">2.2</span> Part 2</h2>
 <div id="description-1" class="section level3" number="2.2.1">
 <h3><span class="header-section-number">2.2.1</span> Description</h3>
+<article class="day-desc">
+<h2 id="part2">
+— Part Two —
+</h2>
+<p>
+Next, you should verify the <em>life support rating</em>, which can be determined by multiplying the <em>oxygen generator rating</em> by the <em>CO2 scrubber rating</em>.
+</p>
+<p>
+Both the oxygen generator rating and the CO2 scrubber rating are values that can be found in your diagnostic report - finding them is the tricky part. Both values are located using a similar process that involves filtering out values until only one remains. Before searching for either rating value, start with the full list of binary numbers from your diagnostic report and <em>consider just the first bit</em> of those numbers. Then:
+</p>
+<ul>
+<li>
+Keep only numbers selected by the <em>bit criteria</em> for the type of rating value for which you are searching. Discard numbers which do not match the bit criteria.
+</li>
+<li>
+If you only have one number left, stop; this is the rating value for which you are searching.
+</li>
+<li>
+Otherwise, repeat the process, considering the next bit to the right.
+</li>
+</ul>
+<p>
+The <em>bit criteria</em> depends on which type of rating value you want to find:
+</p>
+<ul>
+<li>
+To find <em>oxygen generator rating</em>, determine the <em>most common</em> value (<code>0</code> or <code>1</code>) in the current bit position, and keep only numbers with that bit in that position. If <code>0</code> and <code>1</code> are equally common, keep values with a <code><em>1</em></code> in the position being considered.
+</li>
+<li>
+To find <em>CO2 scrubber rating</em>, determine the <em>least common</em> value (<code>0</code> or <code>1</code>) in the current bit position, and keep only numbers with that bit in that position. If <code>0</code> and <code>1</code> are equally common, keep values with a <code><em>0</em></code> in the position being considered.
+</li>
+</ul>
+<p>
+For example, to determine the <em>oxygen generator rating</em> value using the same example diagnostic report from above:
+</p>
+<ul>
+<li>
+Start with all 12 numbers and consider only the first bit of each number. There are more <code>1</code> bits (7) than <code>0</code> bits (5), so keep only the 7 numbers with a <code>1</code> in the first position: <code>11110</code>, <code>10110</code>, <code>10111</code>, <code>10101</code>, <code>11100</code>, <code>10000</code>, and <code>11001</code>.
+</li>
+<li>
+Then, consider the second bit of the 7 remaining numbers: there are more <code>0</code> bits (4) than <code>1</code> bits (3), so keep only the 4 numbers with a <code>0</code> in the second position: <code>10110</code>, <code>10111</code>, <code>10101</code>, and <code>10000</code>.
+</li>
+<li>
+In the third position, three of the four numbers have a <code>1</code>, so keep those three: <code>10110</code>, <code>10111</code>, and <code>10101</code>.
+</li>
+<li>
+In the fourth position, two of the three numbers have a <code>1</code>, so keep those two: <code>10110</code> and <code>10111</code>.
+</li>
+<li>
+In the fifth position, there are an equal number of <code>0</code> bits and <code>1</code> bits (one each). So, to find the <em>oxygen generator rating</em>, keep the number with a <code>1</code> in that position: <code>10111</code>.
+</li>
+<li>
+As there is only one number left, stop; the <em>oxygen generator rating</em> is <code>10111</code>, or <code><em>23</em></code> in decimal.
+</li>
+</ul>
+<p>
+Then, to determine the <em>CO2 scrubber rating</em> value from the same example above:
+</p>
+<ul>
+<li>
+Start again with all 12 numbers and consider only the first bit of each number. There are fewer <code>0</code> bits (5) than <code>1</code> bits (7), so keep only the 5 numbers with a <code>0</code> in the first position: <code>00100</code>, <code>01111</code>, <code>00111</code>, <code>00010</code>, and <code>01010</code>.
+</li>
+<li>
+Then, consider the second bit of the 5 remaining numbers: there are fewer <code>1</code> bits (2) than <code>0</code> bits (3), so keep only the 2 numbers with a <code>1</code> in the second position: <code>01111</code> and <code>01010</code>.
+</li>
+<li>
+In the third position, there are an equal number of <code>0</code> bits and <code>1</code> bits (one each). So, to find the <em>CO2 scrubber rating</em>, keep the number with a <code>0</code> in that position: <code>01010</code>.
+</li>
+<li>
+As there is only one number left, stop; the <em>CO2 scrubber rating</em> is <code>01010</code>, or <code><em>10</em></code> in decimal.
+</li>
+</ul>
+<p>
+Finally, to find the life support rating, multiply the oxygen generator rating (<code>23</code>) by the CO2 scrubber rating (<code>10</code>) to get <code><em>230</em></code>.
+</p>
+<p>
+Use the binary numbers in your diagnostic report to calculate the oxygen generator rating and CO2 scrubber rating, then multiply them together. <em>What is the life support rating of the submarine?</em> (Be sure to represent your answer in decimal, not binary.)
+</p>
+</article>
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
-<p>We have to create an <code>aim</code> column first, which is the cumulative sum of the
-following helper column:</p>
-<ul>
-<li><em>Forward</em> commands do not effect the <code>aim</code>, thus return <code>0</code>.</li>
-<li><em>Down</em> commands increase the depth, thus return <code>amount</code>.</li>
-<li><em>Up</em> commands decrease the depth, thus return <code>-amount</code>.</li>
-</ul>
-<p>The cumulative sum of this column represents the aim at each step. Then, we
-can drop all non <em>Forward</em> commands and the final position is then given by the
-sum of <code>amount</code> for the horizontal position and the sum of <code>amount * aim</code> for
-the depth.</p>
-<pre class="r"><code>data_3 </code></pre>
+<p>We will use <code>purrr::reduce</code> to apply the filtering function to the columns of
+the matrix (which is back-transformed to a <code>tibble</code> to make use of the list like
+structure). The filtering function is a binary function with parameters <code>cond</code>
+and <code>col</code>.<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a>
+* <code>cond</code> is a logical vector of length <code>NROW(data)</code> indicating whether
+a certain row is still in the race.
+* <code>col</code> is simply the next column to investigate.</p>
+<p>The function stops early (using <code>rlang::done</code>), if there is only one valid item
+in the list. We make again use of the fact that <code>TRUE == 1</code> and <code>FALSE == 0</code>.</p>
+<pre class="r"><code>col_filter &lt;- function(cond, col, type = c(&quot;majority&quot;, &quot;minority&quot;)) {
+   if (sum(cond) &gt; 1) {
+      ## are there more than one cndidates
+      type &lt;- match.arg(type)
+      ## how many 1s are there among the candidates
+      k &lt;- sum(col[cond])
+      n &lt;- length(col[cond])
+      ## for which bit should we filter:
+      ## - if there are more ones than zeros (k &gt;= n - k) and we want to go 
+      ##   for the majority than it should be 1
+      ## - if there are less ones than zero (k &lt; n - k) and we want to go 
+      ##   for the majority than it should be 0
+      goal &lt;- switch(type, majority = (k &gt;= n - k), minority = (k &lt; n - k))
+      new_cond &lt;- rep(FALSE, length(col))
+      ## candidates stay candidates if the have the right bit
+      new_cond[cond] &lt;- col[cond] == goal
+      new_cond
+   } else {
+      done(cond)
+   }
+}
+
+oxygen &lt;- bin_matrix %&gt;% 
+   as_tibble() %&gt;% 
+   reduce(col_filter, .init = rep(TRUE, NROW(.))) %&gt;% 
+   `[`(bin_matrix, .) %&gt;% 
+   bin2dec()
+co2 &lt;- bin_matrix %&gt;% 
+   as_tibble() %&gt;% 
+   reduce(col_filter, type = &quot;minority&quot;, .init = rep(TRUE, NROW(.))) %&gt;% 
+   `[`(bin_matrix, .) %&gt;% 
+   bin2dec()
+
+oxygen * co2</code></pre>
+<pre><code>## [1] 6085575</code></pre>
 </div>
 </div>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p>This
+step is strictly speaking not necessary as, if readed in als character, all
+numbers are properly formtted. Only if readed in as numbers (which is the
+default if <code>read.table</code> is not told otherwise) we see unequal length. However,
+we keep this code to play it safe.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+<li id="fn2"><p>Technically it also takes a third parameter <code>type</code>, indicating
+whether we filter for majority or minority.<a href="#fnref2" class="footnote-back">↩︎</a></p></li>
+</ol>
 </div>
 </div>
 
