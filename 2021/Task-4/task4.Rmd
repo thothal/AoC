@@ -1,0 +1,204 @@
+---
+params:
+   task_nr: 4
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+   
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+   width: 100%;
+}
+
+.back {
+   font-size: 2rem;
+}
+
+.day-desc {
+   border: 2px dotted;
+   border-radius: 6px;
+   border-color: var(--blockquote-border-color);
+   padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+   if (knitr::is_latex_output()) {
+      sprintf("\\texttt{%s}", as.character(x))
+   } else if (knitr::is_html_output()) {
+      sprintf("<tt>%s</tt>", as.character(x))
+   } else {
+      x
+   }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(stringr)
+library(purrr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = TRUE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+   content(encoding = "UTF-8") %>% 
+   xml_find_all("///article") %>% 
+   lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+                   session_cookie) %>% 
+   content(encoding = "UTF-8") %>% 
+   strsplit("\n") %>% 
+   `[[`(1)
+
+read_boards <- function(stream) {
+   markers <- vapply(stream, nchar, integer(1))
+   idx <- which(markers == 0L)
+   idx <- matrix(c(head(idx, -1), tail(idx, -1)), ncol = 2) %>% 
+      `colnames<-`(c("from", "to"))
+   apply(idx, 1, function(ii) {
+      tab <- stream[seq(ii[["from"]] + 1L, ii[["to"]] - 1L)] %>% 
+         paste(collapse = "\n") %>% 
+         trimws() %>% 
+         read.table(text = .) %>% 
+         as.matrix() %>% 
+         `colnames<-`(NULL)
+   }, simplify = FALSE)
+}
+
+puzzle_data <- list(draw = puzzle_data[1] %>% 
+                       strsplit(",") %>% 
+                       `[[`(1) %>% 
+                       as.numeric(),
+                    boards = read_boards(puzzle_data))
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The most challenging part about this puzzle was to bring the data into the right format.
+Once we have a vector of draws and a list of boards we can loop over the draws, mark all
+matches as `TRUE` and calculate `[row|col]Sums`. If either matches the number of rows 
+(cols) we have a BINGO. We use again `purrr:reduce` instead of an old-fashioned `for` 
+loop just for the fun of it.
+
+The binary function takes the following relevant arguments^[The original boards are passed
+in as an argument as well though we could simply use it without an explicit argument. But
+I prefer expliciteness overimpliciteness.]:
+* `matches` a list of length 5 lists. The first element corresponds to the board.
+The second element is a logical matrix showing the matches. The third element is a logical
+flagging a bingo. The forth element is the last number drawn. The last number is the round
+whihc we are in.
+* `draw` a numeric given the next number.
+
+```{r solution-a}
+play_bingo <- function(rounds, draw, 
+                       boards = puzzle_data$boards, 
+                       stop_on_first = TRUE) {
+   bingo_found <- FALSE
+   res <- map(rounds, function(round) {
+      bingo <- round$bingo
+      if (!bingo) {
+         res <- round$matches | round$board == draw 
+         if (any(rowSums(res) == nrow(round$board),
+                 colSums(res) == ncol(round$board))) {
+            bingo <- TRUE
+            bingo_found <<- TRUE
+         }
+         list(board = round$board, matches = res, bingo = bingo, draw = draw,
+              round = round$round + 1)
+      } else {
+         round
+      }
+   })
+   all_bingos <- all(map_lgl(res, ~ .x$bingo))
+   if (bingo_found & stop_on_first | all_bingos) {
+      done(res)
+   } else {
+      res
+   }
+}
+
+init <- map(puzzle_data$boards, ~ list(board = .x,
+                                       matches = matrix(FALSE, nrow(.x), ncol(.x)),
+                                       bingo = FALSE,
+                                       draw = NA, round = 0))
+
+bingo_game <- reduce(puzzle_data$draw, play_bingo, 
+                     .init = init)
+
+
+winner <- Filter(\(l) l$bingo, bingo_game)
+map_dbl(winner, ~ sum(.x$board[!.x$matches]) * .x$draw)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We can reuse the previous code, but instead of exiting pre-maturely on first BINGO, we
+play until all boards have a bingo.
+
+```{r solution-b, eval = length(puzzle) > 1}
+bingo_game <- reduce(puzzle_data$draw, play_bingo, 
+                     stop_on_first = FALSE, .init = init)
+
+max_round <- map_dbl(bingo_game, ~ .x$round)
+winner <- bingo_game[which.max(max_round)]
+map_dbl(winner, ~ sum(.x$board[!.x$matches]) * .x$draw)
+
+```
+
+
