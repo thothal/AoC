@@ -1,11 +1,15 @@
-suppressPackageStartupMessages({
-	library(here)
-	library(glue)
-	library(purrr)
-	library(stringr)
-	library(dplyr)
-	library(cli)
-})
+pan_loc <- rmarkdown::find_pandoc(dir = "c:/Program Files/RStudio/bin/pandoc/")
+
+suppressWarnings(
+	suppressPackageStartupMessages({
+		library(here)
+		library(glue)
+		library(purrr)
+		library(stringr)
+		library(dplyr)
+		library(cli)
+	})
+)
 
 edit_file <- function(lines, file, replace, start, idx = NULL) {
 	if (replace) {
