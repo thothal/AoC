@@ -1,3 +1,4 @@
+.libPaths("C:/Users/tthaler/Documents/R/win-library/4.1")
 pan_loc <- rmarkdown::find_pandoc(dir = "c:/Program Files/RStudio/bin/pandoc/")
 
 suppressWarnings(
@@ -113,4 +114,4 @@ rmarkdown::render(here::here("index.Rmd"),
 						output_file = here::here("docs", "index"))
 
 cli_alert_success("Updating docs done")
-
+q(status = 0)
