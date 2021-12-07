@@ -71,7 +71,7 @@ library(dplyr)
 ## Retrieve Data from `r tt("AoC")`
 
 
-```{r get-data, cache = TRUE, messages = FALSE}
+```{r get-data, cache = FALSE, messages = FALSE}
 session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
 base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
 puzzle <- GET(base_url,
