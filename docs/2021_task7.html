@@ -278,21 +278,85 @@ Determine the horizontal position that the crabs can align to using the least fu
 points and each potential point in <code>range(puzzle_data)</code>. Points outside this range can be
 always improved by setting them to the nearest maximum. We will use <code>outer</code> to get all
 distances and then apply <code>rowSum</code> to get the distance for each potential candidate. The
-point wiht minimum <code>rowSum</code> is the best option.</p>
+point with minimum <code>rowSum</code> is the best option.</p>
 <pre class="r"><code>cand &lt;- puzzle_data %&gt;% 
     range() %&gt;% 
     set_names(c(&quot;from&quot;, &quot;to&quot;)) %&gt;% 
     as.list() %&gt;% 
-    do.call(seq, .)</code></pre>
+    do.call(seq, .)
+
+mh_dist &lt;- outer(cand, puzzle_data, `-`) %&gt;% 
+    abs()
+min(rowSums(mh_dist))</code></pre>
+<pre><code>## [1] 333755</code></pre>
 </div>
 </div>
 <div id="part-2" class="section level2" number="2.2">
 <h2><span class="header-section-number">2.2</span> Part 2</h2>
 <div id="description-1" class="section level3" number="2.2.1">
 <h3><span class="header-section-number">2.2.1</span> Description</h3>
+<article class="day-desc">
+<h2 id="part2">
+— Part Two —
+</h2>
+<p>
+The crabs don’t seem interested in your proposed solution. Perhaps you misunderstand crab engineering?
+</p>
+<p>
+As it turns out, crab submarine engines <span title="This appears to be due to the modial interaction of magneto-reluctance and capacitive duractance.">don’t burn fuel at a constant rate</span>. Instead, each change of 1 step in horizontal position costs 1 more unit of fuel than the last: the first step costs <code>1</code>, the second step costs <code>2</code>, the third step costs <code>3</code>, and so on.
+</p>
+<p>
+As each crab moves, moving further becomes more expensive. This changes the best horizontal position to align them all on; in the example above, this becomes <code>5</code>:
+</p>
+<ul>
+<li>
+Move from <code>16</code> to <code>5</code>: <code>66</code> fuel
+</li>
+<li>
+Move from <code>1</code> to <code>5</code>: <code>10</code> fuel
+</li>
+<li>
+Move from <code>2</code> to <code>5</code>: <code>6</code> fuel
+</li>
+<li>
+Move from <code>0</code> to <code>5</code>: <code>15</code> fuel
+</li>
+<li>
+Move from <code>4</code> to <code>5</code>: <code>1</code> fuel
+</li>
+<li>
+Move from <code>2</code> to <code>5</code>: <code>6</code> fuel
+</li>
+<li>
+Move from <code>7</code> to <code>5</code>: <code>3</code> fuel
+</li>
+<li>
+Move from <code>1</code> to <code>5</code>: <code>10</code> fuel
+</li>
+<li>
+Move from <code>2</code> to <code>5</code>: <code>6</code> fuel
+</li>
+<li>
+Move from <code>14</code> to <code>5</code>: <code>45</code> fuel
+</li>
+</ul>
+<p>
+This costs a total of <code><em>168</em></code> fuel. This is the new cheapest possible outcome; the old alignment position (<code>2</code>) now costs <code>206</code> fuel instead.
+</p>
+<p>
+Determine the horizontal position that the crabs can align to using the least fuel possible so they can make you an escape route! <em>How much fuel must they spend to align to that position?</em>
+</p>
+</article>
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
+<p>In this variant we have to calculate the distance sligthly different. Instead of taking
+the absolute value of the difference between the two points, we calculate the sum of all
+values from 1 to this distance:</p>
+<pre class="r"><code>adj_dist &lt;- outer(cand, puzzle_data, 
+                        FUN = Vectorize(function(x, y) sum(seq(0, abs(y - x)))))
+min(rowSums(adj_dist))</code></pre>
+<pre><code>## [1] 94017638</code></pre>
 </div>
 </div>
 </div>
