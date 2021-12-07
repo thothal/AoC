@@ -1,0 +1,233 @@
+---
+params:
+   task_nr: 6
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(ggplot2)
+library(ggimage)
+library(gganimate)
+library(scales)
+library(fontawesome)
+library(here)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = TRUE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	strsplit(",") %>% 
+	`[[`(1) %>% 
+	as.integer() %>% 
+	tibble(cnt = .) %>% 
+	count(cnt) %>% 
+	bind_rows(tibble(cnt = c(0, 6:8), n = 0)) %>% 
+	arrange(cnt)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+Our data is stored in a `tibble` with the columns `cnt` and `n` representing the counter
+until the fish reproduces and the amount of fish having this very counter. 
+
+```{r data-glimpse}
+puzzle_data
+```
+
+
+When a day passes, we simply shift the column `n`, that is the entries for `cnt == 8`  
+become the entries for `cnt==7`, the entries for `cnt==7` become the entries for `cnt==6` 
+and so on. The entries for `cnt==0` are added to the entries for `cnt==6` **and** `cnt==8` 
+(which represents the reproduction).
+
+The the sum of `n` after 80 iterations represent the amount of fish overall. We will use 
+a recursive function with an additional parameter `day` which initially represents the 
+amount of iterations we want to do. In each iteration, this number is reduced by one and
+the recursion stops, once this number equals zero.
+
+As a bonus for an animated graph we also store the intermediate results.
+
+```{r solution-a}
+simulate_day <- function(state, day, all_states = NULL) {
+	all_states <- all_states %>% 
+		bind_rows(state %>% 
+					 	mutate(day = day))
+	if (day > 0) {
+		new_state <- state %>% 
+			mutate(n_new = lead(n, default = 0),
+					 repr  = if_else(cnt %in% c(6, 8), n[cnt == 0], 0)) %>% 
+			transmute(cnt, n = n_new + repr)
+		Recall(new_state, day - 1, all_states)
+	} else {
+		list(final_state = state,
+			  all_states = all_states %>% 
+			  	mutate(day = max(day) - day),
+			  nr_of_fish = sum(state$n))
+	}
+}
+
+results <- simulate_day(puzzle_data, 80)
+
+results$nr_of_fish
+```
+
+The plots show the growth of the fish population on a log and a linear scale.
+
+```{r animated_growth, cache = TRUE}
+fish_file <- tempfile(fileext = ".svg")
+fish <- fa("fas fa-fish") %>% 
+	as.character() %>% 
+	str_replace(fixed("<svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"")
+cat(fish, file = fish_file)
+
+fish_lin <- results$all_states %>% 
+	group_by(day) %>% 
+	summarize(n = sum(n)) %>% 
+	mutate(img = fish_file) %>%  
+	ggplot(aes(day, n)) +
+	geom_line(size = 1.5) +
+	labs(x = "Day", y = NULL) +
+	geom_image(aes(image = img), color = "steelblue", size = .1) + 
+	scale_y_continuous(breaks = 0:4 * 1e5,
+							 labels = expression(0, 10^5, 2 %*% 10 ^ 5, 
+							 						  3 %*% 10 ^ 5, 4 %*% 10 ^ 5)) +
+	theme_light() +
+	theme(panel.background = element_rect(fill = "transparent"),
+			plot.background = element_rect(fill = "transparent", colour = NA)) +
+	transition_reveal(day, keep_last = FALSE)
+
+fish_log <- results$all_states %>% 
+	group_by(day) %>% 
+	summarize(n = sum(n)) %>% 
+	mutate(img = fish_file) %>%  
+	ggplot(aes(day, n)) +
+	geom_line(size = 1.5) +
+	labs(x = "Day", y = "#") +
+	geom_image(aes(image = img), color = "steelblue", size = .1) + 
+	scale_y_log10(breaks = trans_breaks("log10", function(x) 10 ^ x),
+					  labels = trans_format("log10", math_format(10 ^ .x))) +
+	annotation_logticks(sides = "l") +
+	theme_light() +
+	theme(panel.background = element_rect(fill = "transparent"),
+			plot.background = element_rect(fill = "transparent", colour = NA)) +
+	transition_reveal(day, keep_last = FALSE)
+
+anim_save(here("2021", "Task-6", "images", "fish_lin.gif"),
+			 fish_lin,
+			 bg = "transparent")
+anim_save(here("2021", "Task-6", "images", "fish_log.gif"),
+			 fish_log,
+			 bg = "transparent")
+```
+
+```{r anim-fish, echo = FALSE, out.width = "50%", fig.show = "hold", fig.cap = "Fish Population Growth on a Linear and Log Scale"}
+knitr::include_graphics(c(here("2021", "Task-6", "images", "fish_lin.gif"),
+								  here("2021", "Task-6", "images", "fish_log.gif")))
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We can simply use the same function as before with a longer period.  We have, however, to make sure that we use 
+enough digits to get the precise number.
+
+```{r solution-b, eval = length(puzzle) > 1}
+results <- simulate_day(puzzle_data, 256)
+format(results$nr_of_fish, digits = 20) 
+```
+
+
