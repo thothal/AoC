@@ -1,0 +1,203 @@
+---
+params:
+   task_nr: 8
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+sort_pattern <- function(a) {
+	str_split(a, "") %>% 
+		map_chr(~ .x %>% 
+				  	sort() %>% 
+				  	paste(collapse = ""))
+}
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	strsplit("\n") %>% 
+	`[[`(1) %>% 
+	strsplit("\\|") %>% 
+	map_dfr(~strsplit(trimws(.x), "\\s+") %>% 
+			  	unlist() %>% 
+			  	set_names(c(paste0("I", 1:10),
+			  					paste0("O", 1:4))) %>% 
+			  	as.list() %>% 
+			  	as_tibble()) %>% 
+	mutate(across(.fns = sort_pattern))
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+This task is as easy as simply counting all the outputs whose string length is two, three,
+four or seven.
+
+```{r solution-a}
+puzzle_data %>% 
+	select(starts_with("O")) %>% 
+	pivot_longer(everything()) %>% 
+	filter(nchar(value) %in% c(2:4, 7)) %>% 
+	nrow()
+
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+Kudos to my brother with whom I discussed the problem and who helped me to get to the same result more elegantly. The final idea is as follows:
+
+1. Digits `1`, `4`, `7` and `8` are trivially identified by the length of their code.
+1. Digit `3` is the only one among the length 5 codes, where `1` is a complete subset.
+1. Counting the occurrence of each letter in the codes, we will identify the lower right
+segment as it is the only one which occurs in 9 out of 10 digits.
+1. The one digit which does not have it is the `2`.
+1. The remaining 5 letter code must be `5`.
+1. `6` is the only digit among the 6 letter codes which does not fully cover `1`.
+1. Likewise is `0` the only digit among the 6 letter codes which does not fully cover `5`.
+1. The last digit must be `9`.
+
+In order to solve the puzzle the input codes were sorted, such that we can easily compare
+inputs and code irrespective of the order.
+
+```{r solution-b, eval = length(puzzle) > 1}
+diff_patterns <- function(...) {
+	f <- function(a, b) {
+		rx <- str_replace_all(b, "(.)(?!$)", "\\1|")
+		str_remove_all(a, rx)
+	}
+	
+	reduce(list(...), f)
+}
+
+solve_riddle <- function(I1, I2, I3, I4, I5, I6, I7, I8, I9, I10,
+								 O1, O2, O3, O4, ...) {
+	row <- c(I1, I2, I3, I4, I5, I6, I7, I8, I9, I10)
+	len <- nchar(row)
+	S1 <- row[len == 2]
+	S4 <- row[len == 4]
+	S7 <- row[len == 3]
+	S8 <- row[len == 7]
+	S235 <- row[len == 5]
+	S069 <- row[len == 6]
+	S3 <- S235[!nzchar(diff_patterns(S1, S235))]
+	el_e <- row %>% 
+		str_split("") %>% 
+		unlist() %>% 
+		table() %>% 
+		which.max() %>% 
+		names()
+	S2 <- S235[nzchar(diff_patterns(el_e, S235))]
+	S5 <- setdiff(S235, c(S2, S3))
+	S6 <- S069[nzchar(diff_patterns(S1, S069))]
+	S0 <- S069[nzchar(diff_patterns(S5, S069))]
+	S9 <- setdiff(S069, c(S6, S0))
+	sol <- c(S0 = S0, S1 = S1, S2 = S2, S3 = S3, S4 = S4, S5 = S5, S6 = S6,
+				S7 = S7, S8 = S8, S9 = S9)
+	stopifnot(all(c(O1, O2, O3, O4) %in% sol))
+	names(sol[match(c(O1, O2, O3, O4), sol)]) %>% 
+		str_remove(fixed("S")) %>% 
+		paste(collapse = "") %>% 
+		as.integer()
+}
+
+sum(pmap_int(puzzle_data, solve_riddle))
+```
+
+
