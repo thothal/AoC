@@ -1,0 +1,183 @@
+---
+params:
+   task_nr: 9
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+## use curly braces in the last pipe to avoid that . is additionally added
+## as the first argument
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1) %>% 
+	str_split("") %>% 
+	do.call(rbind, .) %>% 
+	{matrix(as.numeric(.), nrow(.), ncol(.))}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+To solve this puzzle, we simply create the nighbors by dropping the first / last 
+row / column and pad with an `Inf` row / column and compare the original matrix to 
+those neighbors.
+
+```{r solution-a}
+nc <- ncol(puzzle_data)
+nr <- nrow(puzzle_data)
+left_neighbors  <- cbind(Inf, puzzle_data[, -nc])
+right_neighbors <- cbind(puzzle_data[, -1], Inf)
+upper_neighbors <- rbind(Inf, puzzle_data[-nr, ])
+lower_neighbors <- rbind(puzzle_data[-1, ], Inf)
+low_points <- puzzle_data < left_neighbors &
+	puzzle_data < right_neighbors &
+	puzzle_data < upper_neighbors &
+	puzzle_data < lower_neighbors
+sum(puzzle_data[low_points] + 1)
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For this puzzle we use a recursive function, where we start in a basin (as determined in
+part 1) and walk up, down, left, and right counting all cells until we either
+
+1. Reach an already visited field.
+1. Reach the edge
+
+*N.B.* The algo could be improved, if we moved the logic for checking whether we are on
+an invalid field *before* recalling the function. This approach, however, makes it easier, 
+as we do not have to take about bad indices 4 times.
+
+```{r solution-b, eval = length(puzzle) > 1}
+walk_basin <- function(row, col,
+							  map = puzzle_data) {
+	visited <- matrix(FALSE, nrow(map), ncol(map))
+	do_walk <- function(row, col) {
+		nr <- nrow(map)
+		nc <- ncol(map)
+		if (!between(row, 1, nr) || !between(col, 1, nc)) {
+			0L
+		} else if (map[row, col] == 9 || visited[row, col]) {
+			visited[row, col] <<- TRUE
+			0L
+		} else {
+			visited[row, col] <<- TRUE
+			1L + Recall(row - 1, col) + 
+				Recall(row + 1, col) +
+				Recall(row, col - 1) + 
+				Recall(row, col + 1)
+		}
+	}
+	map2_int(row, col, do_walk)
+}
+
+which(low_points, arr.ind = TRUE) %>% 
+	as_tibble() %>% 
+	mutate(basin_size = walk_basin(row, col, puzzle_data)) %>% 
+	arrange(desc(basin_size)) %>% 
+	slice(1:3) %>% 
+	pull(basin_size) %>% 
+	prod
+
+```
+
+
