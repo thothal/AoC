@@ -1,0 +1,277 @@
+---
+params:
+   task_nr: 10
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(glue)
+library(stringr)
+library(R6)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+## use curly braces in the last pipe to avoid that . is additionally added
+## as the first argument
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1) %>% 
+	str_split("") %>% 
+	head(n = -1L) ## remove empty string at end
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+My first intuition was to use RegEx, but after reading some [SO Answers](https://stackoverflow.com/questions/546433/regular-expression-to-match-balanced-parentheses) I am not sure whether RegEx is the right tool. The answer shows some funky posisbilities to solve it via RegEx, but hey, why going through all this hassle. Instead I
+will use a good old loop (you may have guessed, `purrr::reduce` to the rescue, simply 
+because of its nifty `rlang::done` support).
+
+The idea is that we loop through the string and maintain a LIFO stack of the opened 
+brackets. When we encounter a closing bracket, we check whether it has a corresponding 
+open bracket on the top of the stack. If this is not the case, we indicate an error.
+
+
+```{r solution-a}
+## a naive implementation of a stack
+Stack <- R6Class(
+	"qstack",
+	public = list(
+		initialize = function(init_size = 1000L) {
+			private$.stack <- rep(list(NULL), init_size)
+			private$.head <- 0L
+			private$.init_size <- private$.size <- as.integer(init_size)
+		},
+		push = function(elem) {
+			if (private$.head == private$.size) {
+				message(
+					sprintf(paste("stack size is too small -",
+									  "trying to reallociate %d more slots"),
+							  private$.init_size))
+				private$.stack <- c(private$.stack, 
+										  rep(list(NULL), private$.init_size))
+				private$.size <- private$.size + private$.init_size
+			}
+			private$.head <- private$.head + 1L
+			private$.stack[[private$.head]] <- elem
+			invisible(self)
+		},
+		pop = function() {
+			if (private$.head == 0) {
+				NULL 
+			} else {
+				el <- private$.stack[[private$.head]]
+				private$.stack[private$.head] <- list(NULL)
+				private$.head <- private$.head -1
+				el
+			}
+		},
+		size = function() {
+			private$.head
+		},
+		max_size = function() {
+			private$.size
+		},
+		print = function() {
+			if (private$.head == 0L) {
+				cat("# Empty stack\n")
+			} else {
+				indent <- "    "
+				cat(glue("# Stack with {private$.head} element(s)"), "\n")
+				str <- capture.output(private$.stack[seq(1, private$.head, 1L)])
+				str <- paste0(indent, str)
+				str <- str_replace_all(str, glue("^{indent}$"), 
+											  glue("\n{indent}^^^\n", .trim = FALSE))
+				str[length(str)] <- ""
+				str <- str_replace(
+					str, 
+					glue("{indent}(\\[\\[{private$.head}\\]\\])"),
+					"--> \\1")
+				cat(str, sep = "\n")
+			}
+		}
+	),
+	private = list(
+		.stack = NULL,
+		.head = NA_integer_,
+		.init_size = NA_integer_,
+		.size = NA_integer_
+	)
+)
+
+brackets_data <- tribble(
+	~ open, ~ close, ~value_missing, ~value_adding,
+	"(",    ")",     3L,             1L,
+	"[",    "]",     57L,            2L,
+	"{",    "}",     1197L,          3L,
+	"<",    ">",     25137L,         4L)
+
+is_opening <- function(chr) {
+	chr %in% brackets_data$open
+}
+
+match_brackets <- function(a, b) {
+	cls <- brackets_data %>% 
+		filter(close == b)
+	does_match <- cls %>% 
+		filter(open == a) %>% 
+		nrow() == 1L
+	if (does_match) {
+		0L
+	} else {
+		cls %>% 
+			pull(value_missing)
+	}
+}
+
+get_closing_value <- function(a) {
+	brackets_data %>% 
+		filter(open == a) %>% 
+		pull(value_adding)
+}
+
+check_line <- function(line) {
+	stack <- Stack$new(length(line))
+	
+	check <- function(value, chr) {
+		if (is_opening(chr)) {
+			stack$push(chr)
+			res <- 0L
+		} else {
+			el <- stack$pop()
+			res <- match_brackets(el, chr)
+		}
+		if (res > 0) {
+			done(list(result = res, stack = stack))
+		} else {
+			list(result = res, stack = stack)
+		}
+	}
+	
+	reduce(line, check, .init = list(result = 0L, stack = stack))
+}
+
+res <- map(puzzle_data, check_line)
+sum(map_int(res, pluck, "result"))
+
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We filter the results from part 1 by dropping corrupt and valid codes, which leaves us
+with incomplete codes (valid codes have an empty stack as all opening brackets were
+dutifully closed). For those, we just close each bracket still on the stack and update
+the penailty formula as indicated.
+
+
+```{r solution-b, eval = length(puzzle) > 1}
+## Please note the R 4.1. shortcut for anonymous function
+incomplete <- Filter(\(r) r$result == 0L & r$stack$size() > 0, res)
+get_score <- function(res) {
+	sum <- 0
+	while(res$stack$size() > 0) {
+		sum <- sum * 5 + get_closing_value(res$stack$pop())	
+	}
+	sum
+}
+
+map_dbl(incomplete, get_score) %>% 
+	median()
+```
+
+
