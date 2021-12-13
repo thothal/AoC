@@ -26,18 +26,18 @@ editor_options:
 
 ```{css custom-css, echo = FALSE}
 .page-content  .figure {
-	width: 100%;
+width: 100%;
 }
 
 .back {
-	font-size: 2rem;
+font-size: 2rem;
 }
 
 .day-desc {
-	border: 2px dotted;
-	border-radius: 6px;
-	border-color: var(--blockquote-border-color);
-	padding: 0 20px;
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
 }
 ```
 
@@ -111,71 +111,93 @@ cat(puzzle[[1]])
 
 ### Solution
 
+We use again an [R6 Class](https://r6.r-lib.org/articles/Introduction.html) for 
+its beauty rather than its necessity. To avoid infinite loops, we set octopuses
+which flashed already to `Inf`. Adding one to `Inf` let the value remain at 
+`Inf` and we can conveniently count only new flashes. At the end of a step, 
+we set those cells back to `0`. Some syntactic sugar like the `print` member, or
+allowing to set the flash threshold to an number other than `10` was added, for 
+the sake of testing.
+
 ```{r solution-a}
 Octopus <- R6Class(
 	"Octopus",
 	public = list(
-		initialize = function(start) {
+		initialize = function(start, flash_signal = 10L) {
 			stopifnot(is.matrix(start))
 			private$.state <- start
+			private$.flashes_at <- flash_signal
 		},
-		print = function(row = NULL, col = NULL) {
-			if (!is.null(row) && !is.null(col)) {
-				stopifnot(between(row, 1L, nrow(private$.state)) &
-							 	between(col, 1L, ncol(private$.state)))
-				str <- as.character(private$.state)
-				dim(str) <- dim(private$.state)
-				str[cbind(row, col)] <- col_red("#")
-				nb <- private$.get_neighbors(row, col)
-				str[nb] <- col_yellow(str[nb])
-				str <- apply(str, 1, paste, collapse = "") %>% 
-					paste(collapse = "\n")
-			} else {
-				rx <- glue("([0-9]{{{ncol(private$.state)}}})")
-				str <- paste(t(private$.state), collapse = "") %>% 
-					str_replace_all(rx, "\\1\n")
-				str <- str %>% 
-					str_replace_all(fixed("9"), col_red("#"))
-			}
-			cat(str)
+		print = function() {
+			str <- private$.state
+			str[str >= private$.flashes_at] <- col_red("#")
+			str <- apply(str, 1, paste, collapse = "") %>% 
+				paste(collapse = "\n")
+			cat(cli::col_grey(strrep("-", ncol(private$.state)), "\n"))
+			cat(str, "\n")
+			cat(cli::col_grey(strrep("-", ncol(private$.state)), "\n"))
+			invisible(self)
 		}
 	),
 	private = list(
 		.state = NULL,
 		.round = 0L,
 		.nr_flashes = 0L,
-		.get_neighbors = function(row, col) {
-			res <- apply(matrix(c(row, col), ncol = 2), 1, function(r) {
-				expand.grid(x = -1:1, y = -1:1) %>% 
-					`[`(-5, ) %>% ## get rid of (0, 0)
-					t() %>% 
-					`+`(c(as.integer(r[1]), as.integer(r[2]))) %>% 
-					t() %>% 
-					as_tibble() %>% 
-					filter(between(x, 1L, nrow(private$.state)),
-							 between(y, 1L, ncol(private$.state))) %>% 
-					as.matrix()
-			}, simplify = FALSE)
-			res <- do.call(rbind, res)
-			unique(res)
-		}
+		.flashes_at = 10L
 	)
 )
 
 Octopus$set("private",
-				".add",
+				".increase_neighbors",
 				function() {
-					private$.state <- private$.state + 1
-					flashes <- which(private$.state == 9, arr.ind = TRUE)
-					while(nrow(flashes) > 0) {
-						private$.nr_flashes <- private$.nr_flashes + nrow(flashes)
-						nb <- private$.get_neighbors(flashes[, 1], flashes[, 2])
+					flash <- is.finite(private$.state) &
+						private$.state >= private$.flashes_at
+					idx <- which(flash, arr.ind = TRUE) 
+					amt <- expand.grid(row = -1:1,
+											 col = -1:1) %>% 
+						apply(1, `+`, t(idx), simplify = FALSE)  %>% 
+						do.call(cbind, .) %>%
+						t() %>% 
+						as_tibble() %>% 
+						filter(between(row, 1L, nrow(private$.state)),
+								 between(col, 1L, ncol(private$.state))) %>% 
+						count(row, col) %>% 
+						as.matrix()
+					private$.state[amt[, 1:2]] <- private$.state[amt[, 1:2]] + 
+						amt[, 3]
+					private$.state[flash] <- Inf
+					sum(flash)
+				})
+
+Octopus$set("private",
+				".add",
+				function(verbose = FALSE) {
+					if (verbose) {
+						print(self)
 					}
-					
+					private$.state <- private$.state + 1
+					while ((flashes <- private$.increase_neighbors()) > 0) {
+						if (verbose) {
+							print(self)
+						}
+						private$.nr_flashes <- private$.nr_flashes + 
+							flashes
+					}
+					private$.state[is.infinite(private$.state)] <- 0L
+					private$.round <- private$.round + 1
 					invisible(self)
 				})
-octo <- Octopus$new(puzzle_data)
 
+Octopus$set("public",
+				"simulate",
+				function(n, verbose = FALSE) {
+					for (i in seq_len(n)) {
+						private$.add(verbose)
+					}
+					private$.nr_flashes
+				})
+octo <- Octopus$new(puzzle_data)
+octo$simulate(100)
 
 ```
 
@@ -191,8 +213,23 @@ cat(puzzle[[2]])
 
 ### Solution
 
+To solve this task, we simply add another method to our `Octopus` class, which
+calls `.add` until we reach a state, where all the octopuses flashes. *N.B.* 
+This is the case when all animals have an energy level of **0**, b/c this means
+they flashed all in this round.
 
 ```{r solution-b, eval = length(puzzle) > 1}
+Octopus$set("public",
+				"find_climax",
+				function(verbose = FALSE) {
+					while (sum(private$.state == 0L) < 
+							 prod(dim(private$.state))) {
+						private$.add(verbose)
+					}
+					private$.round
+				})
+new_octo <- Octopus$new(puzzle_data)
+new_octo$find_climax()
 ```
 
 
