@@ -23,7 +23,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 8](https://thothal.github.io/AoC/2021_task8.html)
 - [x] [Day 9](https://thothal.github.io/AoC/2021_task9.html)
 - [x] [Day 10](https://thothal.github.io/AoC/2021_task10.html)
-- [ ] Day 11
+- [x] [Day 11](https://thothal.github.io/AoC/2021_task11.html)
 - [ ] Day 12
 - [ ] Day 13
 - [ ] Day 14

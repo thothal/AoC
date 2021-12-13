@@ -1,4 +1,4 @@
-.libPaths("C:/Users/tthaler/Documents/R/win-library/4.1")
+.libPaths("C:/Users/thothal/Documents/6. R/win-library/4.1")
 pan_loc <- rmarkdown::find_pandoc(dir = "c:/Program Files/RStudio/bin/pandoc/")
 
 suppressWarnings(

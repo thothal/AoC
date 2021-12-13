@@ -1,0 +1,235 @@
+---
+params:
+   task_nr: 11
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(glue)
+library(stringr)
+library(R6)
+library(cli)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+## use curly braces in the last pipe to avoid that . is additionally added
+## as the first argument
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1) %>% 
+	str_split("") %>% 
+	do.call(rbind, .) %>% 
+	{matrix(as.numeric(.), nrow(.), ncol(.))}
+
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use again an [R6 Class](https://r6.r-lib.org/articles/Introduction.html) for 
+its beauty rather than its necessity. To avoid infinite loops, we set octopuses
+which flashed already to `Inf`. Adding one to `Inf` let the value remain at 
+`Inf` and we can conveniently count only new flashes. At the end of a step, 
+we set those cells back to `0`. Some syntactic sugar like the `print` member, or
+allowing to set the flash threshold to an number other than `10` was added, for 
+the sake of testing.
+
+```{r solution-a}
+Octopus <- R6Class(
+	"Octopus",
+	public = list(
+		initialize = function(start, flash_signal = 10L) {
+			stopifnot(is.matrix(start))
+			private$.state <- start
+			private$.flashes_at <- flash_signal
+		},
+		print = function() {
+			str <- private$.state
+			str[str >= private$.flashes_at] <- col_red("#")
+			str <- apply(str, 1, paste, collapse = "") %>% 
+				paste(collapse = "\n")
+			cat(cli::col_grey(strrep("-", ncol(private$.state)), "\n"))
+			cat(str, "\n")
+			cat(cli::col_grey(strrep("-", ncol(private$.state)), "\n"))
+			invisible(self)
+		}
+	),
+	private = list(
+		.state = NULL,
+		.round = 0L,
+		.nr_flashes = 0L,
+		.flashes_at = 10L
+	)
+)
+
+Octopus$set("private",
+				".increase_neighbors",
+				function() {
+					flash <- is.finite(private$.state) &
+						private$.state >= private$.flashes_at
+					idx <- which(flash, arr.ind = TRUE) 
+					amt <- expand.grid(row = -1:1,
+											 col = -1:1) %>% 
+						apply(1, `+`, t(idx), simplify = FALSE)  %>% 
+						do.call(cbind, .) %>%
+						t() %>% 
+						as_tibble() %>% 
+						filter(between(row, 1L, nrow(private$.state)),
+								 between(col, 1L, ncol(private$.state))) %>% 
+						count(row, col) %>% 
+						as.matrix()
+					private$.state[amt[, 1:2]] <- private$.state[amt[, 1:2]] + 
+						amt[, 3]
+					private$.state[flash] <- Inf
+					sum(flash)
+				})
+
+Octopus$set("private",
+				".add",
+				function(verbose = FALSE) {
+					if (verbose) {
+						print(self)
+					}
+					private$.state <- private$.state + 1
+					while ((flashes <- private$.increase_neighbors()) > 0) {
+						if (verbose) {
+							print(self)
+						}
+						private$.nr_flashes <- private$.nr_flashes + 
+							flashes
+					}
+					private$.state[is.infinite(private$.state)] <- 0L
+					private$.round <- private$.round + 1
+					invisible(self)
+				})
+
+Octopus$set("public",
+				"simulate",
+				function(n, verbose = FALSE) {
+					for (i in seq_len(n)) {
+						private$.add(verbose)
+					}
+					private$.nr_flashes
+				})
+octo <- Octopus$new(puzzle_data)
+octo$simulate(100)
+
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To solve this task, we simply add another method to our `Octopus` class, which
+calls `.add` until we reach a state, where all the octopuses flashes. *N.B.* 
+This is the case when all animals have an energy level of **0**, b/c this means
+they flashed all in this round.
+
+```{r solution-b, eval = length(puzzle) > 1}
+Octopus$set("public",
+				"find_climax",
+				function(verbose = FALSE) {
+					while (sum(private$.state == 0L) < 
+							 prod(dim(private$.state))) {
+						private$.add(verbose)
+					}
+					private$.round
+				})
+new_octo <- Octopus$new(puzzle_data)
+new_octo$find_climax()
+```
+
+
