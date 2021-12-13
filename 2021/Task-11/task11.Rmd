@@ -1,0 +1,198 @@
+---
+params:
+   task_nr: 11
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(glue)
+library(stringr)
+library(R6)
+library(cli)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+## use curly braces in the last pipe to avoid that . is additionally added
+## as the first argument
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1) %>% 
+	str_split("") %>% 
+	do.call(rbind, .) %>% 
+	{matrix(as.numeric(.), nrow(.), ncol(.))}
+
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+```{r solution-a}
+Octopus <- R6Class(
+	"Octopus",
+	public = list(
+		initialize = function(start) {
+			stopifnot(is.matrix(start))
+			private$.state <- start
+		},
+		print = function(row = NULL, col = NULL) {
+			if (!is.null(row) && !is.null(col)) {
+				stopifnot(between(row, 1L, nrow(private$.state)) &
+							 	between(col, 1L, ncol(private$.state)))
+				str <- as.character(private$.state)
+				dim(str) <- dim(private$.state)
+				str[cbind(row, col)] <- col_red("#")
+				nb <- private$.get_neighbors(row, col)
+				str[nb] <- col_yellow(str[nb])
+				str <- apply(str, 1, paste, collapse = "") %>% 
+					paste(collapse = "\n")
+			} else {
+				rx <- glue("([0-9]{{{ncol(private$.state)}}})")
+				str <- paste(t(private$.state), collapse = "") %>% 
+					str_replace_all(rx, "\\1\n")
+				str <- str %>% 
+					str_replace_all(fixed("9"), col_red("#"))
+			}
+			cat(str)
+		}
+	),
+	private = list(
+		.state = NULL,
+		.round = 0L,
+		.nr_flashes = 0L,
+		.get_neighbors = function(row, col) {
+			res <- apply(matrix(c(row, col), ncol = 2), 1, function(r) {
+				expand.grid(x = -1:1, y = -1:1) %>% 
+					`[`(-5, ) %>% ## get rid of (0, 0)
+					t() %>% 
+					`+`(c(as.integer(r[1]), as.integer(r[2]))) %>% 
+					t() %>% 
+					as_tibble() %>% 
+					filter(between(x, 1L, nrow(private$.state)),
+							 between(y, 1L, ncol(private$.state))) %>% 
+					as.matrix()
+			}, simplify = FALSE)
+			res <- do.call(rbind, res)
+			unique(res)
+		}
+	)
+)
+
+Octopus$set("private",
+				".add",
+				function() {
+					private$.state <- private$.state + 1
+					flashes <- which(private$.state == 9, arr.ind = TRUE)
+					while(nrow(flashes) > 0) {
+						private$.nr_flashes <- private$.nr_flashes + nrow(flashes)
+						nb <- private$.get_neighbors(flashes[, 1], flashes[, 2])
+					}
+					
+					invisible(self)
+				})
+octo <- Octopus$new(puzzle_data)
+
+
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+
+```{r solution-b, eval = length(puzzle) > 1}
+```
+
+
