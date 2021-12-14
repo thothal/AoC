@@ -67,11 +67,8 @@ library(magrittr)
 library(tibble)
 library(dplyr)
 library(purrr)
-library(tidyr)
-library(glue)
+library(igraph)
 library(stringr)
-library(R6)
-library(cli)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -90,7 +87,12 @@ puzzle <- GET(base_url,
 ## as the first argument
 puzzle_data <- GET(paste0(base_url, "/input"),
 						 session_cookie) %>% 
-	content(encoding = "UTF-8") 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1) %>% 
+		head(-1L) %>% 
+	lapply(str2lang) %>% 
+	do.call(graph_from_literal, .)
 
 ```
 
@@ -106,8 +108,26 @@ cat(puzzle[[1]])
 
 ### Solution
 
+We use the library `igraph` to deal with the network. First of all, lets plot the graph:
+
+```{r plot-graph}
+V(puzzle_data)$single <- str_detect(V(puzzle_data)$name, "^[:lower:]+$")
+V(puzzle_data)$color <- "#F9DB6D"
+V(puzzle_data)[c("start", "end")]$color <- c("#464D77", "#36827F")
+V(puzzle_data)[c("start", "end")]$label.color <- "white"
+plot(puzzle_data, layout = layout_as_tree(puzzle_data, root = "start"))
+```
+
+
 ```{r solution-a}
-puzzle_data
+walk_graph <- function(vertex, path = list(), G = puzzle_data) {
+	nbs <- 
+	if (vertex$name == "end") {
+		1
+	} else if
+	childs <- G[[vertex]]
+	
+}
 
 ```
 
