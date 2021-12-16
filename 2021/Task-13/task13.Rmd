@@ -1,0 +1,204 @@
+---
+params:
+   task_nr: 13
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+## use curly braces in the last pipe to avoid that . is additionally added
+## as the first argument
+input <- GET(paste0(base_url, "/input"),
+				 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n")
+
+puzzle_data <- local({
+	mat <- input[[1L]] %>% 
+		str_detect("^[:digit:]+,[:digit:]+$") %>% 
+		`[`(input[[1L]], .) %>% 
+		str_split(",") %>% 
+		do.call(rbind, .) %>% 
+		{matrix(as.integer(.), ncol = 2L)} + 1L
+	dots <- matrix(FALSE, max(mat[, 2L]), max(mat[, 1L]))
+	dots[mat[, 2:1]] <- TRUE
+	
+	folds <- input[[1]] %>% 
+		str_detect("^fold") %>% 
+		`[`(input[[1L]], .) %>% 
+		str_extract_all("[:digit:]+|[xy]")
+	
+	folds_df <- folds %>% 
+		do.call(rbind, .) %>% 
+		`colnames<-`(c("dir", "pos")) %>% 
+		as_tibble() %>% 
+		mutate(pos = as.integer(pos) + 1L)
+	
+	list(dots = dots, 
+		  folds = folds %>% 
+		  	map(~ list(dir = .x[[1L]],
+		  				  pos = as.integer(.x[[2L]]) + 1L)), 
+		  folds_df = folds_df)
+})
+
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+To solve this puzzle we work with logicals. Then the task boils down to splitting the 
+matrix into pieces as indicated by the fold positions and mirroring the lower (right) 
+part. The we can use an *OR*  operation on the two parts.
+
+The folds are anyways always at the middle position as the following check shows:
+
+```{r check-folds}
+puzzle_data$folds_df %>% 
+	count(dir) %>% 
+	group_by(dir) %>% 
+	group_map(function(dat, grp) {
+		dd <- set_names(dim(puzzle_data$dots), c("y", "x"))
+		xy <- grp %>% pull(dir)
+		res <- Reduce(\(.x, .y) (.x - 1L) / 2L,
+							seq_len(dat %>% pull(n)),
+							init = dd[xy],
+							accumulate = TRUE)
+		puzzle_data$folds_df %>% 
+			filter(dir == xy) %>% 
+			mutate(calc = tail(res, -1L))
+	})
+```
+
+
+```{r solution-a, cache = FALSE}
+fold_paper <- function(dots, fold) {
+	dir <- fold$dir
+	pos <- fold$pos
+	if (dir == "x") {
+		p1 <- dots[, seq(1L, pos - 1L), drop = FALSE]
+		p2 <- dots[, seq(ncol(dots), pos + 1L, -1L), drop = FALSE]
+	} else if (dir == "y") {
+		p1 <- dots[seq(1, pos - 1L), , drop = FALSE]
+		p2 <- dots[seq(nrow(dots), pos + 1L, -1L), , drop = FALSE]
+	}
+	stopifnot(identical(dim(p1), dim(p2)))
+	res <- p1 | p2
+	class(res) <- "code_paper"
+	res
+}
+
+print.code_paper <- function(x, ...) {
+	res <- matrix(".", nrow(x), ncol(x))
+	res[x] <- "#"
+	res <- apply(res, 1, paste, collapse = "") %>% 
+		paste(collapse = "\n")
+	cat(res, "\n")
+	invisible(x)
+}
+
+sum(fold_paper(puzzle_data$dots, puzzle_data$folds[[1]]))
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+```{r solution-b, eval = length(puzzle) > 1, comment = NA}
+print(reduce(puzzle_data$folds, fold_paper, .init = puzzle_data$dots))
+```
+
+
+
