@@ -1,0 +1,245 @@
+---
+params:
+   task_nr: 12
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(igraph)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+## use curly braces in the last pipe to avoid that . is additionally added
+## as the first argument
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1) %>% 
+	head(-1L) %>% 
+	lapply(str2lang) %>% 
+	do.call(graph_from_literal, .)
+
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use the library `igraph` to deal with the network. First of all, lets plot the graph:
+
+```{r plot-graph, fig.cap = "Cave Network"}
+V(puzzle_data)$single <- str_detect(V(puzzle_data)$name, "^[:lower:]+$")
+V(puzzle_data)$color <- "#F9DB6D"
+V(puzzle_data)[c("start", "end")]$color <- c("#464D77", "#36827F")
+V(puzzle_data)[c("start", "end")]$label.color <- "white"
+
+set.seed(1) ## to keep plot the same
+op <- par(bg = "transparent")
+plot(puzzle_data, layout = layout_with_lgl(puzzle_data, root = "start"),
+	  vertex.size = 25)
+```
+
+Then we can define an easy recursive function which walks the graph according 
+to the following rules:
+
+1. In each iteration we maintain a list of *visitable* neighbors. Those are the neighbors
+which are not yet visited in the current walk, unless it is a *big* cave, which can - by
+definition - visited nore than once.
+1. If we reach `end` we increase the counter by 1 and the function ends.
+1. Otherwise we call the function recursively again with the new neighbor as next node 
+and where we add the current node to the path of visited nodes.
+
+```{r solution-a, cache = FALSE}
+walk_graph <- function(G = puzzle_data) {
+	do_walk <- function(node, path) {
+		path <- c(node, path)
+		nbs <- neighbors(G, node)
+		free_nbs <- difference(nbs, path[single])
+		if (node$name == "end") {
+			## we reached "end"
+			res <- 1
+		} else {
+			res <- 0
+			for (idx in free_nbs) {
+				res <- res + Recall(V(G)[idx], path)
+			}
+		}
+		res
+	}
+	do_walk(V(G)["start"], NULL)
+}
+
+walk_graph()
+
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we need to relax the condition in so far that one small caves can 
+be visited at most twice. To do so, we check if there is already a small cave, which
+was visited twice and only in this condition we remove small caves from the list of
+visitable caves.
+
+*N.B.* The following code includes 2 versions of the same (and part one is largely a clone
+of solution 1): a version with the `igraph` framework and one with a much simpler data
+structure. It turned out that the `igraph` algo, though correct runs by far too long. My
+guess is that this due to copy on change semantics and the fact that an `igraph` object is
+rather heavy. Thus, I include a simpler - yet less verbose - version relying on basic data
+structures.
+
+```{r solution-b, eval = length(puzzle) > 1, cache = FALSE}
+walk_graph2 <- function(G = puzzle_data, use_igraph = FALSE) {
+	do_walk_igraph <- function(node, path) {
+		path <- c(node, path)
+		nbs <- difference(neighbors(G, node), V(G)["start"])
+		if (any(duplicated(path[single]))) {
+			free_nbs <- difference(nbs, path[single])
+		} else {
+			free_nbs <- nbs
+		}
+		
+		if (node$name == "end") {
+			## we reached "end"
+			res <- 1
+		} else {
+			res <- 0
+			for (idx in free_nbs) {
+				res <- res + Recall(V(G)[idx], path)
+			}
+		}
+		res
+	}
+	
+	do_walk_basic <- function(node, path) {
+		path <- c(node, path)
+		nbs <- setdiff(G[[node]], "start")
+		small_caves <- path[str_detect(path, "^[:lower:]+$")]
+		if (any(duplicated(small_caves))) {
+			free_nbs <- setdiff(nbs, small_caves)
+		} else {
+			free_nbs <- nbs
+		}
+		
+		if (node == "end") {
+			## we reached "end"
+			res <- 1
+		} else {
+			res <- 0
+			for (nb in free_nbs) {
+				res <- res + Recall(nb, path)
+			}
+		}
+		res
+	}
+	if (use_igraph) {
+		do_walk_igraph(V(G)["start"], NULL)
+	} else {
+		G <- as_data_frame(G) %>% 
+			### add edges in both directions
+			bind_rows((.) %>% rename(from = to, to = from)) %>% 
+			group_by(from) %>% 
+			group_map(~ list(.x$to) %>% 
+						 	set_names(.y %>% pull(from))) %>% 
+			flatten()
+		do_walk_basic("start", NULL)
+	}
+}
+
+walk_graph2()
+```
+
+
+
