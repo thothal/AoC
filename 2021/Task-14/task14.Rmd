@@ -26,18 +26,18 @@ editor_options:
 
 ```{css custom-css, echo = FALSE}
 .page-content  .figure {
-	width: 100%;
+width: 100%;
 }
 
 .back {
-	font-size: 2rem;
+font-size: 2rem;
 }
 
 .day-desc {
-	border: 2px dotted;
-	border-radius: 6px;
-	border-color: var(--blockquote-border-color);
-	padding: 0 20px;
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
 }
 ```
 
@@ -82,9 +82,18 @@ puzzle <- GET(base_url,
 	xml_find_all("///article") %>% 
 	lapply(as.character)
 
-puzzle_data  <- GET(paste0(base_url, "/input"),
-				 session_cookie) %>% 
-	content(encoding = "UTF-8") 
+puzzle_data <- local({
+	res <- GET(paste0(base_url, "/input"),
+				  session_cookie) %>% 
+		content(encoding = "UTF-8") %>% 
+		str_split("\n+") %>% 
+		`[[`(1L)
+	rules <- head(tail(res, -1L), -1L)
+	lkp <- str_extract(rules, "^..") %>% 
+		set_names(str_extract(rules, ".$"))
+	list(start = res[[1L]],
+		  rules = lkp)
+})
 ```
 
 # Puzzle Day `r params$task_nr`
@@ -99,9 +108,40 @@ cat(puzzle[[1]])
 
 ### Solution
 
+We split the string in pairs of two and replace matches according to the given
+rules. Then we drop the first letter in each pair or tripplet, as it is already
+present in the pair or triplet before.
 
 ```{r solution-a, cache = FALSE}
-puzzle_data
+insert <- function(base, letter) {
+	if (length(base) != length(letter)) browser()
+	str_c(str_sub(base, 1L, 1L),
+			letter,
+			str_sub(base, 2L, 2L))
+}
+
+replace_line <- function(n, 
+								 str = puzzle_data$start,
+								 rules = puzzle_data$rules) {
+	wrapper <- function(str, i) {
+		idx <- seq(1L, str_length(str) - 1)
+		tokens <- str_sub(str, idx, idx + 1)
+		mtc <- tokens %in% rules
+		tokens[mtc] <- insert(tokens[mtc], names(rules[match(tokens, rules)]))
+		tokens[-1L] <- str_sub(tokens[-1L], 2L)
+		str_c(tokens, collapse = "")
+	}
+	all_ltrs <- str_c(rules, collapse = "") %>% 
+		str_split("") %>% 
+		`[[`(1) %>% 
+		unique()
+	reduce(seq(1L, n), wrapper, .init = str) %>% 
+		str_count(fixed(all_ltrs)) %>% 
+		range() %>% 
+		diff()
+}
+
+replace_line(10)
 ```
 
 
@@ -116,6 +156,14 @@ cat(puzzle[[2]])
 ### Solution
 
 ```{r solution-b, eval = length(puzzle) > 1, comment = NA}
+library(igraph)
+G <- imap_dfr(puzzle_data$rules, function(pair, insert) {
+	res <- insert(pair, insert)
+	data.frame(from = rep(pair, 2L),
+				  to   = c(str_sub(res, 1L, 2L),
+				  			str_sub(res, 2L, 3L)))
+}) %>% 
+	graph_from_data_frame()
 ```
 
 
