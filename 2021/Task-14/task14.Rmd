@@ -26,18 +26,18 @@ editor_options:
 
 ```{css custom-css, echo = FALSE}
 .page-content  .figure {
-	width: 100%;
+width: 100%;
 }
 
 .back {
-	font-size: 2rem;
+font-size: 2rem;
 }
 
 .day-desc {
-	border: 2px dotted;
-	border-radius: 6px;
-	border-color: var(--blockquote-border-color);
-	padding: 0 20px;
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
 }
 ```
 
@@ -195,6 +195,47 @@ rules <- c(CH = "B", HH = "N", CB = "H", NH = "C", HB = "C", HC = "B",
 
 
 ```{r solution-b, eval = length(puzzle) > 1, comment = NA}
+solve <- function(max_length, start = puzzle_data$start, 
+						rules = puzzle_data$rules) {
+	cnts <- rep(0, length(unique(rules))) %>% 
+		set_names(unique(rules))
+	
+	rec <- function(left, right, depth = max_length) {
+		browser()
+		if (depth > 0) {
+			new <- rules[paste0(left, right)]
+			cnts[new] <<- cnts[new] + Recall(left, new, depth - 1L) +
+				Recall(new, right, depth - 1L)
+		} else {
+			1
+		}
+	}
+	chrs <- str_split(start, "")[[1]]
+	walk2(head(chrs, -1L), tail(chrs, -1L), rec)
+	cnts
+}
+f <- function(max_length, start = puzzle_data$start, rules = puzzle_data$rules) {
+	idx <- 1:(str_length(start) - 1)
+	pairs <- rep(1, str_length(start) - 1) %>% 
+		set_names(str_sub(start, idx, idx + 1))
+	cnts <- rep(0, length(unique(rules))) %>% 
+		set_names(unique(rules))
+	cnts[str_split(start, "")[[1]]] <- str_count(start, str_split(start, "")[[1]])
+	for (i in 1:max_length) {
+		np <- pairs
+		for (j in names(np)) {
+			x <- rules[j]
+			c <- np[j]
+			pairs[j] <- pairs[j] - c
+			pairs[str_c(str_sub(j, 1, 1), x)] <- coalesce(pairs[str_c(str_sub(j, 1, 1), x)], 1) + c
+			pairs[str_c(x, str_sub(j, 2, 2))] <- coalesce(pairs[str_c(x, str_sub(j, 2, 2))], 1) + c
+			cnts[x] <- cnts[x] + c
+		}
+	}
+	diff(range(cnts))
+}
+
+
 get_neighbor_node <- function(tuple) {
 	nbs <- insert(tuple)
 	from <- rep(1:2, length(tuple))
