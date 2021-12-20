@@ -26,18 +26,18 @@ editor_options:
 
 ```{css custom-css, echo = FALSE}
 .page-content  .figure {
-width: 100%;
+	width: 100%;
 }
 
 .back {
-font-size: 2rem;
+	font-size: 2rem;
 }
 
 .day-desc {
-border: 2px dotted;
-border-radius: 6px;
-border-color: var(--blockquote-border-color);
-padding: 0 20px;
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
 }
 ```
 
@@ -68,6 +68,8 @@ library(tibble)
 library(dplyr)
 library(purrr)
 library(stringr)
+library(igraph)
+library(expm)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -89,8 +91,8 @@ puzzle_data <- local({
 		str_split("\n+") %>% 
 		`[[`(1L)
 	rules <- head(tail(res, -1L), -1L)
-	lkp <- str_extract(rules, "^..") %>% 
-		set_names(str_extract(rules, ".$"))
+	lkp <- str_extract(rules, ".$") %>% 
+		set_names(str_extract(rules, "^.."))
 	list(start = res[[1L]],
 		  rules = lkp)
 })
@@ -109,15 +111,18 @@ cat(puzzle[[1]])
 ### Solution
 
 We split the string in pairs of two and replace matches according to the given
-rules. Then we drop the first letter in each pair or tripplet, as it is already
+rules. Then we drop the first letter in each pair or triplet, as it is already
 present in the pair or triplet before.
 
 ```{r solution-a, cache = FALSE}
-insert <- function(base, letter) {
-	if (length(base) != length(letter)) browser()
-	str_c(str_sub(base, 1L, 1L),
-			letter,
-			str_sub(base, 2L, 2L))
+format_rule <- function(rule) {
+	sprintf("%s -> %s", names(rule), rule)
+}
+
+insert <- function(rule) {
+	str_c(str_sub(names(rule), 1L, 1L),
+			rule,
+			str_sub(names(rule), 2L, 2L))
 }
 
 replace_line <- function(n, 
@@ -126,8 +131,7 @@ replace_line <- function(n,
 	wrapper <- function(str, i) {
 		idx <- seq(1L, str_length(str) - 1)
 		tokens <- str_sub(str, idx, idx + 1)
-		mtc <- tokens %in% rules
-		tokens[mtc] <- insert(tokens[mtc], names(rules[match(tokens, rules)]))
+		tokens <- insert(rules[tokens])
 		tokens[-1L] <- str_sub(tokens[-1L], 2L)
 		str_c(tokens, collapse = "")
 	}
@@ -155,15 +159,115 @@ cat(puzzle[[2]])
 
 ### Solution
 
+While the previous brute-force solution works for small `n` it quickly becomes not
+manageable, because at each step the string can potentially grow by 
+`r length(puzzle_data$rules)` (`=: k`) characters. That is while the upper bound for the
+string length after 10 iterations is `k ^ 10 = ` 
+`` `r length(puzzle_data$rules) ^ 10` ``,
+the upper bound for 40 iterations is already 
+`` r length(puzzle_data$rules) ^ 40` ``. Of course not all `r length(puzzle_data$rules)` 
+will hit in each of the iterations, hence we manage with 10 iterations but clearly for 40
+iterations we have to find a smarter algorithm.
+
+We will resort to a directed graph. Each node represents a tuple like 
+`` `r names(puzzle_data$rules[1])` ``. By applying rule 
+`` `r format_rule(puzzle_data$rules[1])` `` this tuple produces 
+`` `r insert(puzzle_data$rules[1])` ``, which eventually results in the two *new* tuples
+`` `r str_sub(insert(puzzle_data$rules[1]), 1:2, 2:3)` ``. In the graph we hence connect
+`` `r names(puzzle_data$rules[1])` `` with 
+`` `r str_sub(insert(puzzle_data$rules[1]), 1:2, 2:3)` `` via a directed edge. In this 
+way we connect all tuples to its *2*  resulting tuples to form a graph. We assign the 
+newly inserted character to the edge. We connect a dedicated `start` node to the tuples
+found in the start word. 
+
+Then the problem breaks down to find all (not necessarily simple)
+paths of length `k + 1` from the start node (the `+ 1` is needed to account for 
+starting in `start`). While traversing the graph, we simply increase the count for each
+letter (the relevant letter is an attribute of the edge). The original counts are filled
+from the start word.
+
+```{r geteasier-input}
+rules <- c(CH = "B", HH = "N", CB = "H", NH = "C", HB = "C", HC = "B", 
+			  HN = "C", NN = "C", BH = "H", NC = "B", NB = "B", BN = "B", 
+			  BB = "N", BC = "B", CC = "N", CN = "C")
+
+```
+
+
 ```{r solution-b, eval = length(puzzle) > 1, comment = NA}
-library(igraph)
-G <- imap_dfr(puzzle_data$rules, function(pair, insert) {
-	res <- insert(pair, insert)
-	data.frame(from = rep(pair, 2L),
-				  to   = c(str_sub(res, 1L, 2L),
-				  			str_sub(res, 2L, 3L)))
-}) %>% 
-	graph_from_data_frame()
+get_neighbor_node <- function(tuple) {
+	nbs <- insert(tuple)
+	from <- rep(1:2, length(tuple))
+	str_sub(rep(nbs, each = 2), from, from + 1)
+}
+
+create_graph_from_rules <- function(rules = puzzle_data$rules,
+												start = puzzle_data$start) {
+	gr_dat <- data.frame(from   = rep(names(rules), each = 2),
+								to     = get_neighbor_node(rules),
+								insert = rep(rules, each = 2))
+	G <- gr_dat %>% 
+		select(1:2) %>% 
+		graph_from_data_frame(vertices = gr_dat %>% 
+									 	select(1, 3) %>% unique())
+	V(G)$color <- "orange"
+	V(G)$shape <- "circle"
+	idx <- seq_len(str_length(start) - 1L) 
+	new_edges <- rep(str_sub(start, idx, idx + 1L), each = 2)
+	new_edges[2L * (0:(length(new_edges) / 2L - 1L)) + 1L] <- "start"
+	G <- G +
+		vertices("start", color = "steelblue", shape = "square") +
+		edges(new_edges)
+	G
+}
+
+
+
+prune_graph <- function(G) {
+	vert_stats <- V(G)$insert %>% 
+		table()
+	rel_vert <- V(G)[V(G)$insert %in% names(c(which.min(vert_stats), 
+															which.max(vert_stats)))]
+	rel_vert
+}
+
+walk_graph <- function(max_length, start = puzzle_data$start, 
+							  rules = puzzle_data$rules) {
+	G <- create_graph_from_rules(rules, start)
+	cnt <- start %>% 
+		str_count(LETTERS) %>% 
+		set_names(LETTERS)
+	rel <- str_c(start, rules, names(rules), collapse = "") %>% 
+		str_detect(LETTERS) 
+	cnt <- cnt[rel]
+	do_walk <- function(node, path_length) {
+		wt <- node$insert
+		if (!is.na(wt)) {
+			cnt[wt] <<- cnt[wt] + 1
+		}
+		if (path_length < max_length) {
+			nbs <- neighbors(G, node, "out")
+			for (idx in nbs) {
+				nb <- V(G)[idx]
+				Recall(nb,
+						 path_length + 1)
+			}
+		}
+	}
+	## called for its side effects
+	do_walk(V(G)["start"], 0)
+	diff(range(cnt))
+}
+
+walk_graph(40)
+
+# G <- imap_dfr(puzzle_data$rules, function(pair, insert) {
+# 	res <- insert(pair, insert)
+# 	data.frame(from = rep(pair, 2L),
+# 				  to   = c(str_sub(res, 1L, 2L),
+# 				  			str_sub(res, 2L, 3L)))
+# }) %>% 
+# 	graph_from_data_frame()
 ```
 
 
