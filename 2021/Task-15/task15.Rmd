@@ -1,0 +1,194 @@
+---
+params:
+   task_nr: 15
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+
+code em {
+	font-weight:bold
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n+") %>% 
+	`[[`(1L) %>% 
+	head(-1L) %>% 
+	str_split("") %>% 
+	do.call(rbind, .) %>% 
+	{matrix(as.numeric(.), nrow(.), ncol(.))}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+```{r}
+simple_maze <- structure(c(1, 1, 2, 3, 7, 1, 1, 3, 1, 2, 1, 3, 1, 6, 4, 3, 3, 
+									1, 2, 3, 6, 8, 3, 9, 6, 1, 5, 2, 9, 1, 3, 1, 6, 4, 3, 9, 9, 5, 
+									3, 1, 7, 3, 5, 9, 4, 1, 9, 4, 1, 9, 5, 7, 1, 3, 1, 2, 1, 2, 3, 
+									4, 1, 3, 1, 1, 7, 8, 2, 1, 8, 4, 7, 6, 3, 5, 1, 1, 4, 6, 5, 5, 
+									4, 7, 2, 6, 1, 3, 2, 3, 2, 8, 2, 2, 8, 9, 1, 7, 1, 9, 1, 1), .Dim = c(10L, 
+																																 10L))
+```
+
+
+### Solution
+
+This puzzle can be elegantly solved with a `graph` where we are looking for the shortest 
+path from start to end.
+
+```{r solution-a, cache = FALSE}
+get_graph <- function(maze = puzzle_data) {
+	## simply create all indices
+	all_idx <- which(maze > -1, arr.ind = TRUE) %>% 
+		cbind(weight = maze[.])	%>% 
+		as_tibble() %>% 
+		set_names(c("row_orig", "col_orig", "weight")) 
+	e <- all_idx %>% 
+		mutate(row_left = row_orig,
+				 col_left = col_orig - 1L,
+				 row_right = row_orig,
+				 col_right = col_orig + 1L,
+				 row_up = row_orig - 1L,
+				 col_up = col_orig,
+				 row_down = row_orig + 1,
+				 col_down = col_orig) %>% 
+		pivot_longer(-(row_orig:weight),
+						 names_to = c("position", "direction"),
+						 names_sep = "_") %>% 
+		select(row_orig:weight, direction, everything()) %>% 
+		pivot_wider(row_orig:direction, names_from = "position") %>% 
+		filter(between(row, 1L, nrow(maze)),
+				 between(col, 1L, ncol(maze))) %>% 
+		transmute(from = case_when(
+			row == 1 & col == 1 ~ "start", 
+			row == nrow(maze) & col == ncol(maze) ~ "end",
+			TRUE ~ paste(row, col, sep = "/")),
+			to = case_when(
+				row_orig == 1 & col_orig == 1 ~ "start", 
+				row_orig == nrow(maze) & col_orig == ncol(maze) ~ "end",
+				TRUE ~ paste(row_orig, col_orig, sep = "/")),
+			weight = weight)
+	graph_from_data_frame(e, TRUE) 
+}
+G <- get_graph()
+E(G, path = shortest_paths(G, "start", "end")$vpath[[1]])$weight %>% 
+	sum()
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To solve the second part, we simply use the same algorithm on the larger maze, which we 
+need but to create.
+
+```{r solution-b, eval = length(puzzle) > 1, comment = NA}
+make_maze <- function(span_x, span_y, maze = puzzle_data) {
+	mazes <- map(seq_len(span_x + span_y) - 1, ~ (maze + .x) %% 10 + ((maze + .x) %/% 10))
+	map(seq_len(span_y), ~ do.call(cbind, mazes[seq(.x, length.out = span_x)])) %>% 
+		do.call(rbind, .)
+}
+
+Gp <- get_graph(make_maze(5, 5))
+
+E(Gp, path = shortest_paths(Gp, "start", "end")$vpath[[1]])$weight %>% 
+	sum()
+
+```
+
+
+
