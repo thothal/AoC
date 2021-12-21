@@ -1,0 +1,281 @@
+---
+params:
+   task_nr: 14
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- local({
+	res <- GET(paste0(base_url, "/input"),
+				  session_cookie) %>% 
+		content(encoding = "UTF-8") %>% 
+		str_split("\n+") %>% 
+		`[[`(1L)
+	rules <- head(tail(res, -1L), -1L)
+	lkp <- str_extract(rules, ".$") %>% 
+		set_names(str_extract(rules, "^.."))
+	list(start = res[[1L]],
+		  rules = lkp)
+})
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We split the string in pairs of two and replace matches according to the given
+rules. Then we drop the first letter in each pair or triplet, as it is already
+present in the pair or triplet before.
+
+```{r solution-a, cache = FALSE}
+format_rule <- function(rule) {
+	sprintf("%s -> %s", names(rule), rule)
+}
+
+insert <- function(rule) {
+	str_c(str_sub(names(rule), 1L, 1L),
+			rule,
+			str_sub(names(rule), 2L, 2L))
+}
+
+replace_line <- function(n, 
+								 str = puzzle_data$start,
+								 rules = puzzle_data$rules) {
+	wrapper <- function(str, i) {
+		idx <- seq(1L, str_length(str) - 1L)
+		tokens <- str_sub(str, idx, idx + 1L)
+		tokens <- insert(rules[tokens])
+		tokens[-1L] <- str_sub(tokens[-1L], 2L)
+		str_c(tokens, collapse = "")
+	}
+	all_ltrs <- str_c(rules, collapse = "") %>% 
+		str_split("") %>% 
+		`[[`(1) %>% 
+		unique()
+	reduce(seq(1L, n), wrapper, .init = str) %>% 
+		str_count(fixed(all_ltrs)) %>% 
+		range() %>% 
+		diff()
+}
+
+replace_line(10)
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+While the previous brute-force solution works for small `n` it quickly becomes not
+manageable, because at each step the string can potentially grow by 
+`r length(puzzle_data$rules)` (`=: k`) characters. That is, while the upper bound for the
+string length after 10 iterations is `k ^ 10 = ` 
+`` `r length(puzzle_data$rules) ^ 10` ``,
+the upper bound for 40 iterations is already 
+`` r length(puzzle_data$rules) ^ 40` ``. Of course not all `r length(puzzle_data$rules)` 
+will hit in each of the iterations, hence we manage with 10 iterations but clearly for 40
+iterations we have to find a smarter algorithm.
+
+We will resort to a directed graph. Each node represents a tuple like 
+`` `r names(puzzle_data$rules[1])` ``. By applying rule 
+`` `r format_rule(puzzle_data$rules[1])` `` this tuple produces 
+`` `r insert(puzzle_data$rules[1])` ``, which eventually results in the two *new* tuples
+`` `r str_sub(insert(puzzle_data$rules[1]), 1:2, 2:3)` ``. In the graph we hence connect
+`` `r names(puzzle_data$rules[1])` `` with 
+`` `r str_sub(insert(puzzle_data$rules[1]), 1:2, 2:3)` `` via a directed edge. In this 
+way we connect all tuples to its *2*  resulting tuples to form a graph. We connect a 
+dedicated `start` node to the tuples found in the start word. We assign an initial `load` 
+of `1` to the start node. If a tuple appears `k` times in the start string, there 
+will be `k` edges from the start node to this very tuple.
+
+Then the algorithm works as follows:
+
+1. For each outgoing edge, add the full load to the child node. That is, if there are two
+nodes `P` and `P'` say, which have an edge into `C`, then we add the load of `P` plus the 
+load of `P'` to the load of `C`. Note, that the graph may have some loops (a rule like
+`KN -> K` will lead to such a loop). This reflects that each tuple when polymerized will
+create a new tuple. If there are for instance 3 `KN -> H` nodes and 2 `NN -> H`  nodes we
+will - inter alia - have `3 + 2 = 5` new `HN` nodes. The amount is reflectd by the 
+`load`.
+1. We also have to reduce the number of "mother" polymers accordingly. In the above
+example we will reduce the load of `KN` and `NN` by 3 and 2 respectively. Please note, 
+that in one run we can produce __and__ destroy a certain tuple.
+1. Once we transferred the loads to the childs, we recurse into all childs and continue
+until we reached the desired depth.
+
+
+```{r solution-b, eval = length(puzzle) > 1, comment = NA}
+get_neighbor_node <- function(tuple) {
+	nbs <- insert(tuple)
+	from <- rep(1:2, length(tuple))
+	str_sub(rep(nbs, each = 2), from, from + 1)
+}
+
+create_graph_from_rules <- function(start = puzzle_data$start,
+												rules = puzzle_data$rules) {
+	gr_dat <- data.frame(from    = rep(names(rules), each = 2L),
+								to      = get_neighbor_node(rules),
+								insert  = rep(rules, each = 2L),
+								visited = 0L,
+								load    = 0L)
+	G <- gr_dat %>% 
+		select(1:2) %>% 
+		graph_from_data_frame(vertices = gr_dat %>% 
+									 	select(-to) %>% unique())
+	V(G)$color <- "orange"
+	V(G)$shape <- "circle"
+	idx <- seq_len(str_length(start) - 1L) 
+	new_edges <- rep(str_sub(start, idx, idx + 1L), each = 2L)
+	new_edges[2L * (0:(length(new_edges) / 2L - 1L)) + 1L] <- "start"
+	G +
+		vertices("start", 
+					color = "steelblue", 
+					shape = "square",
+					load = 1L,
+					visited = 1L) +
+		edges(new_edges)
+}
+
+walk_graph <- function(max_depth,
+							  start = puzzle_data$start,
+							  rules = puzzle_data$rules) {
+	op <- options(scipen = 99)
+	on.exit(options(op))
+	G <- create_graph_from_rules(start, rules)
+	start_cnt <- tibble(ltr = unique(str_split(start, "")[[1L]]),
+							  n   = str_count(start, ltr))
+	do_walk <- function(nodes, depth) {
+		if (depth == max_depth) {
+			nodes <- difference(V(G), V(G)["start", visited == 0L])
+			tibble(ltr = nodes$insert,
+							  n   = nodes$visited) %>%
+				group_by(ltr) %>% 
+				summarize(n = sum(n)) %>% 
+				full_join(start_cnt,
+							 by = "ltr") %>% 
+				transmute(ltr,
+							 n = coalesce(n.x, 0L) + coalesce(n.y, 0L)) %>% 
+				pull(n) %>% 
+				range() %>% 
+				diff()
+		} else {
+			incs <- incident_edges(G, nodes) %>% 
+				unlist()
+			nbs <- adjacent_vertices(G, nodes) %>% 
+				unlist() %>% 
+				unique()
+			src_dest <- tibble(src  = tail_of(G, incs),
+									 dest = head_of(G, incs),
+									 load = V(G)[src]$load)
+			dest <- src_dest %>% 
+				group_by(dest) %>% 
+				summarize(load = sum(load))
+			V(G)[dest$dest]$load <<- V(G)[dest$dest]$load + dest$load
+			src <- src_dest %>% 
+				distinct(src, load)
+			V(G)[src$src]$load <<- V(G)[src$src]$load - src$load
+			V(G)[nbs]$visited <<- V(G)[nbs]$visited + V(G)[nbs]$load
+			Recall(V(G)[nbs], depth + 1L)
+		}
+	}
+	do_walk(V(G)["start"], 0L)
+}
+
+options(scipen = 1)
+walk_graph(40)
+```
+
+
+

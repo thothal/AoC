@@ -100,7 +100,8 @@ index <- index[-seq(year_start, year_end, 1)]
 
 replacements <- glue("* [Day {day}]({url})",
 							day = str_extract(all_solutions, "task\\d+") %>% 
-								str_remove("task"),
+								str_remove("task") %>% 
+								str_sort(numeric = TRUE),
 							url = glue("{all_solutions}"))
 
 ## replace
