@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2021-12-20" />
+        <meta name="date" content="2021-12-21" />
     
     <title>Task 14   </title>
 
@@ -144,7 +144,7 @@
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2021-12-20</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2021-12-21</p>
            
 
    
@@ -154,18 +154,18 @@
 <div class="page-content has-page-title">
 <style type="text/css">
 .page-content  .figure {
-width: 100%;
+    width: 100%;
 }
 
 .back {
-font-size: 2rem;
+    font-size: 2rem;
 }
 
 .day-desc {
-border: 2px dotted;
-border-radius: 6px;
-border-color: var(--blockquote-border-color);
-padding: 0 20px;
+    border: 2px dotted;
+    border-radius: 6px;
+    border-color: var(--blockquote-border-color);
+    padding: 0 20px;
 }
 </style>
 <div id="setup" class="section level1" number="1">
@@ -178,7 +178,8 @@ library(magrittr)
 library(tibble)
 library(dplyr)
 library(purrr)
-library(stringr)</code></pre>
+library(stringr)
+library(igraph)</code></pre>
 </div>
 <div id="retrieve-data-from-aoc" class="section level2" number="1.2">
 <h2><span class="header-section-number">1.2</span> Retrieve Data from <tt>AoC</tt></h2>
@@ -306,8 +307,8 @@ replace_line &lt;- function(n,
                                  str = puzzle_data$start,
                                  rules = puzzle_data$rules) {
     wrapper &lt;- function(str, i) {
-        idx &lt;- seq(1L, str_length(str) - 1)
-        tokens &lt;- str_sub(str, idx, idx + 1)
+        idx &lt;- seq(1L, str_length(str) - 1L)
+        tokens &lt;- str_sub(str, idx, idx + 1L)
         tokens &lt;- insert(rules[tokens])
         tokens[-1L] &lt;- str_sub(tokens[-1L], 2L)
         str_c(tokens, collapse = &quot;&quot;)
@@ -349,27 +350,118 @@ Apply <em>40</em> steps of pair insertion to the polymer template and find the m
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
 <p>While the previous brute-force solution works for small <code>n</code> it quickly becomes not
 manageable, because at each step the string can potentially grow by
-100 (<code>=: k</code>) characters. That is while the upper bound for the
+100 (<code>=: k</code>) characters. That is, while the upper bound for the
 string length after 10 iterations is <code>k ^ 10 =</code>
 <code>10^{20}</code>,
 the upper bound for 40 iterations is already
 <code>r length(puzzle_data$rules) ^ 40`</code>. Of course not all 100
-will hit in each of the iterations, hence we manage with 10 iterations but clearly for 40 iterations we have to find a smarter algorithm.</p>
+will hit in each of the iterations, hence we manage with 10 iterations but clearly for 40
+iterations we have to find a smarter algorithm.</p>
 <p>We will resort to a directed graph. Each node represents a tuple like
 <code>HF</code>. By applying rule
 <code>HF -&gt; O</code> this tuple produces
 <code>HOF</code>, which eventually results in the two <em>new</em> tuples
-<code>HO, OF</code>. In the graph we hance connect
+<code>HO, OF</code>. In the graph we hence connect
 <code>HF</code> with
-<code>HO, OF</code> via a directed edge.</p>
-<pre class="r"><code>library(igraph)
-# G &lt;- imap_dfr(puzzle_data$rules, function(pair, insert) {
-#   res &lt;- insert(pair, insert)
-#   data.frame(from = rep(pair, 2L),
-#                 to   = c(str_sub(res, 1L, 2L),
-#                           str_sub(res, 2L, 3L)))
-# }) %&gt;% 
-#   graph_from_data_frame()</code></pre>
+<code>HO, OF</code> via a directed edge. In this
+way we connect all tuples to its <em>2</em> resulting tuples to form a graph. We connect a
+dedicated <code>start</code> node to the tuples found in the start word. We assign an initial <code>load</code>
+of <code>1</code> to the start node. If a tuple appears <code>k</code> times in the start string, there
+will be <code>k</code> edges from the start node to this very tuple.</p>
+<p>Then the algorithm works as follows:</p>
+<ol style="list-style-type: decimal">
+<li>For each outgoing edge, add the full load to the child node. That is, if there are two
+nodes <code>P</code> and <code>P&#39;</code> say, which have an edge into <code>C</code>, then we add the load of <code>P</code> plus the
+load of <code>P&#39;</code> to the load of <code>C</code>. Note, that the graph may have some loops (a rule like
+<code>KN -&gt; K</code> will lead to such a loop). This reflects that each tuple when polymerized will
+create a new tuple. If there are for instance 3 <code>KN -&gt; H</code> nodes and 2 <code>NN -&gt; H</code> nodes we
+will - inter alia - have <code>3 + 2 = 5</code> new <code>HN</code> nodes. The amount is reflectd by the
+<code>load</code>.</li>
+<li>We also have to reduce the number of “mother” polymers accordingly. In the above
+example we will reduce the load of <code>KN</code> and <code>NN</code> by 3 and 2 respectively. Please note,
+that in one run we can produce <strong>and</strong> destroy a certain tuple.</li>
+<li>Once we transferred the loads to the childs, we recurse into all childs and continue
+until we reached the desired depth.</li>
+</ol>
+<pre class="r"><code>get_neighbor_node &lt;- function(tuple) {
+    nbs &lt;- insert(tuple)
+    from &lt;- rep(1:2, length(tuple))
+    str_sub(rep(nbs, each = 2), from, from + 1)
+}
+
+create_graph_from_rules &lt;- function(start = puzzle_data$start,
+                                                rules = puzzle_data$rules) {
+    gr_dat &lt;- data.frame(from    = rep(names(rules), each = 2L),
+                                to      = get_neighbor_node(rules),
+                                insert  = rep(rules, each = 2L),
+                                visited = 0L,
+                                load    = 0L)
+    G &lt;- gr_dat %&gt;% 
+        select(1:2) %&gt;% 
+        graph_from_data_frame(vertices = gr_dat %&gt;% 
+                                        select(-to) %&gt;% unique())
+    V(G)$color &lt;- &quot;orange&quot;
+    V(G)$shape &lt;- &quot;circle&quot;
+    idx &lt;- seq_len(str_length(start) - 1L) 
+    new_edges &lt;- rep(str_sub(start, idx, idx + 1L), each = 2L)
+    new_edges[2L * (0:(length(new_edges) / 2L - 1L)) + 1L] &lt;- &quot;start&quot;
+    G +
+        vertices(&quot;start&quot;, 
+                    color = &quot;steelblue&quot;, 
+                    shape = &quot;square&quot;,
+                    load = 1L,
+                    visited = 1L) +
+        edges(new_edges)
+}
+
+walk_graph &lt;- function(max_depth,
+                              start = puzzle_data$start,
+                              rules = puzzle_data$rules) {
+    op &lt;- options(scipen = 99)
+    on.exit(options(op))
+    G &lt;- create_graph_from_rules(start, rules)
+    start_cnt &lt;- tibble(ltr = unique(str_split(start, &quot;&quot;)[[1L]]),
+                              n   = str_count(start, ltr))
+    do_walk &lt;- function(nodes, depth) {
+        if (depth == max_depth) {
+            nodes &lt;- difference(V(G), V(G)[&quot;start&quot;, visited == 0L])
+            tibble(ltr = nodes$insert,
+                              n   = nodes$visited) %&gt;%
+                group_by(ltr) %&gt;% 
+                summarize(n = sum(n)) %&gt;% 
+                full_join(start_cnt,
+                             by = &quot;ltr&quot;) %&gt;% 
+                transmute(ltr,
+                             n = coalesce(n.x, 0L) + coalesce(n.y, 0L)) %&gt;% 
+                pull(n) %&gt;% 
+                range() %&gt;% 
+                diff()
+        } else {
+            incs &lt;- incident_edges(G, nodes) %&gt;% 
+                unlist()
+            nbs &lt;- adjacent_vertices(G, nodes) %&gt;% 
+                unlist() %&gt;% 
+                unique()
+            src_dest &lt;- tibble(src  = tail_of(G, incs),
+                                     dest = head_of(G, incs),
+                                     load = V(G)[src]$load)
+            dest &lt;- src_dest %&gt;% 
+                group_by(dest) %&gt;% 
+                summarize(load = sum(load))
+            V(G)[dest$dest]$load &lt;&lt;- V(G)[dest$dest]$load + dest$load
+            src &lt;- src_dest %&gt;% 
+                distinct(src, load)
+            V(G)[src$src]$load &lt;&lt;- V(G)[src$src]$load - src$load
+            V(G)[nbs]$visited &lt;&lt;- V(G)[nbs]$visited + V(G)[nbs]$load
+            Recall(V(G)[nbs], depth + 1L)
+        }
+    }
+    do_walk(V(G)[&quot;start&quot;], 0L)
+}
+
+options(scipen = 1)
+walk_graph(40)</code></pre>
+<pre><code>[1] 3724343376942</code></pre>
 </div>
 </div>
 </div>
