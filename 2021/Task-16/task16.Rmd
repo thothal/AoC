@@ -1,0 +1,254 @@
+---
+params:
+   task_nr: 16
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+  })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+
+code em {
+font-weight:bold
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_remove("\n")
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We first decode the HEX string into binary. Then we use a recursive function, 
+which takes the starting position for the packet as an argument. If the packet 
+is an operator packet, we recurse into the sub packets and store the intersting
+parts in a list of liust structure, where operator packets have a `child` slot, 
+which holds all the child packets.
+
+```{r solution-a, cache = FALSE}
+hex2bin <- function(code = puzzle_data) {
+	res <- code %>% 
+		str_split("") %>%
+		`[[`(1L) %>% 
+		str_replace_all("([0-9A-F])", function(hc) {
+			strtoi(hc, 16L) %>% 
+				intToBits() %>% 
+				rev() %>% 
+				as.integer() %>% 
+				tail(4) %>% 
+				str_c(collapse = "")
+		}) %>% 
+		str_split("") %>% 
+		unlist() %>% 
+		as.integer()
+	class(res) <- "bitstream"
+	res
+}
+
+bin2dec <- function(bitstream) {
+	stopifnot(all(bitstream %in% 0:1))
+	sum(bitstream * rev(2 ^ (seq_along(bitstream) - 1)))
+}
+
+parse_packets <- function(bitstream) {
+	do_parse <- function(start) {
+		version <- bitstream[seq(start, length.out = 3L)] %>% 
+			bin2dec() %>% 
+			as.integer()
+		type_id <- bitstream[seq(start + 3L, length.out = 3L)] %>% 
+			bin2dec()
+		if (type_id == 4L) {
+			## literal value
+			idx <- seq(start + 6L, length(bitstream), by = 5L)
+			value_end <- idx[which.max(bitstream[idx] == 0L)] + 4L
+			value <- bitstream[(start + 6L):value_end]
+			## remove leading bits
+			idx <- seq(1L, length(value), 5L)
+			value <- list(value = value[-idx] %>% 
+							  	bin2dec(),
+							  version = version,
+							  type = type_id,
+							  packet_length = value_end - start + 1L)
+			class(value) <- c("packet", "literal")
+		} else {
+			## operator
+			length_type_id <- bitstream[start + 6L]
+			if (length_type_id == 0L) {
+				## total length
+				len <- bitstream[seq(start + 7L, length.out = 15L)] %>% 
+					bin2dec()
+				iter <- start + 22L
+				total_len <- 22L
+				cond <- quote(iter < start + len + 22L)
+			} else {
+				## packet length
+				total_cnt <- bitstream[seq(start + 7L, length.out = 11L)] %>%
+					bin2dec()
+				iter <- start + 18L
+				total_len <- 18L
+				cond <- quote(cnt <= total_cnt)
+			}
+			childs <- list()
+			cnt <- 1L
+			while (eval(cond)) {
+				next_pack <- Recall(iter)
+				pack_len <- next_pack$packet_length
+				iter <- iter + pack_len
+				total_len <- total_len + pack_len
+				childs <- c(childs, list(next_pack))
+				cnt <- cnt + 1L
+			}
+			value <- list(childs = childs,
+							  version = version,
+							  type = type_id,
+							  packet_length = total_len,
+							  length_type = length_type_id)
+			class(value) <- c("packet", "operator", 
+									if (length_type_id == 0L) 
+										"total_length" else "total_packets")
+		}
+		value
+	}
+	do_parse(1L)
+}
+
+
+hier <- puzzle_data %>% 
+	hex2bin() %>% 
+	parse_packets()
+
+sum_versions <- function(hier) {
+	if (is.null(hier$childs)) {
+		hier$version
+	} else {
+		hier$version + sum(vapply(hier$childs, sum_versions, integer(1L)))
+	}
+}
+
+sum_versions(hier)
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we have to walk the parsed string recursively and execute 
+the indicated operations.
+
+```{r solution-b, eval = length(puzzle) > 1, comment = NA}
+eval_hierachy <- function(hier = hier) {
+	if (hier$type == 4L) {
+		hier$value
+	} else {
+		fns <- list(
+			sum,
+			prod,
+			min,
+			max,
+			## this should never be called in this branch, we add it to 
+			## avoid additional if clasue
+			stop, 
+			\(x, y) as.integer(x > y),
+			\(x, y) as.integer(x < y),
+			\(x, y) as.integer(x == y)
+		)
+		fn <- fns[[hier$type + 1]]
+		args <- lapply(hier$childs, eval_hierachy)
+		do.call(fn, unname(args))
+	}
+}
+eval_hierachy(hier)
+```
