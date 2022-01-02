@@ -7,7 +7,7 @@ author:
   email: "thorn.thaler@thothal.at"
 date: "`r Sys.Date()`"
 knit: (function(inputFile, encoding) {
-   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+   o_file <- sprintf("2021_%s",
                      tools::file_path_sans_ext(basename(inputFile)))
                      
    rmarkdown::render(inputFile, encoding = encoding, 
