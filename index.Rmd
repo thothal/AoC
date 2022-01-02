@@ -21,6 +21,10 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+# 2022
+
+* [Day 17](2022_task17.html)
+
 # 2021
 
 * [Day 1](2021_task1.html)
