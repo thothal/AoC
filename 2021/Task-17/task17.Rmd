@@ -1,0 +1,239 @@
+---
+params:
+   task_nr: 17
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+  })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+
+code em {
+font-weight:bold
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_extract_all("-?\\d+") %>% 
+	`[[`(1L) %>% 
+	as.integer() %>% 
+	set_names(c("xmin", "xmax", "ymin", "ymax"))
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+This was the first puzzle, which I solved by logic rather than by coding. With
+the given kinetics we can observe the following:
+
+1. To reach a maximum height, we require `y > 0` and the higher `y` the higher
+the maximum height.
+1. Every trajectory with `y_0 > 0` will eventually return to the horizontal
+baseline at  `(x / 0)`. This is because the `y` velocity will first decrease 
+from `y_0` to `0` (reaching a maximum height at `sum(1:y_0)`) and then further 
+decrease until it reaches `-y_0` which means it decreases exactly 
+`sum(-1:-y_0) = -sum(1:y_0)` units.
+1. In order to not overshoot the last decrease can be at most 
+`r puzzle_data["ymin"]`.
+1. That is `y_0` can be at most `r abs(puzzle_data["ymin"]) - 1` and the 
+absolute height can be solved by good old Gauss.
+
+```{r solution-a, cache = FALSE}
+y0 <- abs(puzzle_data["ymin"]) - 1
+(y0 + 1) * y0 / 2
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To get all feasible trajectories, we observe the following points:
+
+1. The *minimal* `x` velocity is the minimal `x_0` which satisfies 
+`sum(1:x_0) >= x_min`. Using Gauss  we conclude 
+``(1 + x) * x / 2 >= `r puzzle_data["xmin"]` `` this can be solved by the 
+quadratic formula:
+   ```{r quadratic-formula-min}
+   q_solve <- function(a, b, c) {
+   	(-b + c(-1, 1) * sqrt(b ^ 2 - 4 * a * c)) / (2 * a)
+   }
+   sol <- q_solve(1 / 2, 1 / 2, -puzzle_data["xmin"])
+   ceiling(sol[sol > 0])
+   ```
+1. We can reach each point `(x/y)` of the trench exactly by using the trajectory
+`(x/-y)`.
+1. Besides these direct trajectories, the maximum `x` velocity is 
+`ceil(xmax / 2)`. If it were `ceil(xmax / 2) + 1` then the next step would be
+already at `ceil(xmax / 2) + 1 + ceil(xmax / 2) + 1 - 1 >= xmax` and thus 
+overshoot the area. Thus, 
+the maximal `x` velocity is `r (x0max <- ceiling(puzzle_data["xmax"] / 2))`.
+1. Likewise the minimum `y` velocity is `ceil(ymin / 2)`, i.e. 
+`r (y0min <- ceiling(puzzle_data["ymin"] / 2))`.
+1. As per part 1, the maximum `y` velocity is `r (y0max <- y0)`.
+1. For each pair `(x0 / y0)` we can calculate the minimal steps which are needed 
+to reach the trench in both directions, `kx` and `ky`, say. Then we take the 
+maximum of those two values (`k`) and check whether we reached the trench after
+`k` steps. It is not necessary to check any other value, because if we overshoot
+after `k` steps, we will overshoot after `k + 1` steps. As we did not reach the
+trench before `k` steps in at least one direction it also not necessary to check
+any value smaller than `k`.
+1. Overall, a semi-intelligent brute-force algorithm, iterates over each pair in
+``(`r ceiling(sol[sol > 0])`...`r x0max`/`r y0min`...`r y0max`)`` calculates `k`
+and counts how many trajectories reach the trench after `k` steps and adds 
+`prod(dim(puzzle) + 1)` to the result accounting for the direct trajectories.^[The 
+algo is rather stupid, because if for any given `(x / yk)` we cannot reach the 
+trench, we do not need to check any `(x / yk + i)`. However, due to the small
+sample size we do not really need to fine tune here.]
+
+```{r solve}
+get_k <- Vectorize(function(x0, y0, dims = puzzle_data) {
+	## solve x0 + x0 - 1 + ... + x0 - k >= dims["xmin"] w.r.t. k
+	## (x0 + x0 - k) * (x0 - (x0 - k) + 1) / 2 = dims["xmin"]
+	## -1 / 2 * k² + (2x0 - 1) / 2 * k + x0 - d
+	kx <- q_solve(-1 / 2, x0 - 1 / 2, x0 - dims["xmin"]) %>% 
+		ceiling()
+	kx <- kx[kx <= x0][[1L]]
+	ky <- q_solve(-1 / 2, y0 - 1 / 2, y0 - dims["ymax"]) %>% 
+		ceiling()
+	ky <- ky[ky >= 0][[1L]]
+	max(kx, ky)
+}, c("x0", "y0"))
+
+get_x <- Vectorize(function(x0, k) {
+	stopifnot(x0 >= 0)
+	if (k > x0) {
+		(x0 + 1) * x0 / 2
+	} else {
+		(2 * x0 - k) * (k + 1) / 2
+	}
+})
+
+get_y <- Vectorize(function(y0, k) {
+	if (k == 0) {
+		0
+	} else {
+		(2 * y0 - k) * (k + 1) / 2
+	}
+})
+
+is_within <- function(x, y, k, dims = puzzle_data) {
+	between(get_x(x, k), dims["xmin"], dims["xmax"]) &
+		between(get_y(y, k), dims["ymin"], dims["ymax"])
+}
+
+solve <- function(dims = puzzle_data) {
+	## total movement in x direction =
+	## x0 + x0 - 1 + x0 - 2 + ... + 1 = (x0 + 1) * X0 / 2
+	## To reach the trench we need at least dims["xmin"] steps in total
+	## => solve (x0 + 1) * x0 / 2 = dims["xmin"] w.r.t to x0
+	x0min <- q_solve(1 / 2, 1 / 2, -dims["xmin"])
+	x0min <- ceiling(x0min[x0min > 0])
+	x0max <- ceiling(dims["xmax"] / 2)
+	y0min <- ceiling(dims["ymin"] / 2)
+	y0max <- abs(dims["ymin"]) - 1
+	sols <- expand.grid(x = x0min:x0max,
+							  y = y0min:y0max) %>% 
+		as_tibble() %>% 
+		mutate(k = get_k(x, y, dims),
+				 hits = is_within(x, y, k, dims)) %>% 
+		filter(hits) %>% 
+		nrow()
+	sols + ((diff(range(dims[c("xmin", "xmax")])) + 1) *
+			  	(diff(range(abs(dims[c("ymin", "ymax")]))) + 1))
+}
+
+solve(puzzle_data)
+```
+
