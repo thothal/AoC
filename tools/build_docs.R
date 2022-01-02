@@ -37,7 +37,7 @@ edit_file <- function(lines, file, replace, start, idx = NULL) {
 
 year <- coalesce(force_year, format(Sys.Date(), "%Y"))
 all_solutions <- list.files(here("docs"), pattern = glue("^{year}_.*\\.html")) %>% 
-	sort()
+	str_sort(numeric = TRUE)
 
 ## README.md
 cli_alert_info("Updating README.md")
