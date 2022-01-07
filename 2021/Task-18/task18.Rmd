@@ -1,0 +1,567 @@
+---
+params:
+   task_nr: 18
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("2021_%s",
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })      
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+
+code em {
+	font-weight:bold
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(R6)
+library(glue)
+library(data.tree)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1L) %>% 
+	head(-1L)
+
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+To solve this puzzle, we have to create a proper data structure first. We rely on 
+[R6](https://r6.r-lib.org/articles/Introduction.html) and use a tree inspired structure,
+where each element contains references to its childs and its parent. A child can be either 
+a regular number, `NULL` or another Snailfish node. With this recursive structure we can
+easily traverse in either direction. Additionally, we tell nodes whether they are a left
+or a right node, which is necessary to find the neighbors for exploding nodes.
+
+This data structure is definitely an overkill and due to the involvement of environments
+(the very basis of `R6`) a rather slow solution.
+
+```{r data-structure}
+Snailfish <- R6Class(
+	"Snailfish",
+	active = list(
+		position = function(value) {
+			if (missing(value)) {
+				private$.pos  
+			} else {
+				private$.pos <- value
+			}
+		},
+		parent = function(value) {
+			if (missing(value)) {
+				private$.parent
+			} else {
+				stopifnot(inherits(value, "Snailfish") || is.null(value))
+				private$.parent <- value
+			}
+		}
+	),
+	private = list(
+		.left     = NULL,
+		.right    = NULL,
+		.parent   = NULL,
+		.depth    = 0L,
+		.pos      = 0L
+	)
+)
+
+Snailfish$set(
+	"public",
+	"is_regular",
+	function(dir = allowed_dirs) {
+		allowed_dirs <- c("left", "right", "both")
+		dir <- match.arg(dir, allowed_dirs)
+		if (dir == "both") {
+			dir <- allowed_dirs[1:2]
+		}
+		dir <- glue(".{dir}")
+		res <- !map_lgl(mget(dir, private), inherits, "Snailfish")
+		names(res) <- str_remove(names(res), "^\\.")
+		res
+	}
+)
+
+Snailfish$set(
+	"public",
+	"set_depth",
+	function(start = 0L) {
+		private$.depth <- start
+		left <- self$left()
+		right <- self$right()
+		if (!self$is_regular("left")) {
+			left$set_depth(start + 1L)
+		}
+		if (!self$is_regular("right")) {
+			right$set_depth(start + 1L)
+		}
+		invisible(self)
+	}
+)
+
+Snailfish$set(
+	"public",
+	"set_value",
+	function(value, dir = c("left", "right")) {
+		dir <- match.arg(dir)
+		private[[glue(".{dir}")]] <- value
+		invisible(self)
+	}
+)
+
+Snailfish$set(
+	"public",
+	"get_value",
+	function(dir = c("left", "right")) {
+		dir <- match.arg(dir)
+		stopifnot(self$is_regular(dir))
+		private[[glue(".{dir}")]]
+	}
+)
+
+Snailfish$set(
+	"public",
+	"child",
+	function(dir = c("left", "right")) {
+		dir <- match.arg(dir)
+		switch(dir,
+				 left  = if (!self$is_regular("left")) private$.left else NULL,
+				 right = if (!self$is_regular("right")) private$.right else NULL)
+	}
+)
+
+Snailfish$set(
+	"public",
+	"left",
+	function() {
+		self$child("left")
+	}
+)
+
+Snailfish$set(
+	"public",
+	"right",
+	function() {
+		self$child("right")
+	}
+)
+
+Snailfish$set(
+	"public",
+	"depth",
+	function() {
+		private$.depth
+	}
+)
+
+
+Snailfish$set(
+	"public",
+	"neighbor",
+	function(dir = c("left", "right")) {
+		dir <- match.arg(dir)
+		el <- self
+		pa <- self$parent
+		while (!is.null(pa) && el$position == dir) {
+			el <- pa
+			pa <- pa$parent  
+		}
+		if (!is.null(pa)) {
+			new_dir <- dir
+			while (!pa$is_regular(new_dir)) {
+				pa <- pa$child(new_dir)
+				new_dir <- switch(dir,
+										left = "right",
+										right = "left")
+			}
+			pa <- list(node = pa, dir = new_dir)
+		}
+		pa
+	}
+)
+
+Snailfish$set(
+	"public",
+	"find_next_node",
+	function() {
+		find_next_node <- function(node) {
+			res <- NULL
+			if (!is.null(node)) {
+				if (node$depth() == 4L) {
+					## explosion
+					res <- list(node = node, event = "explode")
+				} else {
+					## check if split should happen at current stage
+					if (node$is_regular("left") && node$get_value("left") >= 10) {
+						res <- list(node = node, event = "split", dir = "left")
+					}
+					## ... however there could be some explosions somewhere else
+					new_res <- Recall(node$left())
+					if (!is.null(new_res)) {
+						if (is.null(res) || 
+							 (res$event != "explode" && 
+							  new_res$event == "explode")) {
+							res <- new_res
+						} 
+					}
+					if (is.null(res) && node$is_regular("right") && 
+						 node$get_value("right") >= 10) {
+						res <- list(node = node, event = "split", dir = "right")
+					}
+					new_res <- Recall(node$right())
+					if (!is.null(new_res)) {
+						if (is.null(res) || 
+							 (res$event != "explode" && 
+							  new_res$event == "explode")) {
+							res <- new_res
+						}
+					}
+				}
+			}
+			res
+		}
+		find_next_node(self$root())
+	}
+)
+
+Snailfish$set(
+	"public",
+	"root",
+	function() {
+		pa <- self
+		while (pa$position != "root") {
+			pa <- pa$parent
+		}
+		pa
+	}
+)
+Snailfish$set(
+	"public",
+	"addr",
+	function() {
+		root <- self$root()
+		addr <- Node$new("Snailfish")	
+		create_tree <- function(node, parent) {
+			if (!is.null(node)) {
+				me <- parent$AddChild(obj_addr(node))
+				if (!node$is_regular("left")) {
+					Recall(node$left(), me)
+				} else {
+					me$AddChild(paste("L:", as.character(node$get_value("left"))))
+				}
+				if (!node$is_regular("right")) {
+					Recall(node$right(), me)
+				} else {
+					me$AddChild(paste("R:", as.character(node$get_value("right"))))
+				}
+			}
+		}
+		create_tree(root, addr)
+		print(addr)
+	}
+)
+
+Snailfish$set(
+	"public",
+	"explode",
+	function() {
+		root <- self$root()
+		add_value <- function(dir) {
+			nb <- self$neighbor(dir)
+			if (!is.null(nb)) {
+				new_val <- self$get_value(dir)
+				old_val <- nb$node$get_value(nb$dir)
+				nb$node$set_value(old_val + new_val, nb$dir)
+			}
+		}
+		add_value("left")
+		add_value("right")
+		self$parent$set_value(0L, self$position)
+		self$parent <- NULL
+		invisible(root)
+	}
+)
+
+Snailfish$set(
+	"public",
+	"split",
+	function(dir) {
+		val <- self$get_value(dir) / 2L
+		new_pair <- Snailfish$new(list(floor(val), ceiling(val)),
+										  self,
+										  self$depth() + 1L,
+										  pos = dir)
+		self$set_value(new_pair, dir)
+		invisible(self$root())
+	}
+)
+
+Snailfish$set(
+	"public",
+	"reduce",
+	function(verbose = FALSE, ...) {
+		root <- self$root()
+		next_node <- root$find_next_node()
+		while(!is.null(next_node)) {
+			if (next_node$event == "explode") {
+				next_node$node$explode()
+				if (verbose) {
+					wh <- capture.output(next_node$node)
+					cat("after exploding @", wh, ":\t\t", sep = "")
+					print(root, ...)
+				}
+			} else if (next_node$event == "split") {
+				wh <- next_node$node$get_value(next_node$dir)
+				next_node$node$split(next_node$dir)
+				if (verbose) {
+					cat("after splitting @", wh, ":\t\t", sep = "")
+					print(root, ...)
+				}
+			}
+			next_node <- root$find_next_node()
+		}
+		invisible(root)
+	}
+)
+
+Snailfish$set(
+	"public",
+	"to_list",
+	function() {
+		to_list <- function(node) {
+			res <- NULL
+			if (node$is_regular("left")) {
+				res <- node$get_value("left")
+			} else {
+				res <- Recall(node$left())
+			}
+			if (node$is_regular("right")) {
+				res <- list(res, node$get_value("right"))
+			} else {
+				res <- list(res, Recall(node$right()))
+			}
+			res
+		}
+		to_list(self)
+	}
+)
+
+Snailfish$set(
+	"public",
+	"magnitude",
+	function() {
+		sum <- function(node) {
+			res <- 0
+			if (!is.null(node)) {
+				if (node$is_regular("left")) {
+					res <- 3 * node$get_value("left")
+				}
+				if (node$is_regular("right")) {
+					res <- res + 2 * node$get_value("right")
+				}
+				res <- res + 3 * Recall(node$left()) + 2 * Recall(node$right())
+			}
+			res
+		}
+		sum(self)
+	}
+)
+
+Snailfish$set(
+	"public",
+	"initialize",
+	function(lst, parent = NULL, depth = 0L, pos = "root", str = NULL) {
+		stopifnot(is.null(str) || length(str) == 1L)
+		if (!xor(missing(lst), is.null(str))) {
+			warning("both 'lst' and 'str' are given - ",
+					  "'lst' will be overridden by 'str'")
+		}
+		if (!is.null(str)) {
+			lst <- str %>% 
+				str_replace_all("\\[", "list(") %>% 
+				str_replace_all("\\]", ")") %>% 
+				parse(text = .) %>% 
+				eval()
+		}
+		stopifnot(is.list(lst) && length(lst) == 2L)
+		self$parent <- parent
+		private$.depth  <- depth
+		private$.pos    <- pos
+		left <- lst[[1L]]
+		right <- lst[[2L]]
+		if (is.list(left)) {
+			private$.left <- Snailfish$new(left, self, depth + 1L, "left")
+		} else {
+			private$.left <- left
+		}
+		if (is.list(right)) {
+			private$.right <- Snailfish$new(right, self, depth + 1L, "right")
+		} else {
+			private$.right <- right
+		}
+	}
+)
+
+Snailfish$set(
+	"public",
+	"print",
+	function(show_depth = FALSE, show_pos = FALSE, ...) {
+		left <- if (self$is_regular("left")) 
+			private$.left else
+				capture.output(print(private$.left, show_depth, show_pos, ...))
+		right <- if (self$is_regular("right")) 
+			private$.right else
+				capture.output(print(private$.right, show_depth, show_pos, ...))
+		depth <- if (show_depth) glue("{private$.depth}") else ""
+		pos <- if (show_pos) switch(private$.pos,
+											 left = "L",
+											 right = "R",
+											 root = "~") else ""
+		sep <- if (show_depth | show_pos) ": " else ""
+		mod <- glue("{depth}{pos}{sep}")
+		cat("[", mod, left, ",", right, "]", "\n", sep = "")
+		invisible(self)
+	}
+)
+
+`%+%` <- function(e1, e2) {
+	new_sf <- list(e1$to_list(),
+						e2$to_list())
+	Snailfish$new(new_sf)
+}
+```
+
+
+```{r solution-a, cache = TRUE, message = FALSE}
+sf0 <- Snailfish$new(str = puzzle_data[[1L]])
+
+res <- reduce(puzzle_data[-1L], function(.x, .y) {
+	sf <- Snailfish$new(str = .y)
+	message(glue("Adding Snailfish {capture.output(sf)}"))
+	sum <- .x %+% sf
+	sum$reduce()
+}, .init = sf0)
+
+res$magnitude()
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To solve this puzzle we simply calculate all magnitudes by brute force.
+
+```{r solution-b, eval = length(puzzle) > 1, message = FALSE}
+cache_file <- here::here("2021", "Task-18", "pairwise_distance.rds")
+force <- FALSE
+if (!file.exists(cache_file) || force) {
+	idx <- seq_along(puzzle_data)
+	res <- matrix(NA, length(idx), length(idx))
+	
+	for (i in idx) {
+		for (j in idx) {
+			.x <- Snailfish$new(str = puzzle_data[[i]])
+			.y <- Snailfish$new(str = puzzle_data[[j]])
+			message(glue("Adding Snailfishs {i} and {j}: ",
+							 "{capture.output(.x)} and {capture.output(.y)}"))
+			sum <- .x %+% .y
+			res[i, j] <- sum$reduce()$magnitude()
+		}
+	}
+	
+	saveRDS(res, cache_file)
+} else {
+	res <- readRDS(cache_file)
+}
+max(res[-seq(1, prod(dim(res)), ncol(res) + 1)])
+```
