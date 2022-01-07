@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2021-12-30" />
+        <meta name="date" content="2022-01-03" />
     
     <title>Task 17   </title>
 
@@ -144,7 +144,7 @@
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2021-12-30</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2022-01-03</p>
            
 
    
@@ -347,12 +347,12 @@ Find the initial velocity that causes the probe to reach the highest <code>y</co
 </div>
 <div id="solution" class="section level3" number="2.1.2">
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
-<p>This was the first puzzle, whihc I solved by logic rather than by coding. With
+<p>This was the first puzzle, which I solved by logic rather than by coding. With
 the given kinetics we can observe the following:</p>
 <ol style="list-style-type: decimal">
 <li>To reach a maximum height, we require <code>y &gt; 0</code> and the higher <code>y</code> the higher
 the maximum height.</li>
-<li>Every trajectory with <code>y_0 &gt; 0</code> will eventually return to the vertical
+<li>Every trajectory with <code>y_0 &gt; 0</code> will eventually return to the horizontal
 baseline at <code>(x / 0)</code>. This is because the <code>y</code> velocity will first decrease
 from <code>y_0</code> to <code>0</code> (reaching a maximum height at <code>sum(1:y_0)</code>) and then further
 decrease until it reaches <code>-y_0</code> which means it decreases exactly
@@ -408,45 +408,48 @@ In the above example, there are <code><em>112</em></code> different initial velo
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
 <p>To get all feasible trajectories, we observe the following points:</p>
 <ol style="list-style-type: decimal">
-<li>The <em>minimal</em> <code>x</code> velocity is the minimal <code>x_0</code> which satisfies
+<li><p>The <em>minimal</em> <code>x</code> velocity is the minimal <code>x_0</code> which satisfies
 <code>sum(1:x_0) &gt;= x_min</code>. Using Gauss we conclude
 <code>(1 + x) * x / 2 &gt;= 48</code> this can be solved by the
-quadratic formula:</li>
-</ol>
+quadratic formula:</p>
 <pre class="r"><code>q_solve &lt;- function(a, b, c) {
-(-b + c(-1, 1) * sqrt(b ^ 2 - 4 * a * c)) / (2 * a)
+ (-b + c(-1, 1) * sqrt(b ^ 2 - 4 * a * c)) / (2 * a)
 }
-sol &lt;- q_solve(1 / 2, 1 / 2, -48)
-(x0min &lt;- ceiling(sol[sol &gt; 0]))</code></pre>
-<pre><code>## [1] 10</code></pre>
-<ol style="list-style-type: decimal">
-<li>We can reach each point <code>(x/y)</code> of the trench exactly by using the trajectory
-<code>(x/-y)</code>.</li>
-<li>Besides these direct trajectories, the maximum <code>x</code> velocity is
+sol &lt;- q_solve(1 / 2, 1 / 2, -puzzle_data[&quot;xmin&quot;])
+ceiling(sol[sol &gt; 0])</code></pre>
+<pre><code>## [1] 10</code></pre></li>
+<li><p>We can reach each point <code>(x/y)</code> of the trench exactly by using the trajectory
+<code>(x/-y)</code>.</p></li>
+<li><p>Besides these direct trajectories, the maximum <code>x</code> velocity is
 <code>ceil(xmax / 2)</code>. If it were <code>ceil(xmax / 2) + 1</code> then the next step would be
 already at <code>ceil(xmax / 2) + 1 + ceil(xmax / 2) + 1 - 1 &gt;= xmax</code> and thus
 overshoot the area. Thus,
-the maximal <code>x</code> velocity is 35.</li>
-<li>Likewise the minimum <code>y</code> velocity is <code>ceil(ymin / 2)</code>, i.e. 
--94.</li>
-<li>As per part 1, the maximum <code>y</code> velocity is 188.</li>
-<li>For each pair <code>(x0 / y0)</code> we can calculate the minimal steps which are needed
+the maximal <code>x</code> velocity is 35.</p></li>
+<li><p>Likewise the minimum <code>y</code> velocity is <code>ceil(ymin / 2)</code>, i.e. 
+-94.</p></li>
+<li><p>As per part 1, the maximum <code>y</code> velocity is 188.</p></li>
+<li><p>For each pair <code>(x0 / y0)</code> we can calculate the minimal steps which are needed
 to reach the trench in both directions, <code>kx</code> and <code>ky</code>, say. Then we take the
 maximum of those two values (<code>k</code>) and check whether we reached the trench after
 <code>k</code> steps. It is not necessary to check any other value, because if we overshoot
 after <code>k</code> steps, we will overshoot after <code>k + 1</code> steps. As we did not reach the
 trench before <code>k</code> steps in at least one direction it also not necessary to check
-any value smaller than <code>k</code>.</li>
-<li>Overall, a semi-intelligent brute-force algorithm, iterates over each pair in
-<code>(10...35/-94...188)</code> calculates <code>k</code>and counts how
-many trajectories reach the trench after <code>k</code> steps and adds <code>prod(dim(puzzle))</code>
-to the result accounting for the direct trajectories.<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a></li>
+any value smaller than <code>k</code>.</p></li>
+<li><p>Overall, a semi-intelligent brute-force algorithm, iterates over each pair in
+<code>(10...35/-94...188)</code> calculates <code>k</code>
+and counts how many trajectories reach the trench after <code>k</code> steps and adds
+<code>prod(dim(puzzle) + 1)</code> to the result accounting for the direct trajectories.<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a></p></li>
 </ol>
 <pre class="r"><code>get_k &lt;- Vectorize(function(x0, y0, dims = puzzle_data) {
-    kx &lt;- q_solve(-1 / 2, 1 / 2, (x0 ^ 2 + x0) / 2 - dims[&quot;xmin&quot;]) %&gt;% 
+    ## solve x0 + x0 - 1 + ... + x0 - k &gt;= dims[&quot;xmin&quot;] w.r.t. k
+    ## (x0 + x0 - k) * (x0 - (x0 - k) + 1) / 2 = dims[&quot;xmin&quot;]
+    ## -1 / 2 * k² + (2x0 - 1) / 2 * k + x0 - d
+    kx &lt;- q_solve(-1 / 2, x0 - 1 / 2, x0 - dims[&quot;xmin&quot;]) %&gt;% 
         ceiling()
-    ky &lt;- q_solve(-1 / 2, 1 / 2, (y0 ^ 2 + y0) / 2 - dims[&quot;ymax&quot;]) %&gt;% 
+    kx &lt;- kx[kx &lt;= x0][[1L]]
+    ky &lt;- q_solve(-1 / 2, y0 - 1 / 2, y0 - dims[&quot;ymax&quot;]) %&gt;% 
         ceiling()
+    ky &lt;- ky[ky &gt;= 0][[1L]]
     max(kx, ky)
 }, c(&quot;x0&quot;, &quot;y0&quot;))
 
@@ -455,7 +458,7 @@ get_x &lt;- Vectorize(function(x0, k) {
     if (k &gt; x0) {
         (x0 + 1) * x0 / 2
     } else {
-        (x0 + 1) * x0 / 2 - (x0 - k + 1) * (x0 - k ) / 2
+        (2 * x0 - k) * (k + 1) / 2
     }
 })
 
@@ -463,7 +466,7 @@ get_y &lt;- Vectorize(function(y0, k) {
     if (k == 0) {
         0
     } else {
-        sum(y0:(y0 - k))
+        (2 * y0 - k) * (k + 1) / 2
     }
 })
 
@@ -472,26 +475,39 @@ is_within &lt;- function(x, y, k, dims = puzzle_data) {
         between(get_y(y, k), dims[&quot;ymin&quot;], dims[&quot;ymax&quot;])
 }
 
-(expand.grid(x = x0min:x0max,
-                 y = y0min:y0max) %&gt;% 
+solve &lt;- function(dims = puzzle_data) {
+    ## total movement in x direction =
+    ## x0 + x0 - 1 + x0 - 2 + ... + 1 = (x0 + 1) * X0 / 2
+    ## To reach the trench we need at least dims[&quot;xmin&quot;] steps in total
+    ## =&gt; solve (x0 + 1) * x0 / 2 = dims[&quot;xmin&quot;] w.r.t to x0
+    x0min &lt;- q_solve(1 / 2, 1 / 2, -dims[&quot;xmin&quot;])
+    x0min &lt;- ceiling(x0min[x0min &gt; 0])
+    x0max &lt;- ceiling(dims[&quot;xmax&quot;] / 2)
+    y0min &lt;- ceiling(dims[&quot;ymin&quot;] / 2)
+    y0max &lt;- abs(dims[&quot;ymin&quot;]) - 1
+    sols &lt;- expand.grid(x = x0min:x0max,
+                              y = y0min:y0max) %&gt;% 
         as_tibble() %&gt;% 
-        mutate(k = get_k(x, y),
-                 hit = is_within(x, y, k)) %&gt;% 
-        pull(hit) %&gt;% 
-        sum()) + 
-    ((diff(range(puzzle_data[c(&quot;xmin&quot;, &quot;xmax&quot;)])) + 1) *
-        (diff(range(puzzle_data[c(&quot;ymin&quot;, &quot;ymax&quot;)])) + 1))</code></pre>
-<pre><code>## [1] 970</code></pre>
+        mutate(k = get_k(x, y, dims),
+                 hits = is_within(x, y, k, dims)) %&gt;% 
+        filter(hits) %&gt;% 
+        nrow()
+    sols + ((diff(range(dims[c(&quot;xmin&quot;, &quot;xmax&quot;)])) + 1) *
+                (diff(range(abs(dims[c(&quot;ymin&quot;, &quot;ymax&quot;)]))) + 1))
+}
+
+solve(puzzle_data)</code></pre>
+<pre><code>## [1] 1733</code></pre>
 </div>
 </div>
 </div>
 <div class="footnotes">
 <hr />
 <ol>
-<li id="fn1"><p>The algo is rather
-stupid, because if for any given <code>(x / yk)</code> we cannot reach the trench, we do
-not need to check any <code>(x / yk + i)</code>. However, due to the small sample size
-we do not really need to fine tune here.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+<li id="fn1"><p>The
+algo is rather stupid, because if for any given <code>(x / yk)</code> we cannot reach the
+trench, we do not need to check any <code>(x / yk + i)</code>. However, due to the small
+sample size we do not really need to fine tune here.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
 </ol>
 </div>
 </div>
