@@ -55,6 +55,16 @@ public:
 		}
 	};
 	
+	long magnitude() {
+		long res = 0;
+		if (this->is_regular()) {
+			res = this->value_;
+		} else {
+			res = 3 * this->left_->magnitude() + 2 * this->right_->magnitude();
+		}	
+		return res;
+	};
+	
 	std::shared_ptr<Node> set_value(const int value) {
 		this->value_ = value;
 		return this->ptr();
@@ -80,8 +90,8 @@ public:
 		bool exploded = false;
 		return this->next(exploded);
 	};
-
-	Node* explode() {
+	
+	std::shared_ptr<Node> explode() {
 		std::shared_ptr<Node> left_nb = neighbor(Position::left);
 		std::shared_ptr<Node> right_nb = neighbor(Position::right);
 		int left_val = this->left_->value_,
@@ -95,17 +105,19 @@ public:
 		this->left_.reset();
 		this->right_.reset();
 		this->value_ = 0;
-		return this;
+		return this->ptr();
 	};
 	
-	Node* split() {
+	std::shared_ptr<Node> split() {
 		int val = this->value_;
 		this->left_ = Node::create();
 		this->left_->set_value(floor(val / 2.0));
 		this->right_ = Node::create();
 		this->right_->set_value(ceil(val / 2.0));
-		return this;
+		return this->ptr();
 	};
+	
+	
 	
 	friend std::ostream& operator<<(std::ostream& os, const Node& rhs);
 private:
@@ -138,7 +150,7 @@ private:
 	};
 	
 	std::shared_ptr<Node> next(bool& exploded) {
-		std::shared_ptr<Node> node;
+		std::shared_ptr<Node> node, node2;
 		if (!exploded) {
 			if (this->is_regular()) {
 				if (this->value() >= 10) {
@@ -150,8 +162,11 @@ private:
 					node = this->ptr();
 				} else {
 					node = this->left_->next(exploded);
-					if (!exploded && !node) {
-						node = this->right_->next(exploded);
+					if (!exploded) {
+						node2 = this->right_->next(exploded);
+						if (!node || exploded) {
+							node = node2;
+						}
 					}
 				}
 			}
@@ -171,26 +186,32 @@ std::ostream& operator<<(std::ostream& os, const Node& rhs) {
 
 class Snailfish {
 public:
-	
 	Snailfish* breed_snailfish(List sf) {
 		this->root_ = Node::create();
 		this->breed_snailfish(sf, this->root_);
 		return this;
 	};
 	
-	std::shared_ptr<Node> root() {
-		return root_;
-	}
-	
-	Snailfish* reduce() {
+	Snailfish* reduce(bool verbose = false) {
 		std::shared_ptr<Node> next_node = this->root_->next();
 		while (next_node) {
 			if (next_node->is_regular()) {
+				if (verbose) {
+					Rcout << "after splitting @" << *next_node << ":\t\t";	
+				}
 				next_node->split();
+				if (verbose) {
+					Rcout << *this << std::endl;
+				}
 			} else {
+				if (verbose) {
+					Rcout << "after exploding @" << *next_node << "\t\t";
+				}
 				next_node->explode();
+				if (verbose) {
+					Rcout << *this << std::endl;
+				}
 			}
-			Rcout << *root_ << std::endl;
 			next_node = this->root_->next();
 		}
 		return this;	
@@ -204,8 +225,12 @@ public:
 		return *this;
 	}
 	
+	long magnitude() {
+		return this->root_->magnitude();
+	}
+	
 	friend std::ostream& operator<<(std::ostream& os, const Snailfish& rhs);
-
+	
 private:
 	std::shared_ptr<Node> root_;
 	
@@ -252,29 +277,17 @@ Snailfish operator+(Snailfish lhs, const Snailfish& rhs) {
 	return lhs;
 }
 
-/*
-
- void reset_depth(std::shared_ptr<Node> node) {
- if (node) {
- if (node->parent.lock()) {
- node->depth = node->parent.lock()->depth + 1;
- }
- reset_depth(node->left);
- reset_depth(node->right);
- }
- }
- 
- */
-
 // [[Rcpp::export]]
-void snailfish(const List& a, const List& b) {
-	Snailfish sf1, sf2;
-	sf1.breed_snailfish(a);
-	sf2.breed_snailfish(b);
-	Rcout << *(sf1 + sf2).reduce() << std::endl;
-	//Rcout << *sfs.explode(sfs.next()) << std::endl;
-	//delete sf;
-	//delete sf1;
+void add_snailfish(const List& sfs) {
+	Snailfish sf0, sfi;
+	sf0.breed_snailfish(sfs[0]);
+	for (auto i = 1; i < 3; i++) {//sfs.length(); i++) {
+		sfi.breed_snailfish(sfs[i]);
+		sf0 = sf0 + sfi;
+		sf0.reduce(true);
+		Rcout << sf0 << std::endl;
+	}
+	Rcout << sf0.magnitude() << std::endl;
 };
 
 
@@ -282,11 +295,22 @@ void snailfish(const List& a, const List& b) {
 ## Rcpp::sourceCpp(here::here("2021", "Task-18", "Snailfish.cpp"))
 library(stringr)
 library(dplyr)
-l <- "[[[[4,3],4],4],[7,[[8,4],9]]]" %>%
+library(purrr)
+l <- "[[[0,[4,5]],[0,0]],[[[4,5],[2,6]],[9,5]]]
+[7,[[[3,7],[4,3]],[[6,3],[8,8]]]]
+[[2,[[0,8],[3,4]]],[[[6,7],1],[7,[1,6]]]]
+[[[[2,4],7],[6,[0,5]]],[[[6,8],[2,8]],[[2,1],[4,5]]]]
+[7,[5,[[3,8],[1,4]]]]
+[[2,[2,2]],[8,[8,1]]]
+[2,9]
+[1,[[[9,3],9],[[9,0],[0,7]]]]
+[[[5,[7,4]],7],1]
+[[[[4,2],2],6],[8,7]]" %>%
+	str_split("\n") %>% 
+	`[[`(1L) %>% 
 	str_replace_all("\\[", "list(") %>% 
-	str_replace_all("\\]", ")") %>% 
-	parse(text = .) %>% 
-	eval()
-k <- list(1L, 1L)
-snailfish(l, k)
+	str_replace_all("\\]", ")") %>%
+	map(~ parse(text = .x) %>% 
+		 	eval())
+add_snailfish(l)
 */
