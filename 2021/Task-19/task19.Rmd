@@ -1,0 +1,330 @@
+---
+params:
+   task_nr: 19
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("2021_%s",
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+  })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+
+code em {
+	font-weight:bold
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- local({
+	lines <- GET(paste0(base_url, "/input"),
+					 session_cookie) %>% 
+		content(encoding = "UTF-8") %>% 
+		str_split("\n") %>% 
+		`[[`(1L) %>% 
+		Filter(nzchar, .)
+	idx <- lines %>% 
+		str_which("^---")
+	map2(idx + 1L,
+		  c(tail(idx, -1L) - 1L, length(lines)),
+		  ~ lines[.x:.y] %>% 
+		  	str_split(",") %>% 
+		  	do.call(rbind, .) %>% 
+		  	{matrix(as.numeric(.), nrow(.))})
+})
+
+sample_data <- local({
+	lines <- "--- scanner 0 ---
+404,-588,-901
+528,-643,409
+-838,591,734
+390,-675,-793
+-537,-823,-458
+-485,-357,347
+-345,-311,381
+-661,-816,-575
+-876,649,763
+-618,-824,-621
+553,345,-567
+474,580,667
+-447,-329,318
+-584,868,-557
+544,-627,-890
+564,392,-477
+455,729,728
+-892,524,684
+-689,845,-530
+423,-701,434
+7,-33,-71
+630,319,-379
+443,580,662
+-789,900,-551
+459,-707,401
+
+--- scanner 1 ---
+686,422,578
+605,423,415
+515,917,-361
+-336,658,858
+95,138,22
+-476,619,847
+-340,-569,-846
+567,-361,727
+-460,603,-452
+669,-402,600
+729,430,532
+-500,-761,534
+-322,571,750
+-466,-666,-811
+-429,-592,574
+-355,545,-477
+703,-491,-529
+-328,-685,520
+413,935,-424
+-391,539,-444
+586,-435,557
+-364,-763,-893
+807,-499,-711
+755,-354,-619
+553,889,-390
+
+--- scanner 2 ---
+649,640,665
+682,-795,504
+-784,533,-524
+-644,584,-595
+-588,-843,648
+-30,6,44
+-674,560,763
+500,723,-460
+609,671,-379
+-555,-800,653
+-675,-892,-343
+697,-426,-610
+578,704,681
+493,664,-388
+-671,-858,530
+-667,343,800
+571,-461,-707
+-138,-166,112
+-889,563,-600
+646,-828,498
+640,759,510
+-630,509,768
+-681,-892,-333
+673,-379,-804
+-742,-814,-386
+577,-820,562
+
+--- scanner 3 ---
+-589,542,597
+605,-692,669
+-500,565,-823
+-660,373,557
+-458,-679,-417
+-488,449,543
+-626,468,-788
+338,-750,-386
+528,-832,-391
+562,-778,733
+-938,-730,414
+543,643,-506
+-524,371,-870
+407,773,750
+-104,29,83
+378,-903,-323
+-778,-728,485
+426,699,580
+-438,-605,-362
+-469,-447,-387
+509,732,623
+647,635,-688
+-868,-804,481
+614,-800,639
+595,780,-596
+
+--- scanner 4 ---
+727,592,562
+-293,-554,779
+441,611,-461
+-714,465,-776
+-743,427,-804
+-660,-479,-426
+832,-632,460
+927,-485,-438
+408,393,-506
+466,436,-512
+110,16,151
+-258,-428,682
+-393,719,612
+-211,-452,876
+808,-476,-593
+-575,615,604
+-485,667,467
+-680,325,-822
+-627,-443,-432
+872,-547,-609
+833,512,582
+807,604,487
+839,-516,451
+891,-625,532
+-652,-548,-490
+30,-46,-14" %>% 
+		str_split("\n") %>% 
+		`[[`(1L) %>% 
+		Filter(nzchar, .)
+	idx <- lines %>% 
+		str_which("^---")
+	map2(idx + 1L,
+		  c(tail(idx, -1L) - 1L, length(lines)),
+		  ~ lines[.x:.y] %>% 
+		  	str_split(",") %>% 
+		  	do.call(rbind, .) %>% 
+		  	{matrix(as.numeric(.), nrow(.))})
+})
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+In a first step we have to find out which beacons any 2 scanners have in common. Since 
+we do not have a reference point, we will calculate all distances between each beacon 
+and match according to distance. If, for instance, beacons `1` and `2` are `123.45` units
+apart for scanner `1`, and beacons `4` and `14` are also `123.45` units apart, we can 
+conclude that beacons map as follows  between scanner `1` and `2`: `1->4` and `2->14`.
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+match_scanners <- function(coords1, coords2) {
+	## get pairwise distances
+	d1 <- dist(coords1)
+	d2 <- dist(coords2)
+	
+	## find out how many matching distances there are per beacon
+	nr_matches <- d1 %>% 
+		as.matrix() %>% 
+		{`dim<-`(. %in% d2, dim(.))} %>% 
+		colSums()
+	
+	if (sum(rel_beacons <- nr_matches == 11L) >= 12L) {
+		## if we have at least 12 matching beacons...
+		## ... reduce first scanner results to these
+		c1 <- coords1[rel_beacons, ]
+		## ... recalculate the distances for the matching beacons
+		rel_dist <- dist(c1)
+
+		## for each of these distances get row and col in the second
+		## distance matrix
+		match_coords <- map(rel_dist[seq(1L, nrow(c1) - 1L)],
+			 ~ which(`dim<-`(as.matrix(d2) == .x, dim(as.matrix(d2))), 
+			 		  arr.ind = TRUE))
+		## however, for each matching we will get 2 positions (matrix is symmetric)
+		## chose the one which occurs everywhere and bring it to long format
+		match_coords <- match_coords %>% 
+			reduce(~ inner_join(as_tibble(.x),
+									  as_tibble(.y),
+									  "row")) %>% 
+			pivot_longer(everything())
+		
+		## match_coords$value is now the the row posiiton in coords2 of matching
+		## beacons with c1
+	}
+	list(c1, coords2[match_coords$value, ], match_coords)
+
+}
+```
+
+### Solution
+
+
+```{r solution-a}
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+
+```{r solution-b, eval = length(puzzle) > 1}
+```
+
