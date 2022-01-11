@@ -1,0 +1,348 @@
+---
+params:
+   task_nr: 19
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("2021_%s",
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+
+code em {
+font-weight:bold
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(digest)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- local({
+	lines <- GET(paste0(base_url, "/input"),
+					 session_cookie) %>% 
+		content(encoding = "UTF-8") %>% 
+		str_split("\n") %>% 
+		`[[`(1L) %>% 
+		Filter(nzchar, .)
+	idx <- lines %>% 
+		str_which("^---")
+	map2(idx + 1L,
+		  c(tail(idx, -1L) - 1L, length(lines)),
+		  ~ lines[.x:.y] %>% 
+		  	str_split(",") %>% 
+		  	do.call(rbind, .) %>% 
+		  	{matrix(as.numeric(.), nrow(.))})
+})
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1L]])
+```
+
+
+### Solution
+
+In a first step we have to find out which beacons any 2 scanners have in common. Since 
+we do not have a reference point, we will calculate all distances between each beacon 
+and match according to this distance. This works nicely, as the distance is
+invariant to any rotation (we do not stretch).
+
+If, for instance, beacons `1` and `2` are `123.45` units apart for scanner `1`, 
+and beacons `4` and `14` are also `123.45` units apart, we can conclude that 
+beacons map as follows between scanner `1` and `2`: `1->4` and `2->14`.
+
+Once we established the common beacons, we have to apply all possible rotations
+and check if the difference between the common beacons of scanner 1 and the 
+beacons of the rotated scanner 2 became constant across all beacons. This yields
+the offset between scanner 1 and 2.
+
+We apply this idea to the initial list of scanners to get all scanners which have 
+beacons in common with scanner 1. These scanners are removed from the list of
+unmatched scanners. If the list of unmatched scanners is not empty yet, we continue 
+with the first element in the list of matched scanners after scanner 1. In this way
+we will eventually match all scanners. All we have to do then is to align all 
+scanners by recursively applying the rotation and adding the offset and count the 
+unique beacons.
+
+```{r solution-a}
+rotate <- function(alpha, beta, gamma) {
+	c(cos(beta) * cos(gamma), 
+	  cos(beta) * sin(gamma), 
+	  -sin(beta), 
+	  sin(alpha) * sin(beta) * cos(gamma) - cos(alpha) * sin(gamma), 
+	  sin(alpha) * sin(beta) * sin(gamma) + cos(alpha) * cos(gamma),
+	  sin(alpha) * cos(beta), 
+	  cos(alpha) * sin(beta) * cos(gamma) + sin(alpha) * sin(gamma),
+	  cos(alpha) * sin(beta) * sin(gamma) - sin(alpha) * cos(gamma), 
+	  cos(alpha) * cos(beta)) %>% 
+		round(0) %>% 
+		as.integer() %>% 
+		matrix(3, 3)
+}
+
+angle <- 0:3 * pi / 2
+par <- expand.grid(alpha = angle, beta = angle, gamma = angle) %>% 
+	as_tibble()
+## remove identical rotation matrices
+rot_mat <- par %>% 
+	pmap(rotate) %>% 
+	`[`(!duplicated(.))
+
+match_scanners <- function(coords1, coords2) {
+	## get pairwise distances
+	d1 <- dist(coords1)
+	d2 <- dist(coords2)
+	
+	## find out how many matching distances there are per beacon
+	nr_matches <- d1 %>% 
+		as.matrix() %>% 
+		{`dim<-`(. %in% d2, dim(.))} %>% 
+		colSums()
+	
+	if (sum(rel_beacons <- nr_matches == 11L) >= 12L) {
+		## if we have at least 12 matching beacons...
+		## ... reduce first scanner results to these
+		c1 <- coords1[rel_beacons, ]
+		## ... recalculate the distances for the matching beacons
+		rel_dist <- dist(c1)
+		
+		## for each of these distances get row and col in the second
+		## distance matrix
+		match_coords <- map(rel_dist[seq(1L, nrow(c1) - 1L)],
+								  ~ which(`dim<-`(as.matrix(d2) == .x, 
+								  					 dim(as.matrix(d2))), 
+								  		  arr.ind = TRUE))
+		## however, for each matching we will get 2 positions (matrix is symmetric)
+		## chose the one which occurs everywhere and bring it to long format
+		match_coords <- match_coords %>% 
+			reduce(~ inner_join(as_tibble(.x),
+									  as_tibble(.y),
+									  "row")) %>% 
+			pivot_longer(everything())
+		
+		## now match_coords$value contains the beacons in order for the second
+		## scanner
+		c2 <- coords2[match_coords$value, ]
+		stopifnot(isTRUE(all.equal(dist(c1), dist(c2), check.attributes = FALSE)))
+		
+		## c1 and c2 are not the common beacons and also aligned
+		## find proper rotation such that diff is constant
+		
+		for (rm in rot_mat) {
+			offset <- c1 - c2 %*% rm
+			if (sum(!duplicated(offset)) == 1L) {
+				## we have one single offset
+				break;
+			}
+		}
+		stopifnot(all.equal(c1, t(t(c2 %*% rm) + offset[1, ])))
+		res <- tibble(base = digest(coords1),
+						  self = digest(coords2),
+						  orig = list(coords2), 
+						  offset = list(matrix(offset[1, ], 1, 3)),
+						  rotation = list(rm))
+	} else {
+		## no matching beacons
+		res <- tibble(base = list(), self = list(), orig = list(), 
+						  offset = list(), rotation = list())
+	}
+	res
+}
+
+remove_from_list <- function(lst, el) {
+	dupes <- !duplicated(c(list(el), lst))
+	lst[tail(dupes, -1L)]
+}
+
+rebase <- function(res) {
+	get_value <- function(hash, what) {
+		res %>% filter(self == hash) %>% 
+			pull(what) %>% 
+			`[[`(1L)
+	}
+	## each scanner is relative to another scanner, that is
+	## self->base, we follow these path until we reach the
+	## baseline
+	lkp <- res %>% 
+		pull(base) %>% 
+		set_names(res %>% pull(self))
+	base0 <- lkp[lkp == names(lkp)]
+	new_offsets <- new_rotations <- vector("list", nrow(res)) %>% 
+		set_names(names(lkp))
+	for (hash in names(lkp)) {
+		orig_hash <- hash
+		offset <- get_value(hash, "offset")
+		rm <- get_value(hash, "rotation")
+		while (hash != base0) {
+			## we follow the path at each offset is already in terms of
+			## coordinates of the new base, that is we have first to
+			## rotate the old offsets to align them to the new base
+			## and then add the offset of this base (which is already in
+			## coorindates of the base of this base)
+			hash <- lkp[hash]
+			offset <- (offset %*% get_value(hash, "rotation")) + 
+				get_value(hash, "offset")
+			## also rotate the rotation matrix such that in the end offset
+			## and rotation are relative to base0
+			rm <- rm %*% get_value(hash, "rotation")
+		}
+		new_offsets[[orig_hash]] <- offset
+		new_rotations[[orig_hash]] <- rm
+	}
+	res %>% 
+		mutate(offset = new_offsets,
+				 rotation = new_rotations)
+}
+
+count_unique_beacons <- function(res) {
+	## we need to pass the rebased offsets and rotations,
+	## then all we have to is to rotate and add the offset
+	shift <- function(orig, offset, rotation, ...) {
+		t(t(orig %*% rotation) + c(offset))
+	}
+	## and count the number of unique beacons
+	pmap(res, shift) %>% 
+		do.call(rbind, .) %>% 
+		unique() %>% 
+		nrow()
+}
+
+get_all_offsets <- function(scanner_data = puzzle_data) {
+	## start wiht the first scanner
+	matched <- head(scanner_data, 1L)
+	## all other scanners are unmatched
+	unmatched <- tail(scanner_data, -1L)
+	offsets <- vector("list", length(scanner_data))
+	idx <- 1L
+	coords0 <- tail(matched, 1L)[[1L]]
+	offsets[[1L]] <- tibble(base = digest(coords0), self = digest(coords0),
+									orig = list(coords0), 
+									offset = list(matrix(rep(0, 3), 1, 3)), 
+									rotation = list(diag(3)))
+	while (length(unmatched)) {
+		## while there are unmatched sensors, pop the last matched sensor
+		coords0 <- tail(matched, 1L)[[1L]]
+		matched <- head(matched, -1L)
+		for (coords1 in unmatched) {
+			## and loop through all unmatched sensors
+			res <- match_scanners(coords0, coords1)
+			if (nrow(res)) {
+				## if we find a match
+				idx <- idx + 1L
+				offsets[[idx]] <- res
+				## store the results and rmeove the matched sensor from 
+				## the unmatched list
+				## N.B. to later identify sensors we hash them to be able
+				## to walk back eventually to base0 
+				matched <- c(matched, list(coords1))
+				unmatched <- remove_from_list(unmatched, coords1)
+			}
+		}	
+	}
+	do.call(rbind, offsets)
+}
+
+coords <- get_all_offsets() %>%
+	rebase()
+
+coords %>% 
+	count_unique_beacons()
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+As we calculated already the relative positions of the scanners for part 1, all we
+need to do is to get all pairwise distances.
+
+```{r solution-b, eval = length(puzzle) > 1}
+outer(coords$offset, 
+		coords$offset, 
+		\(x, y) map2_dbl(x, y, ~ sum(abs(.x - .y)))) %>% 
+	max()
+```
+
