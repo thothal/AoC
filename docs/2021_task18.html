@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2022-01-07" />
+        <meta name="date" content="2022-01-11" />
     
     <title>Task 18   </title>
 
@@ -127,6 +127,7 @@
             <ul>
             <li><a href="#part-1"><span class="toc-section-number">2.1</span> Part 1</a></li>
             <li><a href="#part-2"><span class="toc-section-number">2.2</span> Part 2</a></li>
+            <li><a href="#old-r-solution"><span class="toc-section-number">2.3</span> Old R Solution</a></li>
             </ul></li>
             </ul>
           </div>
@@ -144,7 +145,7 @@
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2022-01-07</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2022-01-11</p>
            
 
    
@@ -172,6 +173,8 @@ code em {
     font-weight:bold
 }
 </style>
+<script src="data:application/javascript; charset=utf-8;base64,UHJpc20ubGFuZ3VhZ2VzLmM9UHJpc20ubGFuZ3VhZ2VzLmV4dGVuZCgiY2xpa2UiLHtjb21tZW50OntwYXR0ZXJuOi9cL1wvKD86W15cclxuXFxdfFxcKD86XHJcbj98XG58KD8hW1xyXG5dKSkpKnxcL1wqW1xzXFNdKj8oPzpcKlwvfCQpLyxncmVlZHk6ITB9LHN0cmluZzp7cGF0dGVybjovIig/OlxcKD86XHJcbnxbXHNcU10pfFteIlxcXHJcbl0pKiIvLGdyZWVkeTohMH0sImNsYXNzLW5hbWUiOntwYXR0ZXJuOi8oXGIoPzplbnVtfHN0cnVjdClccysoPzpfX2F0dHJpYnV0ZV9fXHMqXChcKFtcc1xTXSo/XClcKVxzKik/KVx3K3xcYlthLXpdXHcqX3RcYi8sbG9va2JlaGluZDohMH0sa2V5d29yZDovXGIoPzpfQWxpZ25hc3xfQWxpZ25vZnxfQXRvbWljfF9Cb29sfF9Db21wbGV4fF9HZW5lcmljfF9JbWFnaW5hcnl8X05vcmV0dXJufF9TdGF0aWNfYXNzZXJ0fF9UaHJlYWRfbG9jYWx8X19hdHRyaWJ1dGVfX3xhc218YXV0b3xicmVha3xjYXNlfGNoYXJ8Y29uc3R8Y29udGludWV8ZGVmYXVsdHxkb3xkb3VibGV8ZWxzZXxlbnVtfGV4dGVybnxmbG9hdHxmb3J8Z290b3xpZnxpbmxpbmV8aW50fGxvbmd8cmVnaXN0ZXJ8cmV0dXJufHNob3J0fHNpZ25lZHxzaXplb2Z8c3RhdGljfHN0cnVjdHxzd2l0Y2h8dHlwZWRlZnx0eXBlb2Z8dW5pb258dW5zaWduZWR8dm9pZHx2b2xhdGlsZXx3aGlsZSlcYi8sZnVuY3Rpb246L1xiW2Etel9dXHcqKD89XHMqXCgpL2ksbnVtYmVyOi8oPzpcYjB4KD86W1xkYS1mXSsoPzpcLltcZGEtZl0qKT98XC5bXGRhLWZdKykoPzpwWystXT9cZCspP3woPzpcYlxkKyg/OlwuXGQqKT98XEJcLlxkKykoPzplWystXT9cZCspPylbZnVsXXswLDR9L2ksb3BlcmF0b3I6Lz4+PT98PDw9P3wtPnwoWy0rJnw6XSlcMXxbPzp+XXxbLSsqLyUmfF4hPTw+XT0/L30pLFByaXNtLmxhbmd1YWdlcy5pbnNlcnRCZWZvcmUoImMiLCJzdHJpbmciLHtjaGFyOntwYXR0ZXJuOi8nKD86XFwoPzpcclxufFtcc1xTXSl8W14nXFxcclxuXSl7MCwzMn0nLyxncmVlZHk6ITB9fSksUHJpc20ubGFuZ3VhZ2VzLmluc2VydEJlZm9yZSgiYyIsInN0cmluZyIse21hY3JvOntwYXR0ZXJuOi8oXltcdCBdKikjXHMqW2Etel0oPzpbXlxyXG5cXC9dfFwvKD8hXCopfFwvXCooPzpbXipdfFwqKD8hXC8pKSpcKlwvfFxcKD86XHJcbnxbXHNcU10pKSovaW0sbG9va2JlaGluZDohMCxncmVlZHk6ITAsYWxpYXM6InByb3BlcnR5IixpbnNpZGU6e3N0cmluZzpbe3BhdHRlcm46L14oI1xzKmluY2x1ZGVccyopPFtePl0rPi8sbG9va2JlaGluZDohMH0sUHJpc20ubGFuZ3VhZ2VzLmMuc3RyaW5nXSxjaGFyOlByaXNtLmxhbmd1YWdlcy5jLmNoYXIsY29tbWVudDpQcmlzbS5sYW5ndWFnZXMuYy5jb21tZW50LCJtYWNyby1uYW1lIjpbe3BhdHRlcm46LyheI1xzKmRlZmluZVxzKylcdytcYig/IVwoKS9pLGxvb2tiZWhpbmQ6ITB9LHtwYXR0ZXJuOi8oXiNccypkZWZpbmVccyspXHcrXGIoPz1cKCkvaSxsb29rYmVoaW5kOiEwLGFsaWFzOiJmdW5jdGlvbiJ9XSxkaXJlY3RpdmU6e3BhdHRlcm46L14oI1xzKilbYS16XSsvLGxvb2tiZWhpbmQ6ITAsYWxpYXM6ImtleXdvcmQifSwiZGlyZWN0aXZlLWhhc2giOi9eIy8scHVuY3R1YXRpb246LyMjfFxcKD89W1xyXG5dKS8sZXhwcmVzc2lvbjp7cGF0dGVybjovXFNbXHNcU10qLyxpbnNpZGU6UHJpc20ubGFuZ3VhZ2VzLmN9fX19KSxQcmlzbS5sYW5ndWFnZXMuaW5zZXJ0QmVmb3JlKCJjIiwiZnVuY3Rpb24iLHtjb25zdGFudDovXGIoPzpFT0Z8TlVMTHxTRUVLX0NVUnxTRUVLX0VORHxTRUVLX1NFVHxfX0RBVEVfX3xfX0ZJTEVfX3xfX0xJTkVfX3xfX1RJTUVTVEFNUF9ffF9fVElNRV9ffF9fZnVuY19ffHN0ZGVycnxzdGRpbnxzdGRvdXQpXGIvfSksZGVsZXRlIFByaXNtLmxhbmd1YWdlcy5jLmJvb2xlYW47" integrity="sha512-8VrjxGFLIkS0mgEmO3p46A5OkqATHhrNVwyv2V7yUeZrk1jmSDuI3SOEpC9XHEHUWEOsfzzcJeBlUkee9lKGrw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="data:application/javascript; charset=utf-8;base64,IWZ1bmN0aW9uKGUpe3ZhciB0PS9cYig/OmFsaWduYXN8YWxpZ25vZnxhc218YXV0b3xib29sfGJyZWFrfGNhc2V8Y2F0Y2h8Y2hhcnxjaGFyMTZfdHxjaGFyMzJfdHxjaGFyOF90fGNsYXNzfGNvX2F3YWl0fGNvX3JldHVybnxjb195aWVsZHxjb21wbHxjb25jZXB0fGNvbnN0fGNvbnN0X2Nhc3R8Y29uc3RldmFsfGNvbnN0ZXhwcnxjb25zdGluaXR8Y29udGludWV8ZGVjbHR5cGV8ZGVmYXVsdHxkZWxldGV8ZG98ZG91YmxlfGR5bmFtaWNfY2FzdHxlbHNlfGVudW18ZXhwbGljaXR8ZXhwb3J0fGV4dGVybnxmaW5hbHxmbG9hdHxmb3J8ZnJpZW5kfGdvdG98aWZ8aW1wb3J0fGlubGluZXxpbnR8aW50MTZfdHxpbnQzMl90fGludDY0X3R8aW50OF90fGxvbmd8bW9kdWxlfG11dGFibGV8bmFtZXNwYWNlfG5ld3xub2V4Y2VwdHxudWxscHRyfG9wZXJhdG9yfG92ZXJyaWRlfHByaXZhdGV8cHJvdGVjdGVkfHB1YmxpY3xyZWdpc3RlcnxyZWludGVycHJldF9jYXN0fHJlcXVpcmVzfHJldHVybnxzaG9ydHxzaWduZWR8c2l6ZW9mfHN0YXRpY3xzdGF0aWNfYXNzZXJ0fHN0YXRpY19jYXN0fHN0cnVjdHxzd2l0Y2h8dGVtcGxhdGV8dGhpc3x0aHJlYWRfbG9jYWx8dGhyb3d8dHJ5fHR5cGVkZWZ8dHlwZWlkfHR5cGVuYW1lfHVpbnQxNl90fHVpbnQzMl90fHVpbnQ2NF90fHVpbnQ4X3R8dW5pb258dW5zaWduZWR8dXNpbmd8dmlydHVhbHx2b2lkfHZvbGF0aWxlfHdjaGFyX3R8d2hpbGUpXGIvLG49IlxcYig/ITxrZXl3b3JkPilcXHcrKD86XFxzKlxcLlxccypcXHcrKSpcXGIiLnJlcGxhY2UoLzxrZXl3b3JkPi9nLGZ1bmN0aW9uKCl7cmV0dXJuIHQuc291cmNlfSk7ZS5sYW5ndWFnZXMuY3BwPWUubGFuZ3VhZ2VzLmV4dGVuZCgiYyIseyJjbGFzcy1uYW1lIjpbe3BhdHRlcm46UmVnRXhwKCIoXFxiKD86Y2xhc3N8Y29uY2VwdHxlbnVtfHN0cnVjdHx0eXBlbmFtZSlcXHMrKSg/ITxrZXl3b3JkPilcXHcrIi5yZXBsYWNlKC88a2V5d29yZD4vZyxmdW5jdGlvbigpe3JldHVybiB0LnNvdXJjZX0pKSxsb29rYmVoaW5kOiEwfSwvXGJbQS1aXVx3Kig/PVxzKjo6XHMqXHcrXHMqXCgpLywvXGJbQS1aX11cdyooPz1ccyo6OlxzKn5cdytccypcKCkvaSwvXGJcdysoPz1ccyo8KD86W148Pl18PCg/OltePD5dfDxbXjw+XSo+KSo+KSo+XHMqOjpccypcdytccypcKCkvXSxrZXl3b3JkOnQsbnVtYmVyOntwYXR0ZXJuOi8oPzpcYjBiWzAxJ10rfFxiMHgoPzpbXGRhLWYnXSsoPzpcLltcZGEtZiddKik/fFwuW1xkYS1mJ10rKSg/OnBbKy1dP1tcZCddKyk/fCg/OlxiW1xkJ10rKD86XC5bXGQnXSopP3xcQlwuW1xkJ10rKSg/OmVbKy1dP1tcZCddKyk/KVtmdWxdezAsNH0vaSxncmVlZHk6ITB9LG9wZXJhdG9yOi8+Pj0/fDw8PT98LT58LS18XCtcK3wmJnxcfFx8fFs/On5dfDw9PnxbLSsqLyUmfF4hPTw+XT0/fFxiKD86YW5kfGFuZF9lcXxiaXRhbmR8Yml0b3J8bm90fG5vdF9lcXxvcnxvcl9lcXx4b3J8eG9yX2VxKVxiLyxib29sZWFuOi9cYig/OmZhbHNlfHRydWUpXGIvfSksZS5sYW5ndWFnZXMuaW5zZXJ0QmVmb3JlKCJjcHAiLCJzdHJpbmciLHttb2R1bGU6e3BhdHRlcm46UmVnRXhwKCcoXFxiKD86aW1wb3J0fG1vZHVsZSlcXHMrKSg/OiIoPzpcXFxcKD86XHJcbnxbXl0pfFteIlxcXFxcclxuXSkqInw8W148PlxyXG5dKj58JysiPG1vZC1uYW1lPig/Olxccyo6XFxzKjxtb2QtbmFtZT4pP3w6XFxzKjxtb2QtbmFtZT4iLnJlcGxhY2UoLzxtb2QtbmFtZT4vZyxmdW5jdGlvbigpe3JldHVybiBufSkrIikiKSxsb29rYmVoaW5kOiEwLGdyZWVkeTohMCxpbnNpZGU6e3N0cmluZzovXls8Il1bXHNcU10rLyxvcGVyYXRvcjovOi8scHVuY3R1YXRpb246L1wuL319LCJyYXctc3RyaW5nIjp7cGF0dGVybjovUiIoW14oKVxcIF17MCwxNn0pXChbXHNcU10qP1wpXDEiLyxhbGlhczoic3RyaW5nIixncmVlZHk6ITB9fSksZS5sYW5ndWFnZXMuaW5zZXJ0QmVmb3JlKCJjcHAiLCJrZXl3b3JkIix7ImdlbmVyaWMtZnVuY3Rpb24iOntwYXR0ZXJuOi9cYig/IW9wZXJhdG9yXGIpW2Etel9dXHcqXHMqPCg/OltePD5dfDxbXjw+XSo+KSo+KD89XHMqXCgpL2ksaW5zaWRlOntmdW5jdGlvbjovXlx3Ky8sZ2VuZXJpYzp7cGF0dGVybjovPFtcc1xTXSsvLGFsaWFzOiJjbGFzcy1uYW1lIixpbnNpZGU6ZS5sYW5ndWFnZXMuY3BwfX19fSksZS5sYW5ndWFnZXMuaW5zZXJ0QmVmb3JlKCJjcHAiLCJvcGVyYXRvciIseyJkb3VibGUtY29sb24iOntwYXR0ZXJuOi86Oi8sYWxpYXM6InB1bmN0dWF0aW9uIn19KSxlLmxhbmd1YWdlcy5pbnNlcnRCZWZvcmUoImNwcCIsImNsYXNzLW5hbWUiLHsiYmFzZS1jbGF1c2UiOntwYXR0ZXJuOi8oXGIoPzpjbGFzc3xzdHJ1Y3QpXHMrXHcrXHMqOlxzKilbXjt7fSInXHNdKyg/OlxzK1teO3t9Iidcc10rKSooPz1ccypbO3tdKS8sbG9va2JlaGluZDohMCxncmVlZHk6ITAsaW5zaWRlOmUubGFuZ3VhZ2VzLmV4dGVuZCgiY3BwIix7fSl9fSksZS5sYW5ndWFnZXMuaW5zZXJ0QmVmb3JlKCJpbnNpZGUiLCJkb3VibGUtY29sb24iLHsiY2xhc3MtbmFtZSI6L1xiW2Etel9dXHcqXGIoPyFccyo6OikvaX0sZS5sYW5ndWFnZXMuY3BwWyJiYXNlLWNsYXVzZSJdKX0oUHJpc20pOw==" integrity="sha512-UYkJiZs5kymKJMPLLVBpexawnvmoh9jMW9H10z96GF8ldp6SDS8FI4BhBMa2rbHoCyc8mc8gSAMgqIj6NXtmYg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <div id="setup" class="section level1" number="1">
 <h1><span class="header-section-number">1</span> Setup</h1>
 <div id="libraries" class="section level2" number="1.1">
@@ -435,6 +438,398 @@ Add up all of the snailfish numbers from the homework assignment in the order th
 </div>
 <div id="solution" class="section level3" number="2.1.2">
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
+<p>The first working solution used <code>R6</code> reference classes and was <code>R</code> based. While
+technically working, it was far from being efficient. The recursive class definition
+coupled wiht environments, required a lot of copying arguments back and forth and was thus
+awfully slow. In order to hone my <code>C++</code> skills and to learn how to use
+<a href="http://dirk.eddelbuettel.com/code/rcpp.html">Rcpp</a>, I re-wrote the whole solution in
+<code>C++</code> and instead of a running time of several hours I was rewarded with instantaneous
+results. Again, the long running time resulted from my choice of <code>R6</code> together with a
+recursive class design, which is not a good match, knowing <code>R&#39;s</code> copy-on-modify semantics.</p>
+<pre class="cpp"><code>#include &lt;Rcpp.h&gt;
+#include &lt;iostream&gt;
+#include &lt;memory&gt;
+using namespace Rcpp;
+
+enum Position {
+    left,
+    right,
+    root
+};
+
+class Node: public std::enable_shared_from_this&lt;Node&gt; {
+public:
+
+    [[nodiscard]] static std::shared_ptr&lt;Node&gt; create() {
+        return std::shared_ptr&lt;Node&gt;(new Node());
+    };
+    
+    bool is_regular() const {
+        return !this-&gt;left_ &amp;&amp; !this-&gt;right_;
+    };
+    
+    bool is_root() const {
+        return !this-&gt;parent_.lock();
+    };
+    
+    std::shared_ptr&lt;Node&gt; ptr() {
+        return shared_from_this();
+    };
+    
+    unsigned int depth() const {
+        unsigned int depth = 0;
+        std::shared_ptr&lt;Node&gt; pa = this-&gt;parent_.lock();
+        while (pa) {
+            depth++;
+            pa = pa-&gt;parent_.lock();
+        }
+        return depth;
+    }
+    
+    int value() const {
+        return this-&gt;value_;
+    };
+    
+    Position position() {
+        if (!this-&gt;is_root()) {
+            std::shared_ptr&lt;Node&gt; pa = this-&gt;parent_.lock();
+            if (this-&gt;ptr() == pa-&gt;left_) {
+                return Position::left;
+            } else {
+                return Position::right;
+            }
+        } else {
+            return Position::root;
+        }
+    };
+    
+    long magnitude() {
+        long res = 0;
+        if (this-&gt;is_regular()) {
+            res = this-&gt;value_;
+        } else {
+            res = 3 * this-&gt;left_-&gt;magnitude() + 
+                2 * this-&gt;right_-&gt;magnitude();
+        }   
+        return res;
+    };
+    
+    std::shared_ptr&lt;Node&gt; set_value(const int value) {
+        this-&gt;value_ = value;
+        return this-&gt;ptr();
+    };
+    
+    std::shared_ptr&lt;Node&gt; set_child(std::shared_ptr&lt;Node&gt; kid, 
+                                 const Position pos) {
+        kid-&gt;parent_ = this-&gt;ptr();
+        if (pos == Position::left) {
+            this-&gt;left_ = kid;
+        } else {
+            this-&gt;right_ = kid;
+        }
+        return this-&gt;ptr();
+    };
+    
+    std::shared_ptr&lt;Node&gt; 
+        set_childs(const std::array&lt;std::shared_ptr&lt;Node&gt;, 2&gt;&amp; kids) {
+        this-&gt;set_child(kids[0], Position::left);
+        this-&gt;set_child(kids[1], Position::right);
+        return this-&gt;ptr();
+    };
+    
+    std::shared_ptr&lt;Node&gt; next() {
+        bool exploded = false;
+        return this-&gt;next(exploded);
+    };
+    
+    std::shared_ptr&lt;Node&gt; explode() {
+        std::shared_ptr&lt;Node&gt; left_nb = neighbor(Position::left);
+        std::shared_ptr&lt;Node&gt; right_nb = neighbor(Position::right);
+        int left_val = this-&gt;left_-&gt;value_,
+            right_val = this-&gt;right_-&gt;value_;
+        if (left_nb) {
+            left_nb-&gt;value_ += left_val;
+        }
+        if (right_nb) {
+            right_nb-&gt;value_ += right_val;
+        }
+        this-&gt;left_.reset();
+        this-&gt;right_.reset();
+        this-&gt;value_ = 0;
+        return this-&gt;ptr();
+    };
+    
+    std::shared_ptr&lt;Node&gt; split() {
+        int val = this-&gt;value_;
+        std::shared_ptr&lt;Node&gt; left, right;
+        left = Node::create();
+        left-&gt;set_value(floor(val / 2.0));
+        right = Node::create();
+        right-&gt;set_value(ceil(val / 2.0));
+        std::array&lt;std::shared_ptr&lt;Node&gt;, 2&gt; kids = {left, right};
+        this-&gt;set_childs(kids);
+        return this-&gt;ptr();
+    };
+    
+    
+    
+    friend std::ostream&amp; operator&lt;&lt;(std::ostream&amp; os, const Node&amp; rhs);
+private:
+    // Do not allow direct init to force use of create
+    Node() = default;
+    int value_;
+    std::weak_ptr&lt;Node&gt; parent_;
+    std::shared_ptr&lt;Node&gt; left_;
+    std::shared_ptr&lt;Node&gt; right_;
+    
+    std::shared_ptr&lt;Node&gt; neighbor(const Position dir) {
+        std::shared_ptr&lt;Node&gt; me = this-&gt;ptr();
+        std::shared_ptr&lt;Node&gt; pa = this-&gt;parent_.lock();
+        while (pa &amp;&amp; me-&gt;position() == dir) {
+            me = pa;
+            pa = pa-&gt;parent_.lock();
+        }
+        if (pa) {
+            Position new_dir = dir;
+            while (!pa-&gt;is_regular()) {
+                if (new_dir == Position::left) {
+                    pa = pa-&gt;left_;
+                } else {
+                    pa = pa-&gt;right_;
+                }
+                new_dir = dir == Position::left ? Position::right : Position::left;
+            }
+        }
+        return pa;
+    };
+    
+    std::shared_ptr&lt;Node&gt; next(bool&amp; exploded) {
+        std::shared_ptr&lt;Node&gt; node, node2;
+        if (!exploded) {
+            if (this-&gt;is_regular()) {
+                if (this-&gt;value() &gt;= 10) {
+                    node = this-&gt;ptr();
+                }
+            } else {
+                if (this-&gt;depth() == 4) {
+                    exploded = true;
+                    node = this-&gt;ptr();
+                } else {
+                    node = this-&gt;left_-&gt;next(exploded);
+                    if (!exploded) {
+                        node2 = this-&gt;right_-&gt;next(exploded);
+                        if (node2 &amp;&amp; (!node || exploded)) {
+                            node = node2;
+                        }
+                    }
+                }
+            }
+        }
+        return node;
+    };
+};
+
+std::ostream&amp; operator&lt;&lt;(std::ostream&amp; os, const Node&amp; rhs) {
+    if (rhs.is_regular()) {
+        os &lt;&lt; rhs.value();
+    } else {
+        os &lt;&lt; &quot;[&quot; &lt;&lt; *rhs.left_ &lt;&lt; &quot;,&quot; &lt;&lt; *rhs.right_ &lt;&lt; &quot;]&quot;;
+    }
+    return os;
+};
+
+class Snailfish {
+public:
+
+    Snailfish* breed_snailfish(List sf) {
+        this-&gt;root_ = Node::create();
+        this-&gt;breed_snailfish(sf, this-&gt;root_);
+        return this;
+    };
+    
+    Snailfish* reduce(bool verbose = false) {
+        std::shared_ptr&lt;Node&gt; next_node = this-&gt;root_-&gt;next();
+        while (next_node) {
+            if (next_node-&gt;is_regular()) {
+                if (verbose) {
+                    Rcout &lt;&lt; &quot;after splitting @&quot; &lt;&lt; *next_node &lt;&lt; &quot;:\t\t&quot;;  
+                }
+                next_node-&gt;split();
+                if (verbose) {
+                    Rcout &lt;&lt; *this &lt;&lt; std::endl;
+                }
+            } else {
+                if (verbose) {
+                    Rcout &lt;&lt; &quot;after exploding @&quot; &lt;&lt; *next_node &lt;&lt; &quot;\t\t&quot;;
+                }
+                next_node-&gt;explode();
+                if (verbose) {
+                    Rcout &lt;&lt; *this &lt;&lt; std::endl;
+                }
+            }
+            next_node = this-&gt;root_-&gt;next();
+        }
+        return this;    
+    };
+    
+    Snailfish&amp; operator+=(const Snailfish&amp; rhs) {
+        std::shared_ptr&lt;Node&gt; new_root = Node::create();
+        std::array&lt;std::shared_ptr&lt;Node&gt;, 2&gt; kids = 
+            {this-&gt;root_, rhs.root_};
+        new_root-&gt;set_childs(kids);
+        this-&gt;root_ = new_root;
+        return *this;
+    }
+    
+    long magnitude() {
+        return this-&gt;root_-&gt;magnitude();
+    }
+    
+    friend std::ostream&amp; operator&lt;&lt;(std::ostream&amp; os, 
+                                 const Snailfish&amp; rhs);
+    
+private:
+    std::shared_ptr&lt;Node&gt; root_;
+    
+    void breed_snailfish(List sf, std::shared_ptr&lt;Node&gt; parent) {
+        if (sf.length() != 2) {
+            stop(&quot;&#39;sf&#39; must be a list of length 2&quot;);
+        }
+        SEXP left_el = sf[0],
+                   right_el = sf[1];
+        SEXPTYPE left_type  = TYPEOF(left_el),
+            right_type = TYPEOF(right_el);
+        std::shared_ptr&lt;Node&gt; left_node = Node::create();
+        std::shared_ptr&lt;Node&gt; right_node = Node::create();
+        
+        if (left_type == INTSXP) {
+            // leaf node
+            left_node-&gt;set_value(*INTEGER(left_el));
+        } else if (left_type == REALSXP){
+            left_node-&gt;set_value((int) *REAL(left_el));
+        } else if (left_type == VECSXP) {
+            breed_snailfish(left_el, left_node); 
+        }
+        
+        if (right_type == INTSXP) {
+            // leaf node
+            right_node-&gt;set_value(*INTEGER(right_el));
+        } else if (right_type == REALSXP){
+            right_node-&gt;set_value((int) *REAL(right_el));
+        } else if (right_type == VECSXP) {
+            breed_snailfish(right_el, right_node); 
+        }       
+        std::array&lt;std::shared_ptr&lt;Node&gt;, 2&gt; kids = 
+            {left_node, right_node};
+        parent-&gt;set_childs(kids);
+    };
+};
+
+std::ostream&amp; operator&lt;&lt;(std::ostream&amp; os, const Snailfish&amp; rhs) {
+    os &lt;&lt; *rhs.root_;
+    return os;
+};
+
+Snailfish operator+(Snailfish lhs, const Snailfish&amp; rhs) {
+    lhs += rhs;
+    return lhs;
+}
+
+// [[Rcpp::export]]
+long add_snailfish(const List&amp; sfs, int verbose = 0) {
+    Snailfish sf0, sfi;
+    sf0.breed_snailfish(sfs[0]);
+    for (auto i = 1; i &lt; sfs.length(); i++) {
+        sfi.breed_snailfish(sfs[i]);
+        sf0 = sf0 + sfi;
+        sf0.reduce(verbose &gt; 1);
+        if (verbose &gt; 0) {
+            Rcout &lt;&lt; sf0 &lt;&lt; std::endl;
+        }
+    }
+    return sf0.magnitude();
+};
+
+// [[Rcpp::export]]
+long max_magnitude(const List&amp; sfs, int verbose = 0) {
+    Snailfish sf0, sf1, sfsum;
+    long max = 0;
+    for (auto i = 0; i &lt; sfs.length(); i++) {
+        for (auto j = 0; j &lt; sfs.length(); j++){
+            if (i != j) {
+                sfsum = *sf0.breed_snailfish(sfs[i]) + 
+                    *sf1.breed_snailfish(sfs[j]);
+                if (verbose &gt; 0) {
+                    Rcout &lt;&lt; sfsum &lt;&lt; std::endl;
+                }
+                sfsum.reduce(verbose &gt; 1);
+                max = (sfsum.magnitude() &gt; max) ? sfsum.magnitude() : max; 
+            }
+        }
+    }
+    return max;
+};</code></pre>
+<pre class="r"><code>puzzle_data %&gt;% 
+    str_replace_all(&quot;\\[&quot;, &quot;list(&quot;) %&gt;% 
+    str_replace_all(&quot;\\]&quot;, &quot;)&quot;) %&gt;% 
+    map(~ eval(parse(text = .x))) %&gt;% 
+    add_snailfish()</code></pre>
+<pre><code>## [1] 3216</code></pre>
+</div>
+</div>
+<div id="part-2" class="section level2" number="2.2">
+<h2><span class="header-section-number">2.2</span> Part 2</h2>
+<div id="description-1" class="section level3" number="2.2.1">
+<h3><span class="header-section-number">2.2.1</span> Description</h3>
+<article class="day-desc">
+<h2 id="part2">
+— Part Two —
+</h2>
+<p>
+You notice a second question on the back of the homework assignment:
+</p>
+<p>
+What is the largest magnitude you can get from adding only two of the snailfish numbers?
+</p>
+<p>
+Note that snailfish addition is not <a href="https://en.wikipedia.org/wiki/Commutative_property" target="_blank">commutative</a> - that is, <code>x + y</code> and <code>y + x</code> can produce different results.
+</p>
+<p>
+Again considering the last example homework assignment above:
+</p>
+<pre><code>[[[0,[5,8]],[[1,7],[9,6]]],[[4,[1,2]],[[1,4],2]]]
+[[[5,[2,8]],4],[5,[[9,9],0]]]
+[6,[[[6,2],[5,6]],[[7,6],[4,7]]]]
+[[[6,[0,7]],[0,9]],[4,[9,[9,0]]]]
+[[[7,[6,4]],[3,[1,3]]],[[[5,5],1],9]]
+[[6,[[7,3],[3,2]]],[[[3,8],[5,7]],4]]
+[[[[5,4],[7,7]],8],[[8,3],8]]
+[[9,3],[[9,9],[6,[4,9]]]]
+[[2,[[7,7],7]],[[5,8],[[9,3],[0,2]]]]
+[[[[5,2],5],[8,[3,7]]],[[5,[7,5]],[4,4]]]
+</code></pre>
+<p>
+The largest magnitude of the sum of any two snailfish numbers in this list is <code><em>3993</em></code>. This is the magnitude of <code>[[2,[[7,7],7]],[[5,8],[[9,3],[0,2]]]]</code> + <code>[[[0,[5,8]],[[1,7],[9,6]]],[[4,[1,2]],[[1,4],2]]]</code>, which reduces to <code>[[[[7,8],[6,6]],[[6,0],[7,7]]],[[[7,8],[8,8]],[[7,9],[0,6]]]]</code>.
+</p>
+<p>
+<em>What is the largest magnitude of any sum of two different snailfish numbers from the homework assignment?</em>
+</p>
+</article>
+</div>
+<div id="solution-1" class="section level3" number="2.2.2">
+<h3><span class="header-section-number">2.2.2</span> Solution</h3>
+<pre class="r"><code>puzzle_data %&gt;% 
+    str_replace_all(&quot;\\[&quot;, &quot;list(&quot;) %&gt;% 
+    str_replace_all(&quot;\\]&quot;, &quot;)&quot;) %&gt;% 
+    map(~ eval(parse(text = .x))) %&gt;% 
+    max_magnitude()</code></pre>
+<pre><code>## [1] 4643</code></pre>
+</div>
+</div>
+<div id="old-r-solution" class="section level2" number="2.3">
+<h2><span class="header-section-number">2.3</span> Old R Solution</h2>
+<div id="solution---part-1" class="section level3" number="2.3.1">
+<h3><span class="header-section-number">2.3.1</span> Solution - Part 1</h3>
 <p>To solve this puzzle, we have to create a proper data structure first. We rely on
 <a href="https://r6.r-lib.org/articles/Introduction.html">R6</a> and use a tree inspired structure,
 where each element contains references to its childs and its parent. A child can be either
@@ -834,60 +1229,26 @@ Snailfish$set(
                         e2$to_list())
     Snailfish$new(new_sf)
 }</code></pre>
-<pre class="r"><code>sf0 &lt;- Snailfish$new(str = puzzle_data[[1L]])
-
-res &lt;- reduce(puzzle_data[-1L], function(.x, .y) {
-    sf &lt;- Snailfish$new(str = .y)
-    message(glue(&quot;Adding Snailfish {capture.output(sf)}&quot;))
-    sum &lt;- .x %+% sf
-    sum$reduce()
-}, .init = sf0)
+<pre class="r"><code>cache_file &lt;- here::here(&quot;2021&quot;, &quot;Task-18&quot;, &quot;summation.rds&quot;)
+force &lt;- FALSE
+if (!file.exists(cache_file) || force) {
+    sf0 &lt;- Snailfish$new(str = puzzle_data[[1L]])
+    res &lt;- reduce(puzzle_data[-1L], function(.x, .y) {
+        sf &lt;- Snailfish$new(str = .y)
+        message(glue(&quot;Adding Snailfish {capture.output(sf)}&quot;))
+        sum &lt;- .x %+% sf
+        sum$reduce()
+    }, .init = sf0)
+    saveRDS(res, cache_file)
+} else {
+    res &lt;- readRDS(cache_file)  
+}
 
 res$magnitude()</code></pre>
 <pre><code>## [1] 3216</code></pre>
 </div>
-</div>
-<div id="part-2" class="section level2" number="2.2">
-<h2><span class="header-section-number">2.2</span> Part 2</h2>
-<div id="description-1" class="section level3" number="2.2.1">
-<h3><span class="header-section-number">2.2.1</span> Description</h3>
-<article class="day-desc">
-<h2 id="part2">
-— Part Two —
-</h2>
-<p>
-You notice a second question on the back of the homework assignment:
-</p>
-<p>
-What is the largest magnitude you can get from adding only two of the snailfish numbers?
-</p>
-<p>
-Note that snailfish addition is not <a href="https://en.wikipedia.org/wiki/Commutative_property" target="_blank">commutative</a> - that is, <code>x + y</code> and <code>y + x</code> can produce different results.
-</p>
-<p>
-Again considering the last example homework assignment above:
-</p>
-<pre><code>[[[0,[5,8]],[[1,7],[9,6]]],[[4,[1,2]],[[1,4],2]]]
-[[[5,[2,8]],4],[5,[[9,9],0]]]
-[6,[[[6,2],[5,6]],[[7,6],[4,7]]]]
-[[[6,[0,7]],[0,9]],[4,[9,[9,0]]]]
-[[[7,[6,4]],[3,[1,3]]],[[[5,5],1],9]]
-[[6,[[7,3],[3,2]]],[[[3,8],[5,7]],4]]
-[[[[5,4],[7,7]],8],[[8,3],8]]
-[[9,3],[[9,9],[6,[4,9]]]]
-[[2,[[7,7],7]],[[5,8],[[9,3],[0,2]]]]
-[[[[5,2],5],[8,[3,7]]],[[5,[7,5]],[4,4]]]
-</code></pre>
-<p>
-The largest magnitude of the sum of any two snailfish numbers in this list is <code><em>3993</em></code>. This is the magnitude of <code>[[2,[[7,7],7]],[[5,8],[[9,3],[0,2]]]]</code> + <code>[[[0,[5,8]],[[1,7],[9,6]]],[[4,[1,2]],[[1,4],2]]]</code>, which reduces to <code>[[[[7,8],[6,6]],[[6,0],[7,7]]],[[[7,8],[8,8]],[[7,9],[0,6]]]]</code>.
-</p>
-<p>
-<em>What is the largest magnitude of any sum of two different snailfish numbers from the homework assignment?</em>
-</p>
-</article>
-</div>
-<div id="solution-1" class="section level3" number="2.2.2">
-<h3><span class="header-section-number">2.2.2</span> Solution</h3>
+<div id="solution---part-2" class="section level3" number="2.3.2">
+<h3><span class="header-section-number">2.3.2</span> Solution - Part 2</h3>
 <p>To solve this puzzle we simply calculate all magnitudes by brute force.</p>
 <pre class="r"><code>cache_file &lt;- here::here(&quot;2021&quot;, &quot;Task-18&quot;, &quot;pairwise_distance.rds&quot;)
 force &lt;- FALSE

@@ -11,7 +11,7 @@ enum Position {
 
 class Node: public std::enable_shared_from_this<Node> {
 public:
-	
+
 	[[nodiscard]] static std::shared_ptr<Node> create() {
 		return std::shared_ptr<Node>(new Node());
 	};
@@ -28,7 +28,7 @@ public:
 		return shared_from_this();
 	};
 	
-	unsigned int depth() {
+	unsigned int depth() const {
 		unsigned int depth = 0;
 		std::shared_ptr<Node> pa = this->parent_.lock();
 		while (pa) {
@@ -60,7 +60,8 @@ public:
 		if (this->is_regular()) {
 			res = this->value_;
 		} else {
-			res = 3 * this->left_->magnitude() + 2 * this->right_->magnitude();
+			res = 3 * this->left_->magnitude() + 
+				2 * this->right_->magnitude();
 		}	
 		return res;
 	};
@@ -70,7 +71,8 @@ public:
 		return this->ptr();
 	};
 	
-	std::shared_ptr<Node> set_child(std::shared_ptr<Node> kid, const Position pos) {
+	std::shared_ptr<Node> set_child(std::shared_ptr<Node> kid, 
+                                 const Position pos) {
 		kid->parent_ = this->ptr();
 		if (pos == Position::left) {
 			this->left_ = kid;
@@ -80,7 +82,8 @@ public:
 		return this->ptr();
 	};
 	
-	std::shared_ptr<Node> set_childs(const std::array<std::shared_ptr<Node>, 2>& kids) {
+	std::shared_ptr<Node> 
+		set_childs(const std::array<std::shared_ptr<Node>, 2>& kids) {
 		this->set_child(kids[0], Position::left);
 		this->set_child(kids[1], Position::right);
 		return this->ptr();
@@ -110,10 +113,13 @@ public:
 	
 	std::shared_ptr<Node> split() {
 		int val = this->value_;
-		this->left_ = Node::create();
-		this->left_->set_value(floor(val / 2.0));
-		this->right_ = Node::create();
-		this->right_->set_value(ceil(val / 2.0));
+		std::shared_ptr<Node> left, right;
+		left = Node::create();
+		left->set_value(floor(val / 2.0));
+		right = Node::create();
+		right->set_value(ceil(val / 2.0));
+		std::array<std::shared_ptr<Node>, 2> kids = {left, right};
+		this->set_childs(kids);
 		return this->ptr();
 	};
 	
@@ -164,7 +170,7 @@ private:
 					node = this->left_->next(exploded);
 					if (!exploded) {
 						node2 = this->right_->next(exploded);
-						if (!node || exploded) {
+						if (node2 && (!node || exploded)) {
 							node = node2;
 						}
 					}
@@ -186,6 +192,7 @@ std::ostream& operator<<(std::ostream& os, const Node& rhs) {
 
 class Snailfish {
 public:
+
 	Snailfish* breed_snailfish(List sf) {
 		this->root_ = Node::create();
 		this->breed_snailfish(sf, this->root_);
@@ -219,7 +226,8 @@ public:
 	
 	Snailfish& operator+=(const Snailfish& rhs) {
 		std::shared_ptr<Node> new_root = Node::create();
-		std::array<std::shared_ptr<Node>, 2> kids = {this->root_, rhs.root_};
+		std::array<std::shared_ptr<Node>, 2> kids = 
+			{this->root_, rhs.root_};
 		new_root->set_childs(kids);
 		this->root_ = new_root;
 		return *this;
@@ -229,7 +237,8 @@ public:
 		return this->root_->magnitude();
 	}
 	
-	friend std::ostream& operator<<(std::ostream& os, const Snailfish& rhs);
+	friend std::ostream& operator<<(std::ostream& os, 
+                                 const Snailfish& rhs);
 	
 private:
 	std::shared_ptr<Node> root_;
@@ -262,7 +271,8 @@ private:
 		} else if (right_type == VECSXP) {
 			breed_snailfish(right_el, right_node); 
 		}		
-		std::array<std::shared_ptr<Node>, 2> kids = {left_node, right_node};
+		std::array<std::shared_ptr<Node>, 2> kids = 
+			{left_node, right_node};
 		parent->set_childs(kids);
 	};
 };
@@ -278,39 +288,36 @@ Snailfish operator+(Snailfish lhs, const Snailfish& rhs) {
 }
 
 // [[Rcpp::export]]
-void add_snailfish(const List& sfs) {
+long add_snailfish(const List& sfs, int verbose = 0) {
 	Snailfish sf0, sfi;
 	sf0.breed_snailfish(sfs[0]);
-	for (auto i = 1; i < 3; i++) {//sfs.length(); i++) {
+	for (auto i = 1; i < sfs.length(); i++) {
 		sfi.breed_snailfish(sfs[i]);
 		sf0 = sf0 + sfi;
-		sf0.reduce(true);
-		Rcout << sf0 << std::endl;
+		sf0.reduce(verbose > 1);
+		if (verbose > 0) {
+			Rcout << sf0 << std::endl;
+		}
 	}
-	Rcout << sf0.magnitude() << std::endl;
+	return sf0.magnitude();
 };
 
-
-/*** R
-## Rcpp::sourceCpp(here::here("2021", "Task-18", "Snailfish.cpp"))
-library(stringr)
-library(dplyr)
-library(purrr)
-l <- "[[[0,[4,5]],[0,0]],[[[4,5],[2,6]],[9,5]]]
-[7,[[[3,7],[4,3]],[[6,3],[8,8]]]]
-[[2,[[0,8],[3,4]]],[[[6,7],1],[7,[1,6]]]]
-[[[[2,4],7],[6,[0,5]]],[[[6,8],[2,8]],[[2,1],[4,5]]]]
-[7,[5,[[3,8],[1,4]]]]
-[[2,[2,2]],[8,[8,1]]]
-[2,9]
-[1,[[[9,3],9],[[9,0],[0,7]]]]
-[[[5,[7,4]],7],1]
-[[[[4,2],2],6],[8,7]]" %>%
-	str_split("\n") %>% 
-	`[[`(1L) %>% 
-	str_replace_all("\\[", "list(") %>% 
-	str_replace_all("\\]", ")") %>%
-	map(~ parse(text = .x) %>% 
-		 	eval())
-add_snailfish(l)
-*/
+// [[Rcpp::export]]
+long max_magnitude(const List& sfs, int verbose = 0) {
+	Snailfish sf0, sf1, sfsum;
+	long max = 0;
+	for (auto i = 0; i < sfs.length(); i++) {
+		for (auto j = 0; j < sfs.length(); j++){
+			if (i != j) {
+				sfsum = *sf0.breed_snailfish(sfs[i]) + 
+					*sf1.breed_snailfish(sfs[j]);
+				if (verbose > 0) {
+					Rcout << sfsum << std::endl;
+				}
+				sfsum.reduce(verbose > 1);
+				max = (sfsum.magnitude() > max) ? sfsum.magnitude() : max; 
+			}
+		}
+	}
+	return max;
+};
