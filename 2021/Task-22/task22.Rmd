@@ -1,0 +1,374 @@
+---
+params:
+   task_nr: 22
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("2021_%s",
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+
+code em {
+	font-weight:bold
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(R6)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1L) %>% 
+	Filter(nzchar, .) %>% 
+	str_extract_all("on|off|-?\\d+") %>% 
+	do.call(rbind, .) %>% 
+	`colnames<-`(c("switch", "x0", "x1", "y0", "y1", "z0", "z1")) %>% 
+	as_tibble() %>% 
+	mutate(across(x0:z1, as.integer))
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1L]])
+```
+
+
+### Solution
+
+The first observation is that an intersection between 2 cubes is another cube, whose
+dimensions are defined by the `max` and the `min` of the respective interval limits. For
+instance the intersection between `[1,4] x [2,5] x [3,6]` and `[0,1] x [1,3] x [4,5]` is
+determined by `[max(1,0),min(4,1)] x [max(2,1),min(5,3)] x [max(3,4),min(6,5)]` = 
+`[1,1] x [2,3] x [4,5]`.
+
+The second observation is that counting all blocks, which are switched on by a single cube
+corresponds to simply getting the volume of the cube.
+
+The third observation leads us to the [Inclusion-Exclusion Principle](https://en.wikipedia.org/wiki/Inclusion%E2%80%93exclusion_principle). That is,
+to get all blocks which are switched on, we have to sum up all volumes and add and remove
+the intersecting cubes according to the inclusion exclusion principle. That is, we have to 
+maintain a list of all intersecting cubes and when we add (or remove, see next point) a
+new cube we simply have to intersect the new cube wiht all previous intersections.
+
+The final observation is that __substracting__ a cube differs from __adding__ a cube only 
+by the fact for the latter we add the cube itself as well, while for the former we simply
+intersect the deleting cube with all cubes already in the list.
+
+This suggests the following algorithm:
+
+1. Add the first cube to the list `I`.
+1. Loop through all remaining cubes and for each new cube `I_j` intersect it with all
+cubes and intersections already in the list `I` resulting in `I'`.
+1. If we are adding, add the cube itself to `I'`.
+1. Keep a count of how many cubes took part in an intersections.
+1. Add the new intersections `I'` to `I`.
+1. Once done, sum the volumes of each intersection multiplied by `(-1)` if there is
+an even number of cubes in the respective intersection.
+
+To solve the puzzle eventually, all which is left to do is to remove the cubes which are 
+outside the dedicated area.
+
+```{r solution-a}
+solve <- function(data = puzzle_data, filter_inner = TRUE) {
+	volume <- function(x0, x1, y0, y1, z0, z1, ...) {
+		(x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) 
+	}
+	intersect <- function(intersections, new_cube) {
+		left <- grep("0$", names(intersections), value = TRUE)
+		right <- grep("1$", names(intersections), value = TRUE)
+		right_cols <- map_dfc(right, ~ list(pmin(intersections[[.x]], 
+															  new_cube[[.x]])) %>% 
+									 	set_names(.x))
+		left_cols <- map_dfc(left, ~ list(pmax(intersections[[.x]], 
+															new_cube[[.x]])) %>% 
+										set_names(.x))
+		res <- bind_cols(left_cols, right_cols)
+		res %>% 
+			mutate(level = (intersections[["level"]] %||% -1) + 1) %>% 
+			filter(x0 <= x1 & y0 <= y1 & z0 <= z1) %>% 
+			mutate(volume = do.call(volume, .))
+		
+	}
+	if (filter_inner) {
+		data <- data %>% 
+			filter(x0 >= -50 & y0 >= -50 & z0 >= -50 &
+					 	x1 <= 50 & y1 <= 50 & z1 <= 50)
+	}
+	
+	all_intersections <- data %>% 
+		slice(1L) %>% 
+		select(-switch) %>% 
+		mutate(volume = do.call(volume, .),
+				 level = 0L)
+	for (r_idx in seq(2L, nrow(data))) {
+		new_cube <- data %>% 
+			slice(r_idx) %>% 
+			mutate(volume = do.call(volume, .),
+					 level = 0L)
+		new_intersections <- intersect(all_intersections, new_cube)
+		if (new_cube$switch == "on") {
+			new_intersections <- bind_rows(new_intersections, new_cube %>% 
+													 	select(-switch))
+		}
+		all_intersections <- bind_rows(all_intersections, new_intersections)
+	}
+	all_intersections %>% 
+		summarise(volume = sum((-1) ^ level * volume)) %>% 
+		pull(volume) %>% 
+		sprintf("%.0f", .)
+}
+solve()
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+```{r solution-b}
+solve(filter_inner = FALSE)
+```
+
+## Original Solution
+
+My original solution based on the same idea, but was utterly slow due to overengineered 
+`S4` class and growing lists. I list it here for the sake of completeness, but the running 
+time suggests not to try it with the data set.
+
+```{r solution-a-original, eval = FALSE}
+Cube <- setClass("Cube", slots = c(.x0 = "integer", .x1 = "integer",
+											  .y0 = "integer", .y1 = "integer",
+											  .z0 = "integer", .z1 = "integer"))
+
+setGeneric("is_empty", function(object) {
+	standardGeneric("is_empty")
+})
+
+setGeneric("volume", function(object) {
+	standardGeneric("volume")
+})
+
+setValidity("Cube", function(object) {
+	all_slots <- c(outer(c(".x", ".y", ".z"), 0:1, paste0))
+	empty_slots <-  all_slots %>% 
+		map_lgl(~ length(slot(object, .x)) == 0L)
+	if (all(empty_slots)) {
+		TRUE
+	} else if (any(empty_slots)) {
+		## only some are empty but __not__ all
+		glue("slot `{all_slots[empty_slots]}` is empty but at least ",
+			  "one other lsot is not empty")
+	} else {
+		## all slots are filled
+		OK <- c(object@.x1 >= object@.x0,
+				  object@.y1 >= object@.y0,
+				  object@.z1 >= object@.z0)
+		if (any(!OK)) {
+			faulty_slots <- c("x", "y", "z")[!OK]
+			start_points <- map_int(faulty_slots, 
+											~ slot(object, paste0(".", .x, "0")))
+			end_points <- map_int(faulty_slots, 
+										 ~ slot(object, paste0(".", .x, "1")))
+			glue("left interval limit `{faulty_slots}0` ",
+				  "[{start_points}] is bigger than ",
+				  "right interval limit `{faulty_slots}1` [{end_points}]")
+		} else {
+			TRUE
+		}
+	}
+})
+
+setMethod("initialize", "Cube",
+			 function(.Object, x0 = NULL, x1 = NULL,
+			 			y0 = NULL, y1 = NULL,
+			 			z0 = NULL, z1 = NULL, ...) {
+			 	.Object <- callNextMethod(.Object, ...)
+			 	.Object@.x0 <- as.integer(x0)
+			 	.Object@.x1 <- as.integer(x1)
+			 	.Object@.y0 <- as.integer(y0)
+			 	.Object@.y1 <- as.integer(y1)
+			 	.Object@.z0 <- as.integer(z0)
+			 	.Object@.z1 <- as.integer(z1)
+			 	validObject(.Object)
+			 	.Object
+			 })
+
+setMethod("is_empty", "Cube",
+			 function(object) {
+			 	## it suffices to test .x0 for zero length b/c the validator assures
+			 	## that either all are empty or none
+			 	length(object@.x0) == 0L
+			 })
+
+setMethod("volume", "Cube",
+			 function(object) {
+			 	if (is_empty(object)) {
+			 		0L
+			 	} else {
+			 		(object@.x1 - object@.x0 + 1L) *
+			 			(object@.y1 - object@.y0 + 1L) *
+			 			(object@.z1 - object@.z0 + 1L)
+			 	}
+			 })
+
+setMethod("show", "Cube",
+			 function(object) {
+			 	if (is_empty(object)) {
+			 		cat("<Empty Cube>\n")	
+			 	} else {
+			 		cat(glue("[{object@.x0}, {object@.x1}] x ",
+			 					"[{object@.y0}, {object@.y1}] x ",
+			 					"[{object@.z0}, {object@.z1}]")
+			 		)
+			 	}
+			 })
+
+setMethod("-", c("Cube", "Cube"),
+			 function(e1, e2) {
+			 	if (is_empty(e1) | is_empty(e2)) {
+			 		Cube()
+			 	} else {
+			 		x0 <- max(e1@.x0, e2@.x0)
+			 		x1 <- min(e1@.x1, e2@.x1)
+			 		y0 <- max(e1@.y0, e2@.y0)
+			 		y1 <- min(e1@.y1, e2@.y1)
+			 		z0 <- max(e1@.z0, e2@.z0)
+			 		z1 <- min(e1@.z1, e2@.z1)
+			 		if (x1 < x0 || y1 < y0 || z1 < z0) {
+			 			Cube()
+			 		} else {
+			 			Cube(x0, x1, y0, y1, z0, z1)
+			 		}
+			 	}
+			 })
+
+solve <- function(data = puzzle_data, filter_inner = TRUE, verbose = FALSE) {
+	cutter <- Cube(-50, 50, -50, 50, -50, 50)
+	pos <- neg <- vector("list", 32000)
+	pos_i <- neg_i <- 1
+	for (i in 1L:nrow(data)) {
+		row <- data[i, ]
+		new_cube <- do.call(Cube, as.list(row[-1L]))
+		if (verbose) {
+			cat("[", str_pad(as.character(i), 3), "/", nrow(data), "]: ", sep = "")
+			cat(if (row[1L] == "on") "Adding" else "Removing")
+			cat(" <")
+			show(new_cube)
+			cat(">...\n")
+		}
+		if (filter_inner) {
+			new_cube <- cutter - new_cube
+		}
+		if (!is_empty(new_cube)) {
+			subst <- map(pos[seq(1, length.out = pos_i - 1)],
+							 ~ .x - new_cube) %>% 
+				Filter(Negate(is_empty), .)
+			add <- map(neg[seq(1, length.out = neg_i - 1)], 
+						  ~ .x - new_cube) %>% 
+				Filter(Negate(is_empty), .)
+			if (row[1L] == "on") {
+				add <- c(add, new_cube)
+			}
+			if (pos_i + length(add) > length(pos)) {
+				pos <- c(pos, vector("list", length(pos)))
+			}
+			if (neg_i + length(subst) > length(neg)) {
+				neg <- c(neg, vector("list", length(neg)))
+			}
+			pos[seq(pos_i, length.out = length(add))] <- add
+			neg[seq(neg_i, length.out = length(subst))] <- subst
+			pos_i <- pos_i + length(add)
+			neg_i <- neg_i + length(subst)
+		}
+	}
+	pos <- Filter(Negate(is.null), pos)
+	neg <- Filter(Negate(is.null), neg)
+	sum(map_int(pos, volume)) -
+		sum(map_int(neg, volume))
+}
+```
+
