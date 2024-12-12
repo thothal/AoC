@@ -1,6 +1,7 @@
-.libPaths(c("C:/Users/thothal/Documents/6. R/win-library/4.1",
-				"C:/Users/tthaler/Documents/R/win-library/4.1"))
-pan_loc <- rmarkdown::find_pandoc(dir = "c:/Program Files/RStudio/bin/pandoc/")
+.libPaths(c("C:/Users/tthaler/AppData/Local/R/win-library/4.4", 
+				"C:/Users/tthaler/AppData/Local/Programs/R/R-4.4.1/library")
+)
+pan_loc <- rmarkdown::find_pandoc(dir = "C:/Users/tthaler/AppData/Local/Programs/RStudio/")
 
 suppressWarnings(
 	suppressPackageStartupMessages({
@@ -56,8 +57,8 @@ if (!any(str_detect(readme, glue("^### *{year}")))) {
 sec_markers <- str_which(readme, "#+")
 year_start <- str_which(readme, glue("### *{year}"))
 year_end <- sec_markers[sec_markers > year_start][1]
-stopifnot(length(year_start) && !is.na(year_start) &&
-			 	length(year_end) && !is.na(year_end))
+year_end <- ifelse(is.na(year_end), length(readme), year_end)
+stopifnot(length(year_start) && !is.na(year_start))
 
 
 replacements <- glue("- [x] [Day {day}]({url})",
@@ -97,7 +98,7 @@ if (is.na(year_end)) {
 }
 
 ## remove the whole year
-index <- index[-seq(year_start, year_end, 1)]
+index <- index[-seq(year_start, year_end, 1L)]
 
 replacements <- glue("* [Day {day}]({url})",
 							day = str_extract(all_solutions, "task\\d+") %>% 
