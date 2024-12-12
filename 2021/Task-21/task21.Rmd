@@ -1,0 +1,220 @@
+---
+params:
+   task_nr: 21
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("2021_%s", 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+	width: 100%;
+}
+
+.back {
+	font-size: 2rem;
+}
+
+.day-desc {
+	border: 2px dotted;
+	border-radius: 6px;
+	border-color: var(--blockquote-border-color);
+	padding: 0 20px;
+}
+
+code em {
+	font-weight:bold
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+	if (knitr::is_latex_output()) {
+		sprintf("\\texttt{%s}", as.character(x))
+	} else if (knitr::is_html_output()) {
+		sprintf("<tt>%s</tt>", as.character(x))
+	} else {
+		x
+	}
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2021/day/", params$task_nr)
+puzzle <- GET(base_url,
+				  session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	xml_find_all("///article") %>% 
+	lapply(as.character)
+
+puzzle_data <- GET(paste0(base_url, "/input"),
+						 session_cookie) %>% 
+	content(encoding = "UTF-8") %>% 
+	str_split("\n") %>% 
+	`[[`(1L) %>% 
+	Filter(nzchar, .) %>% 
+	str_extract_all("\\d+$") %>% 
+	unlist() %>% 
+	as.numeric()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1L]])
+```
+
+
+### Solution
+
+
+```{r solution-a}
+play <- function(start1, start2) {
+	## moves for each player
+	die_start <- (seq(1L, by = 3L, length.out = 2000L) - 1L) %% 100L + 1L
+	p1 <- (3 * (die_start[seq(1L, by = 2L, length.out = 1000L)] + 1)) %% 10
+	p2 <- (3 * (die_start[seq(2L, by = 2L, length.out = 1000L)] + 1)) %% 10
+	
+	## we need at most 1000 moves:
+	## if we would always end up on 1 we need exactly 1000 moves
+	
+	p1 <- rep(p1, ceiling(1000L / length(p1)))[1L:1000L]
+	p2 <- rep(p2, ceiling(1000L / length(p2)))[1L:1000L]
+	
+	mod_cumsum <- function(x, y) {
+		(x + y - 1) %% 10 + 1
+	} 
+	pos1 <- accumulate(c(start1, p1), mod_cumsum)[-1L]
+	pos2 <- accumulate(c(start2, p2), mod_cumsum)[-1L]
+	
+	points1 <- cumsum(pos1)
+	points2 <- cumsum(pos2)
+	game_over <- c(which.max(points1 >= 1000),
+						which.max(points2 >= 1000))
+	who_won <- which.min(game_over)
+	nr_turns <- min(game_over)
+	nr_throws <- (nr_turns - (who_won == 1L)) * 6 + 3 * (who_won == 1L)
+	loser_points <- if (who_won == 1L) {
+		points2[[nr_turns - 1L]]
+	} else {
+		points1[[nr_turns]]
+	}
+	nr_throws * loser_points
+}
+
+play(puzzle_data[1], puzzle_data[2])
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+```{r solution-b, eval = length(puzzle) > 1}
+nr_results <- expand.grid(1:3, 1:3, 1:3) %>% 
+	cbind(s = rowSums(.)) %>% 
+	count(s) 
+
+game_field <-  cbind(rep(1:10, 7), 
+							c(outer(1:10, nr_results$s, \(x, y) (x + y - 1) %% 10 + 1)), 
+							rep(nr_results$n, each = 10))%>% 
+	`colnames<-`(c("from", "to", "weight")) %>% 
+	graph_from_data_frame()
+
+V(game_field)$weight <- 1:10
+
+walk <- function(start, goal = 21, G = game_field) { 
+	walk_graph <- function(node_names, possibilities, points, player) {
+		nodes <- V(G)[node_names]
+		if (any(points >= goal)) {
+			tibble(nr = possibilities, final_score = paste(points, sep = ":"), 
+					 player_won = player)
+		} else {
+			map_dfr(incident(G, nodes[player], "out"), 
+					  function(.x) {
+					  	next_nodes <- nodes$name
+					  	next_nodes[player] <- head_of(G, .x)$name
+					  	next_player <- 1 + (player %% 2)
+					  	points[player] <- points[player] + head_of(G, .x)$weight
+					  	walk_graph(next_nodes,
+					  				  possibilities * .x$weight,
+					  				  points,
+					  				  next_player)
+					  })
+		}
+	}
+	walk_graph(start, 1, c(0, 0), 1) %>% 
+		group_by(player_won) %>% 
+		summarise(ovl = sum(nr))
+}
+
+
+
+p1 <- xfun::cache_rds({
+	walk(puzzle_data[1], 21)
+}, file = "player1_paths.rds")
+
+p2 <- xfun::cache_rds({
+	walk(puzzle_data[2], 21)
+}, file = "player2_paths.rds")
+
+make_game <- function(start, moves, rounds) {
+	function(pos, score) {
+		new_pos <- outer(pos, moves, \(x, y) (x + y) %% 10 + 1)
+		new_score <- sweep(new_pos, 1, score, `+`)
+	}
+}
+
+```
+
