@@ -1,0 +1,174 @@
+---
+params:
+   task_nr: 1
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Preamble
+
+It has been 3 years since I last participated in the AoC, so I needed to revisit my old 
+code base to see how I have done it the last time. Fortunatlye, things were rather 
+automatized already and I also remembered that I needed to logon once by hand to retrieve 
+the session cookie to automatize the data retrieval.
+
+So for future references: visit the page, open up Chrome DevTools, go to *Network*, reload
+the page and then click on *Cookies*, where you will find the cookie named `session`.
+
+This is the one which we need to store in our `keyring`.
+
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(tibble)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+library(kableExtra)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+puzzle_data <- local({
+  res <- GET(paste0(base_url, "/input"),
+             session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    str_split("\n+") %>% 
+    extract2(1L) %>% 
+    str_split("\\s+")
+  do.call(rbind, res) %>% 
+    set_colnames(c("start", "end")) %>% 
+    as_tibble() %>% 
+    filter(nzchar(start)) %>% 
+    mutate(across(everything(), as.integer))
+})
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The first 10 rows of the data looks like this:
+
+```{r show-data, echo = FALSE}
+kbl(
+  puzzle_data %>% 
+    slice(1:10)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE)
+```
+
+
+We simply sort both columns subtract them and sum the differences:
+
+```{r get-solution-1}
+puzzle_data %>% 
+  summarize(solution = sum(abs(sort(start) - sort(end))))
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To solve the second part, we simply inner-join the `start` column with the `end` column, 
+allowing for a "many-to-many" relationship. In this way we automatically create as many 
+copies of a value in `start` as there are matching values in `end`. Eventually we have to 
+sum up these values to get the answer.
+
+```{r get-solution-2}
+inner_join(
+  puzzle_data %>% 
+    select(start),
+  puzzle_data %>% 
+    select(end),
+  c(start = "end"),
+  relationship = "many-to-many"
+) %>% 
+  summarize(solution = sum(start))
+```
+
+
