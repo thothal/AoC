@@ -13,7 +13,7 @@ suppressWarnings(
 		library(cli)
 	})
 )
-force_year <- NA #"2024"
+force_year <- "2024"
 
 edit_file <- function(lines, file, replace, start, idx = NULL) {
 	if (replace) {
@@ -118,4 +118,4 @@ rmarkdown::render(here::here("index.Rmd"),
 						output_file = here::here("docs", "index"))
 
 cli_alert_success("Updating docs done")
-q(status = 0)
+#q(status = 0)
