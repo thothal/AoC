@@ -1,0 +1,198 @@
+---
+params:
+   task_nr: 5
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+puzzle_data <- local({
+  res <- GET(paste0(base_url, "/input"),
+             session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    str_split("\n") %>% 
+    extract2(1L)
+  rules <- str_subset(res, "\\d+\\|\\d+") %>% 
+    str_split(fixed("|")) %>% 
+    map(~ setNames(as.integer(.x), c("x", "y")) %>% as.list() %>% as_tibble()) %>% 
+    list_rbind()
+  updates <- str_subset(res, "(\\d+,\\d+,?)+") %>% 
+    str_split(fixed(",")) %>% 
+    map(as.integer)
+  list(rules = rules, updates = updates)
+})
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+First, we define a function which loops through an update and checks if all relevant rules
+are obeyed:
+
+```{r check-compliance}
+is_valid_order <- function(update, rules = puzzle_data$rules) {
+  check_number <- function(solution, el) {
+    ancestors <- solution$ancestors
+    forbidden <- rules %>% 
+      filter(x == el) %>% 
+      pull(y)
+    res <- !any(ancestors %in% forbidden)
+    ret <- list(ancestors = head(ancestors, -1L), res = solution$res && res)
+    if (!res) {
+      done(ret)
+    } else {
+      ret
+    }
+  }
+  reduce(rev(update), 
+         check_number, .init = list(ancestors = head(update, -1L), res = TRUE)) %>% 
+    extract2("res")
+}
+```
+
+Now we can filter all valid rules, extract their middle point and sum it
+
+```{r get-solution-1}
+keep(puzzle_data$updates, is_valid_order) %>% 
+  map_int(~ .x[ceiling(length(.x) / 2)]) %>% 
+  sum()
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+The idea of the sorting algorithm is as follows:
+
+1. Start with an empty vector.
+1. Take the first element and place it into the vector,
+1. Consecutively add new elements `el`. For each element look at all rules, which apply, 
+   find the indices of all the elements which `el` must precede and place it before the
+   element with the smallest index.
+1. Continue until all elements were put inot the list.
+
+```{r sort-update}
+sort_update <- function(update, rules = puzzle_data$rules) {
+  insert_element <- function(sorted_list, element) {
+    n <- length(sorted_list)
+    ancestors <- rules %>% 
+      filter(x == element) %>% 
+      pull(y)
+    idx <- which(sorted_list %in% ancestors)
+    if (length(idx) == 0L) {
+      res <- c(sorted_list, element)
+    } else if(min(idx) == 1L) { 
+      res <- c(element, sorted_list)
+    } else {
+      idx <- min(idx)
+      res <- c(head(sorted_list, idx - 1L), element, tail(sorted_list, n - idx + 1L))
+    }
+    res
+  }
+  reduce(update, insert_element, .init = integer(0))
+}
+```
+
+Now that we can properly sort the updates, we simply have to apply this sorting to 
+invalid updates and sum their respective middle points:
+
+```{r get-solution-2}
+discard(puzzle_data$updates, is_valid_order) %>% 
+  map_int(function(.x) {
+    sx <- sort_update(.x, puzzle_data$rules)
+    sx[ceiling(length(sx) / 2)]
+  }) %>% 
+  sum()
+```
