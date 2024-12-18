@@ -1,0 +1,265 @@
+---
+params:
+   task_nr: 7
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  formulas <- text_block %>% 
+    unlist() %>% 
+    keep(nzchar)
+  res <- str_extract(formulas, "^\\d+") %>% 
+    as.integer64() %>% 
+    as.list()
+  ops <- str_remove(formulas, "^\\d+: *") %>% 
+    str_split(fixed(" ")) %>% 
+    map(as.integer64)
+  map2(ops, res, ~ list(ops = .x, res = .y))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    str_split("\n") %>% 
+    parse_puzzle_data()
+})
+
+test_input <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+```{r get-solution-1-implementation, echo = FALSE}
+nr_calls <- 0
+is_valid1 <- function(res, operands, i, division = FALSE) {
+  nr_calls <<- nr_calls + 1L
+  ret <- FALSE
+  if (i == 0L) {
+    ret <- (division && res == 1L) || (!division && res == 0L)
+  } else {
+    operand <- operands[i]
+    if ((res - operand) >= 0L) {
+      if (Recall(res - operand, operands, i - 1L, FALSE)) {
+        ret <- TRUE
+      }
+    }
+    if (res %% operand == 0L) {
+      if (Recall(res / operand, operands, i - 1L, TRUE)) {
+        ret <- TRUE
+      }
+    }
+  }
+  ret
+}
+
+get_valid <- function(calibrations, validator) {
+  nr_calls <<- 0
+  map_lgl(calibrations, function(calibration) {
+    ops <- calibration$ops
+    res <- calibration$res
+    validator(res, ops, length(ops))
+  })
+}
+
+idx1 <- get_valid(puzzle_data, is_valid1)
+
+res1 <- puzzle_data[idx1] %>% 
+    map("res") %>% 
+    do.call(c, .) %>% 
+    sum()
+```
+
+We use a backtracking algorithm with all the operators from the **right**. If the current 
+result is divisible without remainder by the current operator, we recurse into a division 
+branch with the current result divided by the current operator. If the current result is
+greater than the current operator we recurse into a subtraction branch with the
+current result minus the current operator. If no numbers are left, we check whether we 
+end up at zero for a subtraction branch or at one for a division branch. We stop early if
+at any recursion neither of the 2 pre-conditions (no remainder and greater 
+result) holds true.
+
+The benefit from doing it from the right is that we can branch a lot of cases where the
+division would not work. A brute force method would need the following amount of 
+recursions:
+
+```{r nr-recursions-1}
+puzzle_data %>% 
+  map_dbl(~ 2 ^ (.x$ops %>% length())) %>% 
+  sum()
+```
+
+while the branching brought that number down to `r format(nr_calls, big.mark = ",")`.
+
+```{r get-solution-1}
+<<get-solution-1-implementation>>
+res1
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+```{r get-solution-2-implemebtation, echo = FALSE}
+is_valid2 <- function(res, operands, i, division = FALSE) {
+  nr_calls <<- nr_calls + 1L
+  ret <- FALSE
+  if (i == 0L) {
+    ret <- (division && res == 1L) || (!division && res == 0L)
+  } else {
+    operand <- operands[i]
+    if ((res - operand) >= 0L) {
+      if (Recall(res - operand, operands, i - 1L, FALSE)) {
+        ret <- TRUE
+      }
+    }
+    if (res %% operand == 0L) {
+      if (Recall(res / operand, operands, i - 1L, TRUE)) {
+        ret <- TRUE
+      }
+    }
+    str_operand <- as.character(operand)
+    str_res <- as.character(res)
+    n <- nchar(str_res)
+    n_operand <- nchar(str_operand)
+    if (substr(str_res, n - n_operand + 1L, n) == str_operand) {
+      ## concatenate could be a viable solution
+      ## remove last character and recurse
+      res <- substr(str_res, 1L, n - n_operand) %>% 
+        as.integer64()
+      if (Recall(res, operands, i - 1L, FALSE)) {
+        ret <- TRUE
+      }
+    }
+  }
+  ret
+}
+
+idx2 <- get_valid(puzzle_data[!idx1], is_valid2)
+
+res2 <- puzzle_data[!idx1][idx2] %>% 
+  map("res") %>% 
+  do.call(c, .) %>% 
+  sum()
+```
+
+We simply adapt our `is_valid1` function by adding the concat operator. We run the 
+backtracking algorithm only on cases where we did not find a match in part one, saving 
+also some decent amount of runs.
+
+For the concat operator the (even more direly needed) branching condition is, whether the 
+current result ends in the current number. If so, we recurse simply by removing those
+numbers from the end.
+
+Without branching we would need a whooping number of
+
+```{r nr-recursions-2}
+puzzle_data %>% 
+  map_dbl(~ 3 ^ (.x$ops %>% length())) %>% 
+  sum()
+```
+
+runs, while in our implementation we brought that number down to 
+`r format(nr_calls, big.mark = ",")`.
+
+```{r get-solution-2}
+<<get-solution-2-implemebtation>>
+res1 + res2
+```
