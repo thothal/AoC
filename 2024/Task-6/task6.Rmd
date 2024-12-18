@@ -68,6 +68,7 @@ library(dplyr)
 library(purrr)
 library(stringr)
 library(knitr)
+library(cli)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -105,273 +106,114 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We solve this puzzle in the following way:
+We solve this puzzle by simulating the alk field by field. An earlier version of this code
+used more sophisticated indexing, but was for some reasons not clear to me, slower.
 
-1. From the current position, find the nearest obstacle in the same row or column, 
-depending on the current orientation of the guard.
-1. If there is no obstacle fill all the fields and stop the loop.
-1. From the current position up to the field before the obstacle fill all empty spots.
-1. Turn around and repeat.
+Anyways, the algorithm is rather straight forward:
 
-*N.B.* The code below includes already parts (`extended_path`) which are needed for part 2
-of the puzzle and will be explained there
+1. If we are not seeing a `#` move one field in the current direction and store the
+step number and current direction in the path (this is done to recognize loops.)
+1. If we hit a `#` first step back (reducing the step counter to undo the step) and then 
+turn.
+1. Continue until we would be outside the grid.
 
-```{r helper-funcs}
-get_relative_position <- function(p1, p2) {
-  x <- -1:1
-  lkp <- expand.grid(s1 = x, s2 = x) %>% 
-    mutate(direction = c("left_top", "left", "left_bottom",
-                         "top", "same", "bottom",
-                         "right_top", "right", "right_bottom"
-    )) %>% 
-    as_tibble()
-  pos <- c(sign(p2 - c(p1))) %>% 
-    matrix(ncol = 2) %>% 
-    set_colnames(c("s1", "s2")) %>% 
-    as_tibble()
-  lkp %>% 
-    inner_join(pos, c("s1", "s2")) %>% 
-    pull(direction)
-}
+*N.B.* Most of the data stored (`step_number` or `direction`) is not needed for the first 
+puzzle, where we simply want to get the number of fields visited. Also the part where we 
+can resume an earlier path. However, we will need (and explain) these parts in the section 
+of puzzle 2.
 
-get_connection_node <- function(p1, p2) {
-  ## p1 must be a single point
-  stopifnot("`p1` must be single point" = length(c(p1)) == 2L)
-  ## make sure ü2 has dimensions
-  p2 <- matrix(as.matrix(p2), ncol = 2L)
-  apply(p2, 1, function(p2) {
-    pos <- get_relative_position(p1, p2)
-    if (pos == "right_bottom") {
-      if (p1[1L] + 1L == p2[1L]) {
-        res <- p2
-      } else {
-        res <- cbind(p1[1L] + 1L, p2[2L] + 1L)
-      }
-    } else if (pos == "right_top") {
-      if (p1[2L] + 1L == p2[2L]) {
-        res <- p2
-      } else {
-        res <- cbind(p2[1L] - 1L, p1[2L] + 1L)
-      }
-    } else if (pos == "left_bottom") {
-      if (p1[2L] - 1L == p2[2L]) {
-        res <- p2
-      } else {
-        res <- cbind(p2[1L] + 1L, p1[2L] - 1L)
-      }
-    } else if (pos == "left_top") {
-      if (p1[1L] - 1L == p2[1L]) {
-        res <- p2
-      } else {
-        res <- cbind(p1[1L] - 1L, p2[2L] - 1L)
-      }
-    } else {
-      res <- cbind(NA_integer_, NA_integer_)
-    }
-    res
-  }) %>% 
-    t()
-}
-
-o <- as.matrix(obs)
-all_con_nodes <- lapply(seq(1L, nrow(o)), 
-                        \(i) get_connection_node(o[i, ], o[-i, ])) %>% 
-  do.call(rbind, .) %>% 
-  as_tibble() %>% 
-  distinct() %>% 
-  setNames(c("row", "col")) %>% 
-  inner_join(path)
-
-```
 
 
 ```{r get-solution-1}
-find_obstacles <- function(line, current_pos) {
-  all_obstacles <- which(line == "#")
-  distance <- all_obstacles - current_pos
-  left_top <- distance[distance < 0L]
-  right_bottom <- distance[distance > 0L]
-  if (length(left_top) > 0L) {
-    res <- c(left_top = all_obstacles[distance == max(left_top)] + 1L)
-  } else {
-    res <- c(left_top = 1L)
+get_field_id <- function(idx) {
+  paste(idx, collapse = "/")
+}
+
+walk_maze <- function(maze, trodden_path = NULL) {
+  pos <- which(maze == "^", arr.ind = TRUE)
+  continue <- loop <- done <- FALSE
+  dir <- "up"
+  walk <- function(pos, dir, backward = FALSE) {
+    offset <- switch(
+      dir,
+      up = cbind(-1L, 0L),
+      right = cbind(0L, 1L),
+      down = cbind(1L, 0L),
+      left = cbind(0L, -1L)
+    )
+    pos + (1L - 2L * backward) * offset
   }
-  if (length(right_bottom) > 0L) {
-    res <- c(res, right_bottom = all_obstacles[distance == min(right_bottom)] - 1L)
-  } else {
-    res <- c(res, right_bottom = length(line))
+  path <- vector("list", prod(dim(maze)))
+  i <- 1L
+  step_counter <- 1L
+  if (!is.null(trodden_path)) {
+    idx <- seq_along(trodden_path)
+    path[idx] <- trodden_path
+    names(path)[idx] <- names(trodden_path)
+    last_field_idx <- map_dbl(
+      trodden_path,
+      max
+    ) %>% 
+      which.max()
+    last_field <- trodden_path[last_field_idx]
+    step_counter <- max(last_field[[1L]])
+    pos <- last_field %>% 
+      names() %>% 
+      str_split(fixed("/")) %>% 
+      extract2(1L) %>% 
+      as.integer() %>% 
+      matrix(ncol = 2L)
+    dir <- last_field[[1L]] %>% 
+      tail(1L) %>% 
+      names()
+    i <- length(trodden_path) + 1L
+    continue <- TRUE
   }
+  while (!done) {
+    cur_field <- maze[pos]
+    if (cur_field == "#") {
+      pos <- walk(pos, dir, TRUE)
+      dir <- switch(
+        dir,
+        up = "right",
+        right = "down",
+        down = "left",
+        left = "up"
+      )
+      step_counter <- step_counter - 1L
+    } else {
+      id <- get_field_id(pos)
+      new_step <- step_counter %>% 
+        setNames(dir)
+      if (id %in% names(path)) {
+        if (continue) {
+          ## if we continue a path the first step is already recorded so skip
+          continue <- FALSE
+        } else {
+          if (dir %in% names(path[[id]])) {
+            ## loop condition
+            done <- loop <- TRUE
+          }
+          path[[id]] <- c(path[[id]], new_step)
+        }
+      } else {
+        path[[i]] <- new_step
+        names(path)[[i]] <- id
+        i <- i + 1L
+      }
+      pos <- walk(pos, dir)
+      step_counter <- step_counter + 1L
+    }
+    done <- done || pos[1L] %in% c(0L, nrow(maze) + 1L) ||
+      pos[2L] %in% c(0L, ncol(maze) + 1L)
+  }
+  res <- discard(path, is.null)
+  attr(res, "loop") <- loop
   res
 }
 
-set_marks <- function(marks, new_mark) {
-  marks %>% 
-    str_split(fixed("|")) %>% 
-    map_chr(
-      function(mark) {
-        mark <- discard(mark, ~ .x == ".")
-        c(mark, new_mark)  %>% 
-          unique() %>% 
-          sort() %>% 
-          paste(collapse = "|")
-      }
-    )
-}
-
-simulate_walk <- function(current_map, current_position, direction, paths = list()) {
-  dd <- dim(current_map)
-  if (direction %in% c("up", "down")) {
-    idx <- cbind(1:dd[1L], current_position[2L])
-    guard <- current_position[1L]
-  } else if (direction %in% c("left", "right")) {
-    idx <- cbind(current_position[1L], 1:dd[2L])
-    guard <- current_position[2L]
-  }
-  closest_obstacles <- find_obstacles(current_map[idx], guard)
-  if (direction %in% c("left", "up")) {
-    path <- idx[seq(closest_obstacles[["left_top"]], guard), ]
-    if (guard < nrow(idx)) {
-      extended_path <- idx[seq(guard + 1L, closest_obstacles[["right_bottom"]]), ,
-                           drop = FALSE]
-    } else {
-      extended_path <- idx[FALSE, , drop = FALSE]
-    }
-    new_position <- idx[closest_obstacles[["left_top"]], ]
-    done <- closest_obstacles[["left_top"]] == 1L
-  } else if (direction %in% c("right", "down")) {
-    path <- idx[seq(guard, closest_obstacles[["right_bottom"]]), ]
-    if (guard > 1L) {
-      extended_path <- idx[seq(closest_obstacles[["left_top"]], guard - 1L), , 
-                           drop = FALSE]
-    } else {
-      extended_path <- idx[FALSE, , drop = FALSE]
-    }
-    new_position <- idx[closest_obstacles[["right_bottom"]], ]
-    done <- closest_obstacles[["right_bottom"]] == nrow(idx)
-  }
-  new_map <- current_map
-  new_map[path] <- set_marks(new_map[path], c("X", direction))
-  new_map[extended_path] <- set_marks(new_map[extended_path], direction)
-  if (list(path) %in% paths) {
-    attr(new_map, "loop") <- TRUE
-    done <- TRUE
-  } else {
-    paths <- c(paths, list(path))
-    attr(new_map, "loop") <- FALSE
-  }
-  if (!done) {
-    new_direction <- case_when(
-      direction == "up" ~ "right",
-      direction == "right" ~ "down",
-      direction == "down" ~ "left",
-      direction == "left" ~ "up"
-    )
-    new_map <- Recall(new_map, new_position, new_direction, paths)
-  }
-  new_map 
-}
-
-simulate_walk3 <- function(current_map, current_position, direction) {
-  dd <- dim(current_map)
-  if (direction %in% c("up", "down")) {
-    idx <- cbind(1:dd[1L], current_position[2L])
-    guard <- current_position[1L]
-  } else if (direction %in% c("left", "right")) {
-    idx <- cbind(current_position[1L], 1:dd[2L])
-    guard <- current_position[2L]
-  }
-  closest_obstacles <- find_obstacles(current_map[idx], guard)
-  if (direction %in% c("left", "up")) {
-    path <- idx[seq(closest_obstacles[["left_top"]], guard), ]
-    if (guard < nrow(idx)) {
-      extended_path <- idx[seq(guard + 1L, closest_obstacles[["right_bottom"]]), ,
-                           drop = FALSE]
-    } else {
-      extended_path <- idx[FALSE, , drop = FALSE]
-    }
-    new_position <- idx[closest_obstacles[["left_top"]], ]
-    done <- closest_obstacles[["left_top"]] == 1L
-  } else if (direction %in% c("right", "down")) {
-    path <- idx[seq(guard, closest_obstacles[["right_bottom"]]), ]
-    if (guard > 1L) {
-      extended_path <- idx[seq(closest_obstacles[["left_top"]], guard - 1L), , 
-                           drop = FALSE]
-    } else {
-      extended_path <- idx[FALSE, , drop = FALSE]
-    }
-    new_position <- idx[closest_obstacles[["right_bottom"]], ]
-    done <- closest_obstacles[["right_bottom"]] == nrow(idx)
-  }
-  new_map <- current_map
-  new_map[path] <- set_marks(new_map[path], c("X", direction))
-  new_map[extended_path] <- set_marks(new_map[extended_path], direction)
-  if (!done) {
-    new_direction <- case_when(
-      direction == "up" ~ "right",
-      direction == "right" ~ "down",
-      direction == "down" ~ "left",
-      direction == "left" ~ "up"
-    )
-    new_map <- Recall(new_map, new_position, new_direction)
-  }
-  new_map 
-}
-
-simulate_walk2 <- function(current_map, current_position, direction) {
-  dd <- dim(current_map)
-  done <- FALSE
-  while (!done) {
-    if (direction %in% c("up", "down")) {
-      idx <- cbind(1:dd[1L], current_position[2L])
-      guard <- current_position[1L]
-    } else if (direction %in% c("left", "right")) {
-      idx <- cbind(current_position[1L], 1:dd[2L])
-      guard <- current_position[2L]
-    }
-    closest_obstacles <- find_obstacles(current_map[idx], guard)
-    if (direction %in% c("left", "up")) {
-      path <- idx[seq(closest_obstacles[["left_top"]], guard), ]
-      if (guard < nrow(idx)) {
-        extended_path <- idx[seq(guard + 1L, closest_obstacles[["right_bottom"]]), ,
-                             drop = FALSE]
-      } else {
-        extended_path <- idx[FALSE, , drop = FALSE]
-      }
-      current_position <- idx[closest_obstacles[["left_top"]], ]
-      done <- closest_obstacles[["left_top"]] == 1L
-    } else if (direction %in% c("right", "down")) {
-      path <- idx[seq(guard, closest_obstacles[["right_bottom"]]), ]
-      if (guard > 1L) {
-        extended_path <- idx[seq(closest_obstacles[["left_top"]], guard - 1L), , 
-                             drop = FALSE]
-      } else {
-        extended_path <- idx[FALSE, , drop = FALSE]
-      }
-      current_position <- idx[closest_obstacles[["right_bottom"]], ]
-      done <- closest_obstacles[["right_bottom"]] == nrow(idx)
-    }
-    current_map[path] <- set_marks(current_map[path], c("X", direction))
-    current_map[extended_path] <- set_marks(current_map[extended_path], direction)
-    direction <- case_when(
-      direction == "up" ~ "right",
-      direction == "right" ~ "down",
-      direction == "down" ~ "left",
-      direction == "left" ~ "up"
-    )
-  }
-  current_map 
-}
-
-```
-
-```{r get-solution-1}
-maze <- puzzle_data
-current_pos <- which(maze == "^", arr.ind = TRUE)
-maze[current_pos] <- "."
-walked_maze <- simulate_walk2(maze, current_pos, "up")
-walked_maze %>% 
-  str_count("X") %>% 
-  sum()
+path <- walk_maze(puzzle_data)
+length(path)
 ```
 
 ## Part 2
@@ -384,181 +226,58 @@ cat(puzzle[[2]])
 
 ### Solution
 
-A couple of observations for the placment of any new obstacles which should form a loop:
+Any obstacle creating a loop must be placed on the original path. An obstacle placed
+somewhere else would simply be never hit. We loop through each field on the path, place
+an obstacle there and re-simulate the walk. To detect whether we ended up in a loop, all 
+we have to check whether the field we are entering was entered already before in the same
+direction. To safe some time, we do not regenerate the walk from the beginning at each 
+iteration but reuse the original path up to the field on which we are placing the new 
+obstacle. For this reason, we stored the `step_counter` in the first place, because to
+trim a path, we simply discard and step larger than a given step number.
 
-1. It must be on one of the fields which a guard passed in his original walk.
-1. A loop is created if the new path induced by the new obstacle will lead into a path the
-guard took already. There are 2 options for this:
-1. The first field after the obstacle (i.e. after turning) was visited by the guard
-previously **and** he passed this evry field in the same direction.
-1. The **extension** of the new path eventually leads into a path already walked by
-the guard (again in the same direction).
-
-To translate this into an algorithm, we need to
-1. Mark each field on the path with all the directions the guard took walking over this
-field.
-1. Extend each path from the turning point until the next obstacle (to make it easier to
-detect whether a new path connects with a trodden one).
-1. With this steps done, all we have to do is to loop through all fields on the path and
-check whether placing an obstacle on this field would result in a path connecting with an
-old path.
-1. With this appraoch it could however happen, that we also create shortcuts to freedom.
-That is we connect to the path which leads to the border. To avoid this we would need to
-keep track of the timepoint when we visited a field. This seems to be too cumbersome for
-the moment, hence we take a brute force approach: Get all reconnecting paths and check for each if we still could escape eventually.
-
-```{r find_loops}
-is_trodden <- function(walked_map, current_field) {
-  all_directions <- walked_map[current_field] %>% 
-    str_split(fixed("|")) %>% 
-    extract2(1L) %>% 
-    str_subset(fixed("X"), negate = TRUE)
-  check_field <- function(current_field, direction) {
-    new_direction <- case_when(
-      direction == "up" ~ "right",
-      direction == "right" ~ "down",
-      direction == "down" ~ "left",
-      direction == "left" ~ "up"
-    )
-    prev_field <- case_when(
-      direction == "up" ~ cbind(current_field[1L] + 1L, current_field[2L]),
-      direction == "right" ~ cbind(current_field[1L], current_field[2L] - 1L),
-      direction == "down" ~ cbind(current_field[1L] - 1L, current_field[2L]),
-      direction == "left" ~ cbind(current_field[1L], current_field[2L] + 1L)
-    )
-    new_field <- case_when(
-      new_direction == "up" ~ cbind(prev_field[1L] - 1L, prev_field[2L]),
-      new_direction == "right" ~ cbind(prev_field[1L], prev_field[2L] + 1L),
-      new_direction == "down" ~ cbind(prev_field[1L] + 1L, prev_field[2L]),
-      new_direction == "left" ~ cbind(prev_field[1L], prev_field[2L] - 1L)
-    )
-    str_detect(walked_map[new_field], new_direction) &&
-      str_detect(walked_map[prev_field], fixed("#"), negate = TRUE)
-  }
-  map_lgl(all_directions, ~ check_field(current_field, .x)) %>% 
-    any()
-}
-
-find_reconnecting_obstacles <- function(walked_map, starting_pos) {
-  visited_fields <- str_detect(walked_map, "X") %>% 
-    `dim<-`(dim(walked_map)) %>% 
-    which(arr.ind = TRUE)
-  visited_fields <- visited_fields[!(visited_fields[, 1L] == starting_pos[[1L]] &
-                                       visited_fields[, 2L] == starting_pos[[2L]]), ,
-                                   drop = FALSE]
-  candidates <- apply(visited_fields, 1, function(ii)
-    is_trodden(walked_map, cbind(ii[[1L]], ii[[2L]])))
-  visited_fields[candidates, , drop = FALSE]
-}
-
-find_loop_obstacles <- function(walked_map, starting_pos) {
-  orig_map <- walked_map
-  orig_map[orig_map != "#"] <- "."
-  candidates <- find_reconnecting_obstacles(walked_map, starting_pos)
-  print(paste(nrow(candidates), "candidates found"))
-  i <- 1 
-  is_loop <- apply(candidates, 1, function(ii) {
-    print(paste("Checking candidate", i))
-    idx <- cbind(ii[1L], ii[2L])
-    new_map <- orig_map
-    new_map[idx] <- "#"
-    i <<- i  + 1
-    attr(simulate_walk(new_map, starting_pos, "up"), "loop")
-  })
-  candidates[is_loop, , drop = FALSE]
-}
-
-brute_force <- function(walked_map, starting_pos) {
-  start <- Sys.time()
-  print(start)
-  orig_map <- walked_map
-  orig_map[orig_map != "#"] <- "."
-  visited_fields <- str_detect(walked_map, "X") %>% 
-    `dim<-`(dim(walked_map)) %>% 
-    which(arr.ind = TRUE)
-  visited_fields <- visited_fields[!(visited_fields[, 1L] == starting_pos[[1L]] &
-                                       visited_fields[, 2L] == starting_pos[[2L]]), ,
-                                   drop = FALSE]
-  #visited_fields <- visited_fields[1:10, ]
-  print(paste("Checking", nrow(visited_fields), "Candidates"))
-  i <- 1
-  is_loop <- apply(visited_fields, 1, function(ii) {
-    print(paste("Checking candidate", i))
-    idx <- cbind(ii[1L], ii[2L])
-    new_map <- orig_map
-    new_map[idx] <- "#"
-    i <<- i  + 1
-    attr(simulate_walk(new_map, starting_pos, "up"), "loop")
-  })
-  duration <- Sys.time() - start
-  print(duration)
-  visited_fields[is_loop, , drop = FALSE]
-}
-
-sol <- brute_force(walked_maze, current_pos)
-
-find_loop_obstacles(walked_maze, current_pos) %>% 
-  nrow()
-
-find_loop_obstacles(orig_maze_walked, cbind(7, 5))
-```
-
-
-```{r get-solution-2}
-mark_fields <- function(current_map, current_position, direction) {
-  dd <- dim(current_map)
-  if (direction == "up") {
-    idx <- cbind(1:current_position[1L], current_position[2L])
-    sel <- max
-    step_back <- c(1L, 0L)
-    turn_to <- "right"
-  } else if (direction == "left") {
-    idx <- cbind(current_position[1L], 1:current_position[2L])
-    sel <- max
-    step_back <- c(0L, 1L)
-    turn_to <- "up"
-  } else if (direction == "down") {
-    idx <- cbind(current_position[1L]:dd[1L], current_position[2L])
-    sel <- min
-    step_back <- c(-1L, 0L)
-    turn_to <- "left"
-  } else if (direction == "right") {
-    idx <- cbind(current_position[1L], current_position[2L]:dd[2L])
-    sel <- min
-    step_back <- c(0L, -1L)
-    turn_to <- "down"
-  }
-  obstacles <- which(current_map[idx] == "#")
-  if (length(obstacles) == 0L) {
-    marks <- current_map[idx] %>% 
-      str_split(fixed("|"))
-    
-    new_marks <-  map_chr(marks, ~ c(.x, direction) %>% 
-                            unique() %>% 
-                            sort() %>% 
-                            paste(collapse = "|")) %>% 
-      str_remove("^\\|")
-    current_map[idx] <- new_marks
-    res <- current_map
+```{r get-solution-2, cache = TRUE}
+trim_path <- function(path, idx) {
+  if (idx > 0L) {
+    keep(path, ~ any(.x <= idx)) %>% 
+      map(~ .x[.x <= idx])
   } else {
-    nearest_obstacle <- idx[sel(obstacles), , drop = FALSE]
-    new_position <- nearest_obstacle + step_back
-    distance <- max(c(abs(new_position - current_position)))
-    idx <- cbind(seq(current_position[, 1L], new_position[, 1L],
-                     length.out = distance + 1L),
-                 seq(current_position[, 2L], new_position[, 2L],
-                     length.out = distance + 1L))
-    marks <- current_map[idx] %>% 
-      str_split(fixed("|")) 
-    new_marks <- map_chr(marks, ~ c(.x, direction) %>% 
-                           unique() %>% 
-                           sort() %>% 
-                           paste(collapse = "|")) %>% 
-      str_remove("^\\|")
-    current_map[idx] <- new_marks
-    res <- Recall(current_map, new_position, turn_to)
+    NULL
   }
-  res
 }
 
+find_loops <- function(maze, path) {
+  start_pos <- which(maze == "^", arr.ind = TRUE)
+  path_fields_nm <- names(path) %>% 
+    setdiff(get_field_id(start_pos))
+  path_fields <- path_fields_nm %>% 
+    str_split(fixed("/")) %>% 
+    map(~ as.integer(.x) %>% matrix(ncol = 2))
+  if (interactive()) {
+    pb <- list(
+      name = "Checking Candidates",
+      type = "iterator",
+      ## need to convert to double beforehand otherwise we get an error
+      total = as.numeric(length(path_fields)) 
+    )
+  } else {
+    pb <- FALSE
+  }
+  idx <- map_lgl(
+    seq_along(path_fields), 
+    function(i) {
+      ## use global maze to avoid copying large objects in each iteration
+      cand <- path_fields[[i]]
+      maze[cand] <- "#"
+      current_path <- trim_path(path, i - 1L)
+      new_path <- walk_maze(maze, current_path)
+      ## need to reset the maze
+      maze[cand] <- "."
+      attr(new_path, "loop")
+    },
+    .progress = pb
+  )
+  path_fields_nm[idx]
+}
+res <- find_loops(puzzle_data, path)
+length(res)
 ```
