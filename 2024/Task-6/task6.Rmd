@@ -1,0 +1,283 @@
+---
+params:
+   task_nr: 6
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    str_split("\n") %>% 
+    extract2(1L) %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+})
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We solve this puzzle by simulating the alk field by field. An earlier version of this code
+used more sophisticated indexing, but was for some reasons not clear to me, slower.
+
+Anyways, the algorithm is rather straight forward:
+
+1. If we are not seeing a `#` move one field in the current direction and store the
+step number and current direction in the path (this is done to recognize loops.)
+1. If we hit a `#` first step back (reducing the step counter to undo the step) and then 
+turn.
+1. Continue until we would be outside the grid.
+
+*N.B.* Most of the data stored (`step_number` or `direction`) is not needed for the first 
+puzzle, where we simply want to get the number of fields visited. Also the part where we 
+can resume an earlier path. However, we will need (and explain) these parts in the section 
+of puzzle 2.
+
+
+
+```{r get-solution-1}
+get_field_id <- function(idx) {
+  paste(idx, collapse = "/")
+}
+
+walk_maze <- function(maze, trodden_path = NULL) {
+  pos <- which(maze == "^", arr.ind = TRUE)
+  continue <- loop <- done <- FALSE
+  dir <- "up"
+  walk <- function(pos, dir, backward = FALSE) {
+    offset <- switch(
+      dir,
+      up = cbind(-1L, 0L),
+      right = cbind(0L, 1L),
+      down = cbind(1L, 0L),
+      left = cbind(0L, -1L)
+    )
+    pos + (1L - 2L * backward) * offset
+  }
+  path <- vector("list", prod(dim(maze)))
+  i <- 1L
+  step_counter <- 1L
+  if (!is.null(trodden_path)) {
+    idx <- seq_along(trodden_path)
+    path[idx] <- trodden_path
+    names(path)[idx] <- names(trodden_path)
+    last_field_idx <- map_dbl(
+      trodden_path,
+      max
+    ) %>% 
+      which.max()
+    last_field <- trodden_path[last_field_idx]
+    step_counter <- max(last_field[[1L]])
+    pos <- last_field %>% 
+      names() %>% 
+      str_split(fixed("/")) %>% 
+      extract2(1L) %>% 
+      as.integer() %>% 
+      matrix(ncol = 2L)
+    dir <- last_field[[1L]] %>% 
+      tail(1L) %>% 
+      names()
+    i <- length(trodden_path) + 1L
+    continue <- TRUE
+  }
+  while (!done) {
+    cur_field <- maze[pos]
+    if (cur_field == "#") {
+      pos <- walk(pos, dir, TRUE)
+      dir <- switch(
+        dir,
+        up = "right",
+        right = "down",
+        down = "left",
+        left = "up"
+      )
+      step_counter <- step_counter - 1L
+    } else {
+      id <- get_field_id(pos)
+      new_step <- step_counter %>% 
+        setNames(dir)
+      if (id %in% names(path)) {
+        if (continue) {
+          ## if we continue a path the first step is already recorded so skip
+          continue <- FALSE
+        } else {
+          if (dir %in% names(path[[id]])) {
+            ## loop condition
+            done <- loop <- TRUE
+          }
+          path[[id]] <- c(path[[id]], new_step)
+        }
+      } else {
+        path[[i]] <- new_step
+        names(path)[[i]] <- id
+        i <- i + 1L
+      }
+      pos <- walk(pos, dir)
+      step_counter <- step_counter + 1L
+    }
+    done <- done || pos[1L] %in% c(0L, nrow(maze) + 1L) ||
+      pos[2L] %in% c(0L, ncol(maze) + 1L)
+  }
+  res <- discard(path, is.null)
+  attr(res, "loop") <- loop
+  res
+}
+
+path <- walk_maze(puzzle_data)
+length(path)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+Any obstacle creating a loop must be placed on the original path. An obstacle placed
+somewhere else would simply be never hit. We loop through each field on the path, place
+an obstacle there and re-simulate the walk. To detect whether we ended up in a loop, all 
+we have to check whether the field we are entering was entered already before in the same
+direction. To safe some time, we do not regenerate the walk from the beginning at each 
+iteration but reuse the original path up to the field on which we are placing the new 
+obstacle. For this reason, we stored the `step_counter` in the first place, because to
+trim a path, we simply discard and step larger than a given step number.
+
+```{r get-solution-2, cache = TRUE}
+trim_path <- function(path, idx) {
+  if (idx > 0L) {
+    keep(path, ~ any(.x <= idx)) %>% 
+      map(~ .x[.x <= idx])
+  } else {
+    NULL
+  }
+}
+
+find_loops <- function(maze, path) {
+  start_pos <- which(maze == "^", arr.ind = TRUE)
+  path_fields_nm <- names(path) %>% 
+    setdiff(get_field_id(start_pos))
+  path_fields <- path_fields_nm %>% 
+    str_split(fixed("/")) %>% 
+    map(~ as.integer(.x) %>% matrix(ncol = 2))
+  if (interactive()) {
+    pb <- list(
+      name = "Checking Candidates",
+      type = "iterator",
+      ## need to convert to double beforehand otherwise we get an error
+      total = as.numeric(length(path_fields)) 
+    )
+  } else {
+    pb <- FALSE
+  }
+  idx <- map_lgl(
+    seq_along(path_fields), 
+    function(i) {
+      ## use global maze to avoid copying large objects in each iteration
+      cand <- path_fields[[i]]
+      maze[cand] <- "#"
+      current_path <- trim_path(path, i - 1L)
+      new_path <- walk_maze(maze, current_path)
+      ## need to reset the maze
+      maze[cand] <- "."
+      attr(new_path, "loop")
+    },
+    .progress = pb
+  )
+  path_fields_nm[idx]
+}
+res <- find_loops(puzzle_data, path)
+length(res)
+```
