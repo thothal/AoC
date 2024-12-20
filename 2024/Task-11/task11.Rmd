@@ -1,0 +1,177 @@
+---
+params:
+   task_nr: 11
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  text_block %>% 
+    unlist() %>% 
+    str_split(" ") %>% 
+    extract2(1L) %>% 
+    keep(nzchar) %>% 
+    as.integer()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+```{r get_example_data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+Instead of storing *all* the stone ids, we store only their distribution (that is how many
+of eahc stone id there are). Then, in the next iteration we simply add the number of 
+parents to the number of their offspring. If, for instance, we had 10 stones with id 1234, 
+we will have 10 stones with id 12 and 10 stones with id 34. A samll corner case needed to 
+be accounted for, namely if a stone id splits into the same ids (e.g. stone ide 77 will 
+split into id 7 *twice*). In this case we need also to add the number of the parent 
+*twice*.
+
+In the end we simply have to sum up all numbers and we get the final count.
+
+```{r get-solution-1}
+dance <- function(cur_seq, n) {
+  dance_step <- function(d) {
+    n <- nchar(as.character(d))
+    if (d == 0L) {
+      as.integer64(1L)
+    } else if (n %% 2 == 0) {
+      c(as.integer64(substr(as.character(d), 1L, n / 2L)),
+        as.integer64(substr(as.character(d), n / 2L + 1L, n)))
+    } else {
+      as.integer64(d * 2024L)
+    }
+  }
+  res <- rep(as.integer64(1L), length(cur_seq)) %>% 
+    setNames(as.character(cur_seq))
+  for (i in 1:n) {
+    cur_res <- as.integer64(NULL)
+    for (d in names(res)) {
+      dnc <- dance_step(as.integer64(d))
+      is_same_coef <- if_else(length(dnc) == 2L &&
+                                length(unique(dnc)) == 1L, as.integer64(2L), 
+                              as.integer64(1L))
+      cur_res[as.character(dnc)] <- coalesce(cur_res[as.character(dnc)], 
+                                             as.integer64(0L)) + is_same_coef * res[d]
+    }
+    res <- cur_res[cur_res > 0L]
+  }
+  sum(res)
+}
+
+dance(puzzle_data, 25L)
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We simply need to increase the iteration count to 75.
+
+```{r get-solution-2, cache = TRUE}
+dance(puzzle_data, 75L)
+```
