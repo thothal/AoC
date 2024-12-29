@@ -24,7 +24,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 9](https://thothal.github.io/AoC/2024_task9.html)
 - [x] [Day 10](https://thothal.github.io/AoC/2024_task10.html)
 - [x] [Day 11](https://thothal.github.io/AoC/2024_task11.html)
-- [ ] Day 12
+- [x] [Day 12](https://thothal.github.io/AoC/2024_task12.html)
 - [ ] Day 13
 - [ ] Day 14
 - [ ] Day 15
