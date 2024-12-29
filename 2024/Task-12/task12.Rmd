@@ -1,0 +1,334 @@
+---
+params:
+   task_nr: 12
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) > 1L) {
+    text_block <- paste(text_block, collapse = "\n")
+  }
+  text_block %>% 
+    unlist() %>% 
+    str_split("\n") %>% 
+    extract2(1L) %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+```{r get_example_data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use again a backtracking algorithn to create all regions. In the backtrackng algorithm, 
+we assign the number of non similar neighbors treating nodes sitting on the edge of
+the matrix as having non matching neighbors outside the matrix boundaries.
+
+Then the solution is to multiply the number of nodes in each region with the sum of non
+matching neighbors to get the final price.
+
+```{r get-solution-1}
+get_regions <- function(garden_map, skip_border = FALSE) {
+  dd <- dim(garden_map)
+  visited <- matrix(FALSE, dd[1L], dd[2L])
+  visited[is.na(garden_map)] <- TRUE
+  ids <- unique(na.omit(c(garden_map)))
+  regions <- vector("list", length(ids))
+  names(regions) <- ids
+  dirs <- rbind(
+    cbind(-1L, 0L),
+    cbind(0L, 1L),
+    cbind(1L, 0L),
+    cbind(0L, -1L)
+  ) %>% 
+    set_rownames(c("up", "right", "down", "left"))
+  
+  parse_region <- function(current_pos, current_region_id) {
+    if (any(current_pos < c(1L, 1L)) ||
+        any(current_pos > dd)) {
+      ## position out of bounds
+      current_region <- NULL
+    } else {
+      ## position in bounds
+      if (visited[current_pos] || is.na(garden_map[current_pos]) ||
+          garden_map[current_pos] != current_region_id) {
+        ## wrong region
+        current_region <- NULL
+      } else {
+        visited[current_pos] <<- TRUE
+        neighbors <- c(current_pos) + t(dirs)
+        border_touchpoints <- rowSums(t(neighbors < c(1L, 1L) | neighbors > dd))
+        neighbors_idx <- t(neighbors)[border_touchpoints == 0, , drop = FALSE]
+        foreign_touchpoints <- garden_map[neighbors_idx] != current_region_id 
+        current_region <- cbind(current_pos, 
+                                border = sum(border_touchpoints) + 
+                                  sum(foreign_touchpoints))
+        for (dir_idx in seq(1L, nrow(dirs))) {
+          dir <- dirs[dir_idx, , drop = FALSE]
+          current_region <- rbind(current_region, 
+                                  Recall(current_pos + dir, current_region_id))
+        }
+      }
+    }
+    current_region
+  }
+  edge_id <- 0
+  while (!all(visited)) {
+    start_pos <- which(!visited, arr.ind = TRUE)[1, , drop = FALSE]
+    current_id <- garden_map[start_pos]
+    current_region <- parse_region(start_pos, current_id)
+    if (skip_border) {
+      current_region <- current_region[, -3L, drop = FALSE]
+    }
+    regions[[current_id]] <- c(regions[[current_id]], list(current_region))
+  }
+  regions
+}
+
+get_fence_price <- function(regions) {
+  regions %>% 
+    flatten() %>% 
+    map_int(~ nrow(.x) * sum(.x[, "border"])) %>% 
+    sum()
+}
+
+garden_regions <- get_regions(puzzle_data)
+
+get_fence_price(garden_regions)
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To compute the side length of each region, we implement the following algorithm:
+1. Get the **convex hull** of the region of interest (that is the rectangular using min 
+and max of row and ocl indices).
+1. This rectangular has 4 corners, hence 4 sides. Hence add 4 to the overall result.
+1. Substract the original region from the convey hull. If this yields the empty set, we 
+are done.
+1. Otherwise, get all sub regions of this difference and calulcate again the convex hull 
+of those.
+1. For each convex hull, if we have at least one corner in common, we add 2 to the result 
+otherwise 4, to avoid counting the same corner twice.
+1. Repeat until each region is iterated over.
+
+
+
+*Notes.* The algorithm is not overly performant, which is due to the fact that the complex 
+hull is explicitely calculated i.e. each field is generated) multiple of times. The region
+finding algorithm was re-implemented using matrix indices this time instead of the matrix 
+itself, as we could then re-use the regiosn generated from part 1 (which returned matrix
+indices).
+
+```{r get-solution-2, cache = TRUE}
+calculate_discount <- function(regions) {
+  get_convex_hull <- function(region) {
+    apply(region, 2, \(x) seq(min(x), max(x), 1L), simplify = FALSE) %>% 
+      do.call(expand.grid, .) %>% 
+      as.matrix()
+  }
+  
+  is_convex <- function(region, convex_hull = get_convex_hull(region)) {
+    region <- region[order(region[, 2L], region[, 1L]), , drop = FALSE]
+    identical(c(region), c(convex_hull))
+  }
+  
+  get_corners <- function(region) {
+    apply(region, 2, \(x) range(x), simplify = FALSE) %>% 
+      do.call(expand.grid, .) %>% 
+      as.matrix()
+  }
+  
+  contains <- function(region1, region2) {
+    apply(region2, 1, function(coord) {
+      any(colSums(coord == t(region1)) == 2L)
+    })
+  }
+  
+  substract <- function(region1, region2) {
+    r1 <- as_tibble(region1)
+    r2 <- as_tibble(region2)
+    r1 %>% 
+      anti_join(r2, c("row", "col")) %>% 
+      as.matrix()
+  }
+  
+  get_sub_regions <- function(region) {
+    dirs <- rbind(
+      cbind(-1L, 0L),
+      cbind(0L, 1L),
+      cbind(1L, 0L),
+      cbind(0L, -1L)
+    ) %>% 
+      set_rownames(c("up", "right", "down", "left"))
+    parse_region <- function(current_pos) {
+      res <- NULL
+      current_pos <- current_pos[, 1:2, drop = FALSE]
+      idx <- contains(current_pos, current_region[, 1:2, drop = FALSE]) 
+      if (!any(idx)) {
+        res <- NULL
+      } else {
+        idx <- which(idx)
+        if (current_region[idx, 3]) {
+          ## node already visited
+          res <- NULL
+        } else {
+          current_region[idx, 3] <<- TRUE
+          res <- current_pos
+          for (dir_idx in seq(1L, nrow(dirs))) {
+            dir <- dirs[dir_idx, , drop = FALSE]
+            res <- rbind(res,
+                         Recall(current_pos + dir))
+          }
+        }
+      }
+      res
+    }
+    current_region <- cbind(region[, 1:2, drop = FALSE], visited = FALSE)
+    regions <- list()
+    while (any(!current_region[, "visited"])) {
+      start_pos <- current_region[!current_region[, "visited"], , drop = FALSE][1, , drop = FALSE]
+      regions <- c(regions, list(parse_region(start_pos)))
+    }
+    regions
+  }
+  
+  calculate_borders <- function(region, prev_region) {
+    region <- region[, 1:2, drop = FALSE] 
+    if (nrow(region) == 0L) {
+      res <- 0L
+    } else {
+      res <- 4L
+      convex_hull <- get_convex_hull(region)
+      if (!is.null(prev_region)) {
+        corners <- get_corners(convex_hull)
+        prev_corners <- get_corners(prev_region)
+        if (any(contains(prev_corners, corners))) {
+          res <- 2L
+        }
+      }
+      if (!is_convex(region, convex_hull)) {
+        diff_regions <- substract(convex_hull, region)
+        sub_regions <- get_sub_regions(diff_regions)
+        sub_border_regions <- vapply(sub_regions, \(r) calculate_borders(r, convex_hull), 
+                                     integer(1L)) %>% 
+          sum()
+        res <- res + sub_border_regions
+      }
+    }
+    res
+  }
+  map_int(flatten(regions), \(region) calculate_borders(region, NULL) * nrow(region)) %>% 
+    sum()
+}
+
+calculate_discount(garden_regions)
+
+```
