@@ -1,0 +1,230 @@
+---
+params:
+   task_nr: 14
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- str_split(text_block, "\n")
+  }
+  text_block <- text_block %>% 
+    unlist()
+  res <- text_block %>% 
+    str_extract_all("-?\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("x", "y", "delta_x", "delta_y"))
+  storage.mode(res) <- "integer"
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+attr(puzzle_data, "size") <- c(101L, 103L)
+```
+
+```{r get_example_data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+attr(example_data, "size") <- c(11L, 7L)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The solution is straight forward. Add the velocity multiplied by the seconds to the 
+starting position and take the results modulo the grid size and you get the final 
+position.
+
+```{r get-solution-1}
+visualize_puzzle <- function(pos, char = "#") {
+  size <- attr(pos, "size")
+  m <- matrix(".", size[2L], size[1L])
+  pos <- pos %>% 
+    select("y", "x") %>% 
+    as.matrix()
+  m[pos[, c("y", "x"), drop = FALSE] + 1L] <- char
+  apply(m, 1, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat("\n")
+}
+
+move_robots <- function(all_robots, secs) {
+  get_quadrant <- function(pos, size) {
+    if (pos[1L] == ((size[1L] - 1L) / 2) || 
+        pos[2L] == ((size[2L] - 1L) / 2L)) {
+      0L
+    } else {
+      if (pos[1L] <= size[1L] / 2L) {
+        if (pos[2L] <= size[2L] / 2) {
+          1L
+        } else {
+          2L
+        }
+      } else {
+        if (pos[2L] <= size[2L] / 2) {
+          3L
+        } else {
+          4L
+        }
+      }
+    }
+  }
+  
+  move_robot <- function(a_robot, secs, size) {
+    pos <- a_robot[c("x", "y")]
+    vel <- a_robot[c("delta_x", "delta_y")]
+    res <- (pos + secs * vel) %% size %>% 
+      matrix(nrow = 1L) %>% 
+      set_colnames(c("x", "y"))
+    res <- cbind(res,
+                 quadrant = get_quadrant(res, size))
+    attr(res, "size") <- size
+    res
+  }
+  
+  size <- attr(all_robots, "size")
+  
+  res <- apply(all_robots, 1L, move_robot, secs, size) %>% 
+    t() %>% 
+    set_colnames(c("x", "y", "quadrant")) %>% 
+    as_tibble()
+  attr(res, "size") <- size
+  res
+}
+
+
+res <- move_robots(puzzle_data, 100L) 
+
+res %>% 
+  filter(quadrant != 0) %>% 
+  group_by(quadrant) %>% 
+  summarize(n = n()) %>% 
+  pull(n) %>% 
+  prod()
+
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We have no idea how the tree should look like, but it is safe to assume that in any 
+picture robots are somehow connected to form a picture. Thus, robots cluster in the same
+area. We can thus measure the variance in both directions and summing them up. The index
+with the lowest sum could be a candidate where there is some structure in the picture.
+
+```{r get-solution-2, cache = TRUE}
+vars <- map_dbl(
+  1:10000,
+  \(i) move_robots(puzzle_data, i) %>% 
+    summarize(v = var(x) + var(y)) %>% 
+    pull(v)
+)
+
+(sol <- which.min(vars))
+```
+
+```{r visualize-solution}
+visualize_puzzle(move_robots(puzzle_data, sol))
+```
+
