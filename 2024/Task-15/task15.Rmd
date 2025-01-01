@@ -1,0 +1,223 @@
+---
+params:
+   task_nr: 15
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- str_split(text_block, "\n")
+  }
+  text_block <- text_block %>% 
+    unlist() %>% 
+    str_split("\n") %>% 
+    head(-1L)
+  split_idx <- which(!nzchar(text_block))
+  warehouse <- text_block[seq(1L, split_idx - 1L)]
+  movements <- text_block[seq(split_idx + 1L, length(text_block))]
+  list(
+    warehouse = str_split(warehouse, "") %>% 
+      do.call(rbind, .),
+    movements = str_split(movements, "") %>% 
+      unlist()
+  )
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r get_example_data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+```{r get-solution-1}
+show_warehouse <- function(warehouse) {
+  cat(
+    apply(
+      warehouse, 1, paste, collapse = ""
+    ) %>% 
+      paste(collapse = "\n"),
+    "\n\n"
+  )
+}
+
+push_boxes <- function(warehouse, movements) {
+  dirs <- rbind(
+    cbind(-1L, 0L),
+    cbind(0L, 1L),
+    cbind(1L, 0L),
+    cbind(0L, -1L)
+  ) %>% 
+    set_rownames(c("^", ">", "v", "<"))
+  current_pos <- which(warehouse == "@", arr.ind = TRUE)
+  move <- function(current_pos, direction) {
+    #if (all(c(current_pos) == c(6, 5))) browser()
+    dir <- dirs[direction, , drop = FALSE]
+    new_pos <- current_pos + dir
+    new_field <- warehouse[new_pos]
+    if (new_field == ".") {
+      ## field is empty => move
+      warehouse[rbind(current_pos, new_pos)] <<- c(".", "@")
+    } else if (new_field == "#") {
+      ## field is a wall => do not move
+      new_pos <- current_pos
+    } else if (new_field == "O") {
+      ## field is a crate
+      ## get distance to border
+      if (any(dir < 0)) {
+        ## we go left / up
+        ref_point <- cbind(1L, 1L)
+      } else {
+        ref_point <- dim(warehouse)
+      }
+      distance_border <- abs(c((ref_point - current_pos) / dir))
+      distance_border <- distance_border[is.finite(distance_border)]
+      if (distance_border >= 3) {
+        ## if we are at least 3 fields away from border (for "# o @" there cannot be an
+        ## empty space)
+        ## all fields next to the current position until the border   
+        idx <- map(seq(2L, distance_border - 1L), ~ current_pos + .x * dir) %>% 
+          do.call(rbind, .)
+        ## free spaces in the same row / col
+        free_spaces <- warehouse[idx] == "."
+        ## walls in the same row / col
+        walls <- warehouse[idx] == "#"
+        ## first free space
+        first_free_space <- which.max(free_spaces)
+        closest_wall <- which.max(walls)
+        if (any(free_spaces) && (!any(walls) || first_free_space < closest_wall)) {
+          ## if there is at least one free space _after_ a wall 
+          warehouse[idx[seq(1L, first_free_space), , drop = FALSE]] <<- "O"
+          warehouse[new_pos] <<- "@"
+          warehouse[current_pos] <<- "."
+        } else {
+          ## if there's none, don't move
+          new_pos <- current_pos
+        }
+      }
+    }
+    cat(direction, "\n")
+    show_warehouse(warehouse)
+    new_pos
+  }
+  reduce(movements, move, .init = current_pos)
+  warehouse
+}
+wh <- example_data$warehouse
+show_warehouse(wh)
+hh <- push_boxes(wh, example_data$movements)
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+
+
+```{r get-solution-2}
+```
+
