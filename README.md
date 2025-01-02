@@ -24,10 +24,10 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 9](https://thothal.github.io/AoC/2024_task9.html)
 - [x] [Day 10](https://thothal.github.io/AoC/2024_task10.html)
 - [x] [Day 11](https://thothal.github.io/AoC/2024_task11.html)
-- [ ] Day 12
-- [ ] Day 13
-- [ ] Day 14
-- [ ] Day 15
+- [x] [Day 12](https://thothal.github.io/AoC/2024_task12.html)
+- [x] [Day 13](https://thothal.github.io/AoC/2024_task13.html)
+- [x] [Day 14](https://thothal.github.io/AoC/2024_task14.html)
+- [x] [Day 15](https://thothal.github.io/AoC/2024_task15.html)
 - [ ] Day 16
 - [ ] Day 17
 - [ ] Day 18
