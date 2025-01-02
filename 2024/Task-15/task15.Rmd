@@ -1,0 +1,511 @@
+---
+params:
+   task_nr: 15
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+library(ggplot2)
+library(gganimate)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      unlist() %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      head(-1L)
+  }
+  split_idx <- which(!nzchar(text_block))
+  warehouse <- text_block[seq(1L, split_idx - 1L)]
+  movements <- text_block[seq(split_idx + 1L, length(text_block))]
+  list(
+    warehouse = str_split(warehouse, "") %>% 
+      do.call(rbind, .),
+    movements = str_split(movements, "") %>% 
+      unlist()
+  )
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r get_example_data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The solution is rather straight forward. Let the robot move and on each step determine 
+where he will move to:
+1. If the new spot is empty, simply move to it.
+1. If it is a wall, stay where you are.
+1. If it is a crate, check for the first empty spot behind the crates and push the crates.
+
+
+```{r get-solution-1, cache = TRUE, message = FALSE}
+show_warehouse <- function(warehouse) {
+  cat(
+    apply(
+      warehouse, 1, paste, collapse = ""
+    ) %>% 
+      paste(collapse = "\n"),
+    "\n\n"
+  )
+}
+
+plot_warehouse <- function(warehouse, direction) {
+  if (!is.list(warehouse)) {
+    warehouse <- list(warehouse)
+  }
+  stopifnot(length(warehouse) == length(direction))
+  coords <- map(seq_along(warehouse), ~ tibble(
+    x = rep(1:ncol(warehouse[[.x]]), each = nrow(warehouse[[.x]])),
+    y = rep(nrow(warehouse[[.x]]):1, ncol(warehouse[[.x]])),
+    value = c(warehouse[[.x]])
+  ) %>% 
+    mutate(fill = case_when(
+      value == "@" ~ "firebrick",
+      value %in% c("O", "[", "]") ~ "burlywood",
+      value == "#" ~ "gray70",
+      TRUE ~ NA_character_
+    ),
+    start = value == "@",
+    dir = direction[[.x]],
+    vj = case_when(
+      dir == "^" ~ .75, 
+      dir == "v" ~ .35,
+      TRUE ~ .5),
+    frame = .x)
+  ) %>% 
+    list_rbind()
+  res <- ggplot(coords, aes(x = x, y = y)) + 
+    geom_tile(aes(fill = fill), linewidth = .5, color = "black") +
+    scale_fill_identity() + 
+    theme_void() +
+    coord_fixed() +
+    geom_text(data = coords %>% filter(start),
+              aes(label = dir, vjust = vj), 
+              color = "white", size = 15) +
+    geom_text(aes(label = label), 
+              data = coords %>% 
+                select(x, y) %>% 
+                mutate(label = max(y) + 1 - y, x = 0) %>% 
+                distinct(),
+              color = "#007ACC",
+              hjust = .5) +
+    geom_text(aes(label = label), 
+              data = coords %>% 
+                select(x, y) %>% 
+                mutate(label = max(y) + 1L - y, x = max(x) + 1) %>% 
+                distinct(),
+              color = "#007ACC",
+              hjust = .5) +
+    geom_text(aes(label = label), 
+              data = coords %>% 
+                select(x, y) %>% 
+                mutate(label = x, y = 0) %>% 
+                distinct(),
+              color = "#007ACC",
+              vjust = .5) +
+    geom_text(aes(label = label), 
+              data = coords %>% 
+                select(x, y) %>% 
+                mutate(label = x, y = max(y) + 1) %>% 
+                distinct(),
+              color = "#007ACC",
+              vjust = .5) +
+    labs(subtitle = "Step {frame}") +
+    transition_manual(frame) +
+    theme(
+      plot.subtitle = element_text(color = "#007ACC"),
+      plot.background = element_blank(),
+      panel.background = element_blank()
+    )
+                                     
+  invisible(res)
+}
+
+push_boxes <- function(warehouse, movements, do_print = FALSE, save_plot = FALSE) {
+  dirs <- rbind(
+    cbind(-1L, 0L),
+    cbind(0L, 1L),
+    cbind(1L, 0L),
+    cbind(0L, -1L)
+  ) %>% 
+    set_rownames(c("^", ">", "v", "<"))
+  current_pos <- which(warehouse == "@", arr.ind = TRUE)
+  i <- 1
+  all_warehouses <- list(warehouse)
+  move <- function(current_pos, direction) {
+    dir <- dirs[direction, , drop = FALSE]
+    new_pos <- current_pos + dir
+    new_field <- warehouse[new_pos]
+    if (new_field == ".") {
+      ## field is empty => move
+      warehouse[rbind(current_pos, new_pos)] <<- c(".", "@")
+    } else if (new_field == "#") {
+      ## field is a wall => do not move
+      new_pos <- current_pos
+    } else if (new_field == "O") {
+      ## field is a crate
+      ## get distance to border
+      if (any(dir < 0)) {
+        ## we go left / up
+        ref_point <- cbind(1L, 1L)
+      } else {
+        ref_point <- dim(warehouse)
+      }
+      distance_border <- abs(c((ref_point - current_pos) / dir))
+      distance_border <- distance_border[is.finite(distance_border)]
+      if (distance_border >= 3) {
+        ## if we are at least 3 fields away from border 
+        ## (for "# o @" there cannot be an empty space)
+        ## all fields next to the current position until the border   
+        idx <- map(seq(2L, distance_border - 1L), ~ current_pos + .x * dir) %>% 
+          do.call(rbind, .)
+        ## free spaces in the same row / col
+        free_spaces <- warehouse[idx] == "."
+        ## walls in the same row / col
+        walls <- warehouse[idx] == "#"
+        ## first free space
+        first_free_space <- which.max(free_spaces)
+        closest_wall <- which.max(walls)
+        if (any(free_spaces) && (!any(walls) || first_free_space < closest_wall)) {
+          ## if there is at least one free space _after_ a wall 
+          warehouse[idx[seq(1L, first_free_space), , drop = FALSE]] <<- "O"
+          warehouse[new_pos] <<- "@"
+          warehouse[current_pos] <<- "."
+        } else {
+          ## if there's none, don't move
+          new_pos <- current_pos
+        }
+      } else {
+        new_pos <- current_pos
+      }
+    }
+    if (do_print) {
+      msg <- paste0("Step ", i, ": ", direction)
+      cat(msg, "\n")
+      show_warehouse(warehouse)
+    }
+    i <<- i + 1
+    if (save_plot) {
+      all_warehouses <<- c(all_warehouses, list(warehouse))
+    }
+    new_pos
+  }
+  reduce(movements, move, .init = current_pos)
+  if (save_plot) {
+    anim <- animate(plot_warehouse(all_warehouses, c("S", movements)), fps = 4, 
+                    nframes = length(all_warehouses))
+    
+  } else {
+    anim <- NULL
+  }
+  list(warehouse = warehouse, anim = anim)
+}
+
+calculate_gps <- function(warehouse) {
+  pos <- which(warehouse == "O" | warehouse == "[", arr.ind = TRUE)
+  sum((pos[, "row"] - 1L) * 100L + (pos[, "col"] - 1L))
+}
+
+solution1 <- push_boxes(puzzle_data$warehouse,
+                        puzzle_data$movements, save_plot = FALSE)
+
+calculate_gps(solution1$warehouse)
+```
+
+For the fun of it, here is a GIF showing the robot at work for a smaller warehouse:
+
+```{r show-animation-1, echo = FALSE, message = FALSE}
+example_data <- list(warehouse = structure(c("#", "#", "#", "#", "#", "#", "#", "#", 
+                                             "#", ".", "#", ".", ".", ".", ".", "#", 
+                                             "#", ".", "@", ".", "#", ".", ".", "#", 
+                                             "#", "O", ".", ".", ".", ".", ".", "#", 
+                                             "#", ".", "O", "O", "O", "O", ".", "#", 
+                                             "#", "O", ".", ".", ".", ".", ".", "#", 
+                                             "#", ".", ".", ".", ".", ".", ".", "#", 
+                                             "#", "#", "#","#", "#", "#", "#", "#"), 
+                                           dim = c(8L, 8L)), 
+                     movements = c("<", "^", "^", ">", ">", ">", "v", "v", "<", "v", ">",
+                                   ">", "v", "<", "<"))
+ex1 <- push_boxes(example_data$warehouse, example_data$movements, save_plot = TRUE)
+ex1$anim
+```
+
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We have to adapt our code slightly. Left right pushes work the same way as before, we just
+have to make sure that we mark the new fields with the proper crate markers.
+
+For upward and downward pushes, we have, however, to identify the current block. That is 
+all crates which are vertically connected. We do that via a backtracking algorithm. If 
+there is a wall above (below) any of the crates which we want to push, we return `NA`, 
+thus, effectively avoiding a push.
+
+
+```{r get-solution-2, cache = TRUE}
+enlarge_warehouse <- function(warehouse) {
+  dd <- dim(warehouse)
+  new_warehouse <- matrix(".",  dd[1L], 2L * dd[2L])
+  idxs <- which(warehouse != "." , arr.ind = TRUE)
+  for (i in seq_len(nrow(idxs))) {
+    idx <- idxs[i, , drop = FALSE]
+    pos_1 <- pos_2 <- idx
+    pos_1[2L] <- 2L * pos_1[2L] - 1L
+    pos_2[2L] <- 2L * pos_2[2L]
+    pos <- rbind(pos_1, pos_2)
+    if (warehouse[idx] == "O") {
+      new_warehouse[pos] <- c("[", "]")
+    } else if (warehouse[idx] == "@") {
+      new_warehouse[pos[1L, , drop = FALSE]] <- "@" 
+    } else {
+      new_warehouse[pos] <- warehouse[idx]
+    }
+  }
+  new_warehouse
+}
+
+push_big_boxes <- function(warehouse, movements, do_print = FALSE, save_plot = FALSE) {
+  dirs <- rbind(
+    cbind(-1L, 0L),
+    cbind(0L, 1L),
+    cbind(1L, 0L),
+    cbind(0L, -1L)
+  ) %>% 
+    set_rownames(c("^", ">", "v", "<"))
+  current_pos <- which(warehouse == "@", arr.ind = TRUE)
+  i <- 1
+  all_warehouses <- list(warehouse)
+  move <- function(current_pos, direction) {
+    dir <- dirs[direction, , drop = FALSE]
+    new_pos <- current_pos + dir
+    new_field <- warehouse[new_pos]
+    if (new_field == ".") {
+      ## field is empty => move
+      warehouse[rbind(current_pos, new_pos)] <<- c(".", "@")
+    } else if (new_field == "#") {
+      ## field is a wall => do not move
+      new_pos <- current_pos
+    } else if (new_field %in% c("[", "]")) {
+      ## field is a crate
+      if (direction %in% c("<", ">")) {
+        ## get distance to border
+        if (any(dir < 0)) {
+          ## we go left / up
+          ref_point <- cbind(1L, 1L)
+        } else {
+          ref_point <- dim(warehouse)
+        }
+        distance_border <- abs(c((ref_point - current_pos) / dir))
+        distance_border <- distance_border[is.finite(distance_border)]
+        ## left / right
+        if (distance_border >= 5) {
+          ## if we are at least 5 fields away from border 
+          ## (for "# # [ ] @" there cannot be an empty space)
+          ## all fields next to the current position until the border   
+          idx <- map(seq(1L, distance_border - 1L), ~ current_pos + .x * dir) %>% 
+            do.call(rbind, .)
+          ## free spaces in the same row / col
+          free_spaces <- warehouse[idx] == "."
+          ## walls in the same row / col
+          walls <- warehouse[idx] == "#"
+          ## first free space
+          first_free_space <- which.max(free_spaces)
+          closest_wall <- which.max(walls)
+          if (any(free_spaces) && (!any(walls) || first_free_space < closest_wall)) {
+            ## if there is at least one free space _after_ a wall 
+            
+            block_idx <- seq(1L, first_free_space)
+            stopifnot(length(block_idx) %% 2L == 1L)
+            block <- rep(c("[", "]"), (length(block_idx) - 1L) / 2L)
+            block_idx <- idx[tail(block_idx, -1L), , drop = FALSE]
+            warehouse[block_idx[order(block_idx[, 2]), , drop = FALSE]] <<- block
+            warehouse[new_pos] <<- "@"
+            warehouse[current_pos] <<- "."
+          } else {
+            ## if there's none, don't move
+            new_pos <- current_pos
+          }
+        } else {
+          new_pos <- current_pos
+        }
+      } else {
+        ## up / down
+        get_block <- function(current_pos) {
+          res <- NULL
+          if (warehouse[current_pos] %in% c("[", "]")) {
+            ## we hit (yet another) a box
+            left_part <- right_part <- current_pos
+            if (warehouse[current_pos] == "[") {
+              right_part[2L] <- right_part[2L] + 1L
+            } else {
+              left_part[2L] <- left_part[2L] - 1L
+            }
+            me <- rbind(left_part, right_part)
+            res <- rbind(me,
+                         Recall(left_part + dir),
+                         Recall(right_part + dir))
+          } else if (warehouse[current_pos] == "#") {
+            ## there is a wall in the way so we cannot move
+            res <- NA
+          } else if (warehouse[current_pos] == ".") {
+            ## there is an empty space so this box part could be moved
+            res <- NULL
+          }
+          res
+        }
+        block_idx <- get_block(new_pos)
+        if (any(is.na(block_idx[, 1]))) {
+          ## block cannot be moved b/c a wall is blocking at some point
+          new_pos <- current_pos
+        } else {
+          block <- warehouse[block_idx]
+          new_block_idx <- t(t(block_idx) + c(dir))
+          warehouse[block_idx] <<- "."
+          warehouse[new_block_idx] <<- block
+          warehouse[new_pos] <<- "@"
+          warehouse[current_pos] <<- "."
+        }
+      }
+    }
+    if (do_print) {
+      msg <- paste0("Step ", i, ": ", direction)
+      cat(msg, "\n")
+      show_warehouse(warehouse)
+    }
+    i <<- i + 1
+    all_warehouses <<- c(all_warehouses, list(warehouse))
+    new_pos
+  }
+  reduce(movements, move, .init = current_pos)
+  if (save_plot) {
+    anim <- animate(plot_warehouse(all_warehouses, c("S", movements)), fps = 4, 
+                    nframes = length(all_warehouses))
+    
+  } else {
+    anim <- NULL
+  }
+  list(warehouse = warehouse, anim = anim)
+}
+
+solution2 <- enlarge_warehouse(puzzle_data$warehouse) %>% 
+  push_big_boxes(puzzle_data$movements)
+calculate_gps(solution2$warehouse)
+```
+
+And again a small visualization:
+
+```{r show-animation-2, echo = FALSE, message = FALSE}
+ex2 <- push_big_boxes(enlarge_warehouse(example_data$warehouse), 
+                  example_data$movements, save_plot = TRUE)
+ex2$anim
+```
+
+
