@@ -1,0 +1,387 @@
+---
+params:
+   task_nr: 16
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   o_file <- sprintf("%s_%s", format(Sys.Date(), "%Y"), 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      unlist() %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      head(-1L)
+  }
+  str_split(text_block,
+            "") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r get_example_data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The idea of the algorithm is as follows:
+
+1. First, find node which has currently the cheapest path to it **and** has still some
+neighbors which have no costs associated yet.
+1. If we can walk in the current direction from this node, do so, otherwise make a turn
+and move then. Keep track of the costs for this operation. If we changed direction, store
+the new direction for this node.
+1. Continue until we reach the final node.
+
+As we are greedily moving along the cheapest path, we will eventually get to the end point
+with lowest costs.
+
+*N.B.* Updating the number of free neighbors of all nodes in each iteration is a bit of
+an overkill and could be optimised to only update hte free neighbors in the local 
+neighborhood.
+
+```{r get-solution-1}
+get_shortest_path <- function(reindeer_map) {
+  dirs <- rbind(
+    cbind(-1L, 0L),
+    cbind(0L, 1L),
+    cbind(1L, 0L),
+    cbind(0L, -1L)
+  ) %>% 
+    set_rownames(c("^", ">", "v", "<"))
+  dd <- dim(reindeer_map)
+  costs <- matrix(Inf, dd[1L], dd[2L])
+  direction <- matrix(NA_character_, dd[1L], dd[2L])
+  
+  turn <- function(current_dir, clockwise) {
+    if (clockwise) {
+      switch(current_dir,
+             "^" = ">",
+             ">" = "v",
+             "v" = "<",
+             "<" = "^"
+      )
+    } else {
+      switch(current_dir,
+             "^" = "<",
+             "<" = "v",
+             "v" = ">",
+             ">" = "^"
+      )
+    }
+  }
+  move <- function(current_pos, current_dir) {
+    current_pos + dirs[current_dir, , drop = FALSE]
+  }
+  
+  get_free_nbs <- function() {
+    is_walkable <- reindeer_map == "." | reindeer_map == "E" | reindeer_map == "S"
+    is_unassigned <- is.infinite(costs)
+    free <- is_walkable & is_unassigned
+    rbind(free[-1L, ], FALSE) +
+      rbind(FALSE, free[-dd[1L], ]) +
+      cbind(free[, -1L], FALSE) +
+      cbind(FALSE, free[, -dd[2L]])
+  }
+  n_nbs <- get_free_nbs()
+  start_pos <- which(reindeer_map == "S", arr.ind = TRUE)
+  end_pos <- which(reindeer_map == "E", arr.ind = TRUE)
+  costs[start_pos] <- 0L
+  direction[start_pos] <- ">"
+  while(is.infinite(costs[end_pos])) {
+    nodes_with_neighbors <- which(n_nbs > 0, arr.ind = TRUE)
+    filtered_costs <- costs[nodes_with_neighbors]
+    cheapest_node <- nodes_with_neighbors[filtered_costs == min(filtered_costs), ,                                          drop = FALSE][1, , drop = FALSE]
+    current_dir <- direction[cheapest_node] 
+    stopifnot(!is.na(current_dir))
+    all_dirs <- c(current_dir, turn(current_dir, TRUE), turn(current_dir, FALSE))
+    candidates <- rbind(
+      move(cheapest_node, current_dir),
+      move(cheapest_node, turn(current_dir, TRUE)),
+      move(cheapest_node, turn(current_dir, FALSE))
+    ) %>% 
+      set_rownames(all_dirs)
+    for (nb_dir in all_dirs) {
+      candidate <- candidates[nb_dir, , drop = FALSE]
+      if (reindeer_map[candidate] %in% c("E", ".") && is.infinite(costs[candidate])) {
+        ## consider only neighbors whihc have unassigned costs and are walk-able
+        new_costs <-  costs[cheapest_node] + 1L + 
+          if_else(nb_dir == current_dir, 0L, 1000L)
+        ## update costs
+        costs[candidate] <- new_costs
+        ## store direction
+        direction[candidate] <- nb_dir
+        ## update free neighbor count (could be optimized)
+        n_nbs <- get_free_nbs()
+        break
+      }
+    }
+  }
+  costs[end_pos]
+}
+get_shortest_path(puzzle_data)
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To solve this puzzle, we fall back to *graph theory*. We construct the graph as follows:
+
+1. For each field in the map we create **4** nodes representing the 4 directions in which 
+we could look. For instance the field `14/2` will be represented by the 4 nodes `14/2/^`,
+`14/2/>`, `14/2/v` and `14/2/<`.
+1. We connect neighboring fields along their same direction and assign a weight of 1 to
+this edge. This represents moving form one field to another in a straight line.
+For instance, the connected fields `14/2` and `13/2` would yield an edge 
+`14/2/^ --> 13/2/^`.
+1. Next, we connect nodes at the same position but different directions if they can be 
+reached via a turn and assign weight 1000. For instance we connect `14/2/>` with `14/2/^`
+and `14/2/v` which represents a turn.
+1. For convenience we define 2 artificial nodes `S` (start) and `E` (end). We connect `S` 
+with weight 0 to the starting position with direction `>` (which is our starting 
+direction) and `E` with all possible direction of the end point (we do not care how we
+reach the end point, that is facing south or facing north would both yield a valid end).
+1. Eventually, to get the solution, we simply construct all shortest paths from `S` to 
+`E`, reduce the node list to fields (that is stripping the direction part of the 
+identifier) and count unique fields.
+
+The algorithm does not create all directions for the fields, but only those which are
+relevant for the solution. For instance if a field has walls to its East and West 
+(allowing moves only to the South and North) we do not create nodes with directions `>` or
+`<`, as it does not make sense to turn into these directions.
+
+*N.B.*  This graph construction allows a swell to solve part one of the puzzle simply by 
+getting the weight of the shortest path.
+
+```{r get-solution-2, cache = TRUE}
+construct_graph <- function(reindeer_map) {
+  dd <- dim(reindeer_map)
+  dirs <- rbind(
+      cbind(-1L, 0L),
+      cbind(0L, 1L),
+      cbind(1L, 0L),
+      cbind(0L, -1L)
+    ) %>% 
+      set_rownames(c("^", ">", "v", "<"))
+  turn <- function(dir, n) {
+    if (n == 1L) {
+      switch(dir,
+             "^" = ">",
+             ">" = "v",
+             "v" = "<",
+             "<" = "^")
+    } else if (n == -1L) {
+      switch(dir,
+             "^" = "<",
+             ">" = "^",
+             "v" = ">",
+             "<" = "v")
+    } else if (n == 2L) {
+      switch(dir,
+             "^" = "v",
+             ">" = "<",
+             "v" = "^",
+             "<" = ">")
+    }
+  }
+  
+  make_vertex_id <- function(current_pos, current_dir) {
+    paste(current_pos, collapse = "/") %>% 
+      paste(current_dir, sep = "/")
+  }
+  
+  is_valid_pos <- function(new_pos) {
+    all(new_pos >= c(1L, 1L) & new_pos <= dd) &&
+      reindeer_map[matrix(new_pos, nrow = 1)] != "#" 
+  }
+  
+  get_neighbor_nodes <- function(current_pos) {
+    nbs <- t(t(dirs) + c(current_pos))
+    nbs[apply(nbs, 1, is_valid_pos), , drop = FALSE]
+  }
+  
+  get_edges <- function() {
+    edges <- tibble(from = character(0L), 
+                    to = character(0L),
+                    weight = integer(0L))
+    no_walls <- which(reindeer_map != "#", arr.ind = TRUE)
+    for (row in seq_len(nrow(no_walls))) {
+      current_node <- no_walls[row, , drop = FALSE]
+      nbs <- get_neighbor_nodes(current_node)
+      nb_dirs <- rownames(nbs)
+      for (dir in nb_dirs) {
+        nb <- nbs[dir, , drop = FALSE]
+        from <- make_vertex_id(current_node, dir)
+        to <- make_vertex_id(nb, dir)
+        edges <- edges %>% 
+          bind_rows(
+            tibble(from = from, to = to, weight = 1L)
+          )
+        par_dir <- turn(dir, 2L)
+        turn_dirs <- setdiff(nb_dirs, dir)
+        for (turn_dir in turn_dirs) {
+          if (turn_dir != par_dir) {
+            edges <- edges %>% 
+              bind_rows(
+                tibble(from = make_vertex_id(current_node, par_dir), 
+                       to = make_vertex_id(current_node, turn_dir), 
+                       weight = 1000L)
+              )
+          }
+        }
+      }
+    }
+  edges
+  }
+  
+  edges <- get_edges()
+  start_pos <- which(reindeer_map == "S", arr.ind = TRUE)
+  end_pos <- which(reindeer_map == "E", arr.ind = TRUE)
+  
+  edges <- edges %>% 
+    bind_rows(
+      tibble(from = rep(make_vertex_id(start_pos, ">"), 2L),
+             to = c(make_vertex_id(start_pos, "^"),
+                    make_vertex_id(start_pos, "v")),
+             weight = rep(1000L, 2L)),
+      tibble(from = map_chr(rownames(dirs), 
+                            ~ make_vertex_id(end_pos, .x)),
+             to = rep("E", 4L),
+             weight = rep(0L, 4L)),
+      tibble(from = "S",
+             to = make_vertex_id(start_pos, ">"),
+             weight = 0L),
+    )
+  
+  graph_from_data_frame(edges, directed = TRUE)
+}
+
+get_all_spots <- function(G) {
+  paths <- all_shortest_paths(G, "S", "E")$vpath
+  paths %>% 
+    do.call(c, .) %>% 
+    unique() %>% 
+    difference(V(G)[name %in% c("S", "E")]) %>% 
+    names() %>% 
+    str_remove("/.$") %>% 
+    unique()
+}
+
+
+G <- construct_graph(puzzle_data)
+get_all_spots(G) %>% 
+  length()
+```
+
+*N.B.* This graph construction allows for solving part 1 also quite easily:
+
+```{r alternative-solution-1}
+distances(G, "S", "E")
+```
