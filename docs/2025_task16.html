@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-01-03" />
+        <meta name="date" content="2025-01-06" />
     
     <title>Task 16   </title>
 
@@ -1821,7 +1821,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-01-03</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-01-06</p>
            
 
    
@@ -1855,7 +1855,8 @@ library(purrr)
 library(stringr)
 library(knitr)
 library(cli)
-library(bit64)</code></pre>
+library(bit64)
+library(igraph)</code></pre>
 </div>
 <div id="retrieve-data-from-aoc" class="section level2" number="1.2">
 <h2><span class="header-section-number">1.2</span> Retrieve Data from <tt>AoC</tt></h2>
@@ -2060,12 +2061,11 @@ neighborhood.</p>
   costs[start_pos] &lt;- 0L
   direction[start_pos] &lt;- &quot;&gt;&quot;
   while(is.infinite(costs[end_pos])) {
-    nodes_with_neighbors &lt;- which(n_nbs &gt; 0 &amp; !is.na(costs), arr.ind = TRUE)
+    nodes_with_neighbors &lt;- which(n_nbs &gt; 0, arr.ind = TRUE)
     filtered_costs &lt;- costs[nodes_with_neighbors]
     cheapest_node &lt;- nodes_with_neighbors[filtered_costs == min(filtered_costs), ,                                          drop = FALSE][1, , drop = FALSE]
     current_dir &lt;- direction[cheapest_node] 
     stopifnot(!is.na(current_dir))
-    ## check if node in same direction is walk-able
     all_dirs &lt;- c(current_dir, turn(current_dir, TRUE), turn(current_dir, FALSE))
     candidates &lt;- rbind(
       move(cheapest_node, current_dir),
@@ -2073,16 +2073,17 @@ neighborhood.</p>
       move(cheapest_node, turn(current_dir, FALSE))
     ) %&gt;% 
       set_rownames(all_dirs)
-    done &lt;- FALSE
     for (nb_dir in all_dirs) {
       candidate &lt;- candidates[nb_dir, , drop = FALSE]
       if (reindeer_map[candidate] %in% c(&quot;E&quot;, &quot;.&quot;) &amp;&amp; is.infinite(costs[candidate])) {
+        ## consider only neighbors whihc have unassigned costs and are walk-able
         new_costs &lt;-  costs[cheapest_node] + 1L + 
           if_else(nb_dir == current_dir, 0L, 1000L)
         ## update costs
         costs[candidate] &lt;- new_costs
         ## store direction
         direction[candidate] &lt;- nb_dir
+        ## update free neighbor count (could be optimized)
         n_nbs &lt;- get_free_nbs()
         break
       }
@@ -2158,6 +2159,154 @@ Analyze your map further. <em>How many tiles are part of at least one of the bes
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
+<p>To solve this puzzle, we fall back to <em>graph theory</em>. We construct the graph as follows:</p>
+<ol style="list-style-type: decimal">
+<li>For each field in the map we create <strong>4</strong> nodes representing the 4 directions in which
+we could look. For instance the field <code>14/2</code> will be represented by the 4 nodes <code>14/2/^</code>,
+<code>14/2/&gt;</code>, <code>14/2/v</code> and <code>14/2/&lt;</code>.</li>
+<li>We connect neighboring fields along their same direction and assign a weight of 1 to
+this edge. This represents moving form one field to another in a straight line.
+For instance, the connected fields <code>14/2</code> and <code>13/2</code> would yield an edge
+<code>14/2/^ --&gt; 13/2/^</code>.</li>
+<li>Next, we connect nodes at the same position but different directions if they can be
+reached via a turn and assign weight 1000. For instance we connect <code>14/2/&gt;</code> with <code>14/2/^</code>
+and <code>14/2/v</code> which represents a turn.</li>
+<li>For convenience we define 2 artificial nodes <code>S</code> (start) and <code>E</code> (end). We connect <code>S</code>
+with weight 0 to the starting position with direction <code>&gt;</code> (which is our starting
+direction) and <code>E</code> with all possible direction of the end point (we do not care how we
+reach the end point, that is facing south or facing north would both yield a valid end).</li>
+<li>Eventually, to get the solution, we simply construct all shortest paths from <code>S</code> to
+<code>E</code>, reduce the node list to fields (that is stripping the direction part of the
+identifier) and count unique fields.</li>
+</ol>
+<p>The algorithm does not create all directions for the fields, but only those which are
+relevant for the solution. For instance if a field has walls to its East and West
+(allowing moves only to the South and North) we do not create nodes with directions <code>&gt;</code> or
+<code>&lt;</code>, as it does not make sense to turn into these directions.</p>
+<p><em>N.B.</em> This graph construction allows a swell to solve part one of the puzzle simply by
+getting the weight of the shortest path.</p>
+<pre class="r"><code>construct_graph &lt;- function(reindeer_map) {
+  dd &lt;- dim(reindeer_map)
+  dirs &lt;- rbind(
+      cbind(-1L, 0L),
+      cbind(0L, 1L),
+      cbind(1L, 0L),
+      cbind(0L, -1L)
+    ) %&gt;% 
+      set_rownames(c(&quot;^&quot;, &quot;&gt;&quot;, &quot;v&quot;, &quot;&lt;&quot;))
+  turn &lt;- function(dir, n) {
+    if (n == 1L) {
+      switch(dir,
+             &quot;^&quot; = &quot;&gt;&quot;,
+             &quot;&gt;&quot; = &quot;v&quot;,
+             &quot;v&quot; = &quot;&lt;&quot;,
+             &quot;&lt;&quot; = &quot;^&quot;)
+    } else if (n == -1L) {
+      switch(dir,
+             &quot;^&quot; = &quot;&lt;&quot;,
+             &quot;&gt;&quot; = &quot;^&quot;,
+             &quot;v&quot; = &quot;&gt;&quot;,
+             &quot;&lt;&quot; = &quot;v&quot;)
+    } else if (n == 2L) {
+      switch(dir,
+             &quot;^&quot; = &quot;v&quot;,
+             &quot;&gt;&quot; = &quot;&lt;&quot;,
+             &quot;v&quot; = &quot;^&quot;,
+             &quot;&lt;&quot; = &quot;&gt;&quot;)
+    }
+  }
+  
+  make_vertex_id &lt;- function(current_pos, current_dir) {
+    paste(current_pos, collapse = &quot;/&quot;) %&gt;% 
+      paste(current_dir, sep = &quot;/&quot;)
+  }
+  
+  is_valid_pos &lt;- function(new_pos) {
+    all(new_pos &gt;= c(1L, 1L) &amp; new_pos &lt;= dd) &amp;&amp;
+      reindeer_map[matrix(new_pos, nrow = 1)] != &quot;#&quot; 
+  }
+  
+  get_neighbor_nodes &lt;- function(current_pos) {
+    nbs &lt;- t(t(dirs) + c(current_pos))
+    nbs[apply(nbs, 1, is_valid_pos), , drop = FALSE]
+  }
+  
+  get_edges &lt;- function() {
+    edges &lt;- tibble(from = character(0L), 
+                    to = character(0L),
+                    weight = integer(0L))
+    no_walls &lt;- which(reindeer_map != &quot;#&quot;, arr.ind = TRUE)
+    for (row in seq_len(nrow(no_walls))) {
+      current_node &lt;- no_walls[row, , drop = FALSE]
+      nbs &lt;- get_neighbor_nodes(current_node)
+      nb_dirs &lt;- rownames(nbs)
+      for (dir in nb_dirs) {
+        nb &lt;- nbs[dir, , drop = FALSE]
+        from &lt;- make_vertex_id(current_node, dir)
+        to &lt;- make_vertex_id(nb, dir)
+        edges &lt;- edges %&gt;% 
+          bind_rows(
+            tibble(from = from, to = to, weight = 1L)
+          )
+        par_dir &lt;- turn(dir, 2L)
+        turn_dirs &lt;- setdiff(nb_dirs, dir)
+        for (turn_dir in turn_dirs) {
+          if (turn_dir != par_dir) {
+            edges &lt;- edges %&gt;% 
+              bind_rows(
+                tibble(from = make_vertex_id(current_node, par_dir), 
+                       to = make_vertex_id(current_node, turn_dir), 
+                       weight = 1000L)
+              )
+          }
+        }
+      }
+    }
+  edges
+  }
+  
+  edges &lt;- get_edges()
+  start_pos &lt;- which(reindeer_map == &quot;S&quot;, arr.ind = TRUE)
+  end_pos &lt;- which(reindeer_map == &quot;E&quot;, arr.ind = TRUE)
+  
+  edges &lt;- edges %&gt;% 
+    bind_rows(
+      tibble(from = rep(make_vertex_id(start_pos, &quot;&gt;&quot;), 2L),
+             to = c(make_vertex_id(start_pos, &quot;^&quot;),
+                    make_vertex_id(start_pos, &quot;v&quot;)),
+             weight = rep(1000L, 2L)),
+      tibble(from = map_chr(rownames(dirs), 
+                            ~ make_vertex_id(end_pos, .x)),
+             to = rep(&quot;E&quot;, 4L),
+             weight = rep(0L, 4L)),
+      tibble(from = &quot;S&quot;,
+             to = make_vertex_id(start_pos, &quot;&gt;&quot;),
+             weight = 0L),
+    )
+  
+  graph_from_data_frame(edges, directed = TRUE)
+}
+
+get_all_spots &lt;- function(G) {
+  paths &lt;- all_shortest_paths(G, &quot;S&quot;, &quot;E&quot;)$vpath
+  paths %&gt;% 
+    do.call(c, .) %&gt;% 
+    unique() %&gt;% 
+    difference(V(G)[name %in% c(&quot;S&quot;, &quot;E&quot;)]) %&gt;% 
+    names() %&gt;% 
+    str_remove(&quot;/.$&quot;) %&gt;% 
+    unique()
+}
+
+
+G &lt;- construct_graph(puzzle_data)
+get_all_spots(G) %&gt;% 
+  length()</code></pre>
+<pre><code>## [1] 508</code></pre>
+<p><em>N.B.</em> This graph construction allows for solving part 1 also quite easily:</p>
+<pre class="r"><code>distances(G, &quot;S&quot;, &quot;E&quot;)</code></pre>
+<pre><code>##        E
+## S 114476</code></pre>
 </div>
 </div>
 </div>

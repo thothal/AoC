@@ -232,7 +232,35 @@ cat(puzzle[[2]])
 
 ### Solution
 
-```{r get-solution-2}
+To solve this puzzle, we fall back to *graph theory*. We construct the graph as follows:
+
+1. For each field in the map we create **4** nodes representing the 4 directions in which 
+we could look. For instance the field `14/2` will be represented by the 4 nodes `14/2/^`,
+`14/2/>`, `14/2/v` and `14/2/<`.
+1. We connect neighboring fields along their same direction and assign a weight of 1 to
+this edge. This represents moving form one field to another in a straight line.
+For instance, the connected fields `14/2` and `13/2` would yield an edge 
+`14/2/^ --> 13/2/^`.
+1. Next, we connect nodes at the same position but different directions if they can be 
+reached via a turn and assign weight 1000. For instance we connect `14/2/>` with `14/2/^`
+and `14/2/v` which represents a turn.
+1. For convenience we define 2 artificial nodes `S` (start) and `E` (end). We connect `S` 
+with weight 0 to the starting position with direction `>` (which is our starting 
+direction) and `E` with all possible direction of the end point (we do not care how we
+reach the end point, that is facing south or facing north would both yield a valid end).
+1. Eventually, to get the solution, we simply construct all shortest paths from `S` to 
+`E`, reduce the node list to fields (that is stripping the direction part of the 
+identifier) and count unique fields.
+
+The algorithm does not create all directions for the fields, but only those which are
+relevant for the solution. For instance if a field has walls to its East and West 
+(allowing moves only to the South and North) we do not create nodes with directions `>` or
+`<`, as it does not make sense to turn into these directions.
+
+*N.B.*  This graph construction allows a swell to solve part one of the puzzle simply by 
+getting the weight of the shortest path.
+
+```{r get-solution-2, cache = TRUE}
 construct_graph <- function(reindeer_map) {
   dd <- dim(reindeer_map)
   dirs <- rbind(
@@ -242,34 +270,31 @@ construct_graph <- function(reindeer_map) {
       cbind(0L, -1L)
     ) %>% 
       set_rownames(c("^", ">", "v", "<"))
-  turn <- function(dir, clockwise) {
-    if (clockwise) {
+  turn <- function(dir, n) {
+    if (n == 1L) {
       switch(dir,
              "^" = ">",
              ">" = "v",
              "v" = "<",
              "<" = "^")
-    } else {
+    } else if (n == -1L) {
       switch(dir,
              "^" = "<",
              ">" = "^",
              "v" = ">",
              "<" = "v")
+    } else if (n == 2L) {
+      switch(dir,
+             "^" = "v",
+             ">" = "<",
+             "v" = "^",
+             "<" = ">")
     }
   }
   
   make_vertex_id <- function(current_pos, current_dir) {
     paste(current_pos, collapse = "/") %>% 
       paste(current_dir, sep = "/")
-  }
-  
-  create_vertex <- function(current_pos, current_dir) {
-    id <- make_vertex_id(current_pos, current_dir)
-    if (!id %in% V(G)$name) {
-      G <<- G %>% 
-        add_vertices(1L, name = id)
-    }
-    id
   }
   
   is_valid_pos <- function(new_pos) {
@@ -299,32 +324,64 @@ construct_graph <- function(reindeer_map) {
           bind_rows(
             tibble(from = from, to = to, weight = 1L)
           )
-        if (turn(dir, TRUE) %in% nb_dirs) {
-          edges <- edges %>% 
-            bind_rows(
-              tibble(from = from, to = make_vertex_id(current_node, turn(dir, TRUE)), 
-                     weight = 1000L)
-            )
-        } else if (turn(dir, FALSE) %in% nb_dirs) {
-          edges <- edges %>% 
-            bind_rows(
-              tibble(from = from, to = make_vertex_id(current_node, turn(dir, FALSE)), 
-                     weight = 1000L)
-            )
+        par_dir <- turn(dir, 2L)
+        turn_dirs <- setdiff(nb_dirs, dir)
+        for (turn_dir in turn_dirs) {
+          if (turn_dir != par_dir) {
+            edges <- edges %>% 
+              bind_rows(
+                tibble(from = make_vertex_id(current_node, par_dir), 
+                       to = make_vertex_id(current_node, turn_dir), 
+                       weight = 1000L)
+              )
+          }
         }
       }
     }
   edges
   }
+  
   edges <- get_edges()
-  list(G = graph_from_data_frame(edges, directed = TRUE), edges = edges)
+  start_pos <- which(reindeer_map == "S", arr.ind = TRUE)
+  end_pos <- which(reindeer_map == "E", arr.ind = TRUE)
+  
+  edges <- edges %>% 
+    bind_rows(
+      tibble(from = rep(make_vertex_id(start_pos, ">"), 2L),
+             to = c(make_vertex_id(start_pos, "^"),
+                    make_vertex_id(start_pos, "v")),
+             weight = rep(1000L, 2L)),
+      tibble(from = map_chr(rownames(dirs), 
+                            ~ make_vertex_id(end_pos, .x)),
+             to = rep("E", 4L),
+             weight = rep(0L, 4L)),
+      tibble(from = "S",
+             to = make_vertex_id(start_pos, ">"),
+             weight = 0L),
+    )
+  
+  graph_from_data_frame(edges, directed = TRUE)
 }
-vn <- NULL
-res <- construct_graph(example_data)
 
-goal <- "8/12/v"
-distances(res$G, "14/2/>", goal)
-shortest_paths(res$G, "14/2/>", goal)$vpath[[1L]]
+get_all_spots <- function(G) {
+  paths <- all_shortest_paths(G, "S", "E")$vpath
+  paths %>% 
+    do.call(c, .) %>% 
+    unique() %>% 
+    difference(V(G)[name %in% c("S", "E")]) %>% 
+    names() %>% 
+    str_remove("/.$") %>% 
+    unique()
+}
 
 
+G <- construct_graph(puzzle_data)
+get_all_spots(G) %>% 
+  length()
+```
+
+*N.B.* This graph construction allows for solving part 1 also quite easily:
+
+```{r alternative-solution-1}
+distances(G, "S", "E")
 ```
