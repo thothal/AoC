@@ -71,7 +71,6 @@ library(stringr)
 library(knitr)
 library(cli)
 library(bit64)
-library(ggplot2)
 library(igraph)
 ```
 
@@ -88,15 +87,15 @@ puzzle <- GET(base_url,
   lapply(as.character)
 
 parse_puzzle_data <- function(text_block = readClipboard()) {
-  if (length(text_block) > 1L) {
+  if (length(text_block) == 1L) {
     text_block <- text_block %>% 
-      paste(collapse = "\n")
+      unlist() %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      head(-1L)
   }
-  text_block %>% 
-    str_split("\n") %>% 
-    extract2(1L) %>% 
-    keep(nzchar) %>% 
-    str_split("") %>% 
+  str_split(text_block,
+            "") %>% 
     do.call(rbind, .)
 }
 
@@ -124,7 +123,103 @@ cat(puzzle[[1]])
 
 ### Solution
 
+The idea of the algorithm is as follows:
+
+1. First, find node which has currently the cheapest path to it **and** has still some
+neighbors which have no costs associated yet.
+1. If we can walk in the current direction from this node, do so, otherwise make a turn
+and move then. Keep track of the costs for this operation. If we changed direction, store
+the new direction for this node.
+1. Continue until we reach the final node.
+
+As we are greedily moving along the cheapest path, we will eventually get to the end point
+with lowest costs.
+
+*N.B.* Updating the number of free neighbors of all nodes in each iteration is a bit of
+an overkill and could be optimised to only update hte free neighbors in the local 
+neighborhood.
+
 ```{r get-solution-1}
+get_shortest_path <- function(reindeer_map) {
+  dirs <- rbind(
+    cbind(-1L, 0L),
+    cbind(0L, 1L),
+    cbind(1L, 0L),
+    cbind(0L, -1L)
+  ) %>% 
+    set_rownames(c("^", ">", "v", "<"))
+  dd <- dim(reindeer_map)
+  costs <- matrix(Inf, dd[1L], dd[2L])
+  direction <- matrix(NA_character_, dd[1L], dd[2L])
+  
+  turn <- function(current_dir, clockwise) {
+    if (clockwise) {
+      switch(current_dir,
+             "^" = ">",
+             ">" = "v",
+             "v" = "<",
+             "<" = "^"
+      )
+    } else {
+      switch(current_dir,
+             "^" = "<",
+             "<" = "v",
+             "v" = ">",
+             ">" = "^"
+      )
+    }
+  }
+  move <- function(current_pos, current_dir) {
+    current_pos + dirs[current_dir, , drop = FALSE]
+  }
+  
+  get_free_nbs <- function() {
+    is_walkable <- reindeer_map == "." | reindeer_map == "E" | reindeer_map == "S"
+    is_unassigned <- is.infinite(costs)
+    free <- is_walkable & is_unassigned
+    rbind(free[-1L, ], FALSE) +
+      rbind(FALSE, free[-dd[1L], ]) +
+      cbind(free[, -1L], FALSE) +
+      cbind(FALSE, free[, -dd[2L]])
+  }
+  n_nbs <- get_free_nbs()
+  start_pos <- which(reindeer_map == "S", arr.ind = TRUE)
+  end_pos <- which(reindeer_map == "E", arr.ind = TRUE)
+  costs[start_pos] <- 0L
+  direction[start_pos] <- ">"
+  while(is.infinite(costs[end_pos])) {
+    nodes_with_neighbors <- which(n_nbs > 0, arr.ind = TRUE)
+    filtered_costs <- costs[nodes_with_neighbors]
+    cheapest_node <- nodes_with_neighbors[filtered_costs == min(filtered_costs), ,                                          drop = FALSE][1, , drop = FALSE]
+    current_dir <- direction[cheapest_node] 
+    stopifnot(!is.na(current_dir))
+    all_dirs <- c(current_dir, turn(current_dir, TRUE), turn(current_dir, FALSE))
+    candidates <- rbind(
+      move(cheapest_node, current_dir),
+      move(cheapest_node, turn(current_dir, TRUE)),
+      move(cheapest_node, turn(current_dir, FALSE))
+    ) %>% 
+      set_rownames(all_dirs)
+    for (nb_dir in all_dirs) {
+      candidate <- candidates[nb_dir, , drop = FALSE]
+      if (reindeer_map[candidate] %in% c("E", ".") && is.infinite(costs[candidate])) {
+        ## consider only neighbors whihc have unassigned costs and are walk-able
+        new_costs <-  costs[cheapest_node] + 1L + 
+          if_else(nb_dir == current_dir, 0L, 1000L)
+        ## update costs
+        costs[candidate] <- new_costs
+        ## store direction
+        direction[candidate] <- nb_dir
+        ## update free neighbor count (could be optimized)
+        n_nbs <- get_free_nbs()
+        break
+      }
+    }
+  }
+  costs[end_pos]
+}
+get_shortest_path(puzzle_data)
+
 ```
 
 ## Part 2
@@ -136,7 +231,6 @@ cat(puzzle[[2]])
 ```
 
 ### Solution
-
 
 ```{r get-solution-2}
 construct_graph <- function(reindeer_map) {
@@ -234,5 +328,3 @@ shortest_paths(res$G, "14/2/>", goal)$vpath[[1L]]
 
 
 ```
-
-
