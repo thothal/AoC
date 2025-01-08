@@ -1,0 +1,335 @@
+---
+params:
+   task_nr: 17
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2024"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+     str_split("\n") %>% 
+      extract2(1L)
+  } 
+  list(
+    reg = c(A = str_subset(text_block, "A:") %>% 
+              str_extract("\\d+") %>% 
+              as.integer64(),
+            B = str_subset(text_block, "B:") %>% 
+              str_extract("\\d+") %>% 
+              as.integer64(),
+            C = str_subset(text_block, "C:") %>% 
+              str_extract("\\d+") %>% 
+              as.integer64()
+    ),
+    code = str_subset(text_block, "Program:") %>% 
+      str_extract("(\\d+,?)+") %>% 
+      str_split(",") %>% 
+      extract2(1L) %>% 
+      as.integer()
+  )
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r get_example_data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+```{r get-solution-1}
+bXor64 <- function(a, b) {
+  tobs <- . %>% 
+    as.integer64() %>% 
+    as.bitstring() %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    as.integer()
+  a <- tobs(a)
+  b <- tobs(b)
+  bs <- paste((a + b) %% 2, collapse = "")
+  class(bs) <- "bitstring"
+  as.integer64(bs)
+}
+
+calculator <- function(data) {
+  instructions <- data$code
+  reg <- data$reg
+  combo <- function(op) {
+    stopifnot(between(op, 0L, 6L))
+    if (op <= 3L) {
+      as.integer64(op)
+    } else {
+      as.integer64(reg[op - 3L])
+    }
+  }
+  
+  div <- function(op, reg_sel) {
+    reg_sel <- match.arg(reg_sel, names(reg))
+    num <- reg["A"]
+    den <- as.integer64(2 ^ combo(op))
+    reg[reg_sel] <<- num %/% den 
+  }
+  
+  adv <- function(op) {
+    div(op, "A")
+  }
+  
+  bxl <- function(op) {
+    reg["B"] <<- bXor64(reg["B"], op)
+  }
+  
+  bst <- function(op) {
+    reg["B"]<<- combo(op) %% 8L
+  }
+  
+  jnz <- function(op) {
+    if (reg["A"] > 0L) {
+      ptr <<- op
+    }
+  }
+  
+  bxc <- function(op) {
+    reg["B"] <<- bXor64(reg["B"], reg["C"])
+  }
+  
+  out <- function(op) {
+    std_out <<- c(std_out, 
+                  as.character(combo(op) %% 8) %>% 
+                    str_split("") %>% 
+                    extract2(1L) %>% 
+                    paste(collapse = ","))
+  }
+  
+  bdv <- function(op) {
+    div(op, "B")
+  }
+  
+  cdv <- function(op) {
+    div(op, "C")
+  }
+  
+  process <- function() {
+    
+    opcode <- instructions[ptr + 1L]
+    operand <- instructions[ptr + 2L]
+    switch(opcode + 1L,
+           adv(operand),
+           bxl(operand),
+           bst(operand),
+           jnz(operand),
+           bxc(operand),
+           out(operand),
+           bdv(operand),
+           cdv(operand))
+    if (opcode != 3 || reg["A"] == as.integer64(0)) {
+      ptr <<- ptr + 2L
+    }
+    invisible(ptr)
+  }
+  
+  ptr <- 0L
+  std_out <- NULL
+  while(ptr < length(instructions)) {
+    process()  
+  }
+  std_out %>% 
+    as.integer()
+}
+
+sol1 <- calculator(puzzle_data)
+
+sol1 %>% 
+  paste(collapse = ",")
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+First we analyze the program. What it does is:
+
+1. Calculating `A` modulo 8 and store it in `B`: `B <- A %% 8L`
+1. Calculating `B` XOR 5 and store it in `B`: `B <- bXor64(B, 5L)`
+1. Calculating `A` divided by 2 to the power of `B` and store it in `C`: 
+`C <- A %/% (2 ^ B)`. This is effectively the same as bit shifting `A` by `B` bits to the
+right (`B` is an integer between 0 and 7 at this point which in turn depends on `A`).
+1. Calculating `B` XOR 6 and store it in `B`: `B <- bXor64(B, 6L)`
+1. Calculating `B` XOR `C` and store it in `B`: `B <- bXor64(B, 6L)`. As `B` has only 3 
+bits at this stage, this effectively changes only the last 3 bits of `C` and let the rest
+remain unchanged.
+1. Output the last 3 bits of `B`.
+1. Divide `A` by 8: `A <- A %/% 8` (i.e. bit shift it 3 bits to the right).
+1. Repeat until `A == 0`.
+
+We can now implement this algorithm straight away:
+
+```{r retro-algo}
+get_next_digit <- function(A) {
+  A <- as.integer64(A)
+  B <- bXor64(A %% 8L, 5L)
+  C <- A %/% (2 ^ B)
+  B <- bXor64(bXor64(B, 6L), C)
+  as.integer(B %% 8)
+}
+
+retro <- function(A) {
+  A <- as.integer64(A)
+  res <- integer(0L)
+  repeat {
+    res <- c(res, get_next_digit(A))
+    A <- A %/% 8
+    if (A == 0) {
+      break
+    }
+  }
+  res
+}
+
+all.equal(retro(puzzle_data$reg["A"]), sol1)
+```
+
+With this decomposed algorithm, we can generate a backtracking algorithm as follows:
+
+1. Let $I$ denote the original instructions. Set $k$ to the length of $I$: $k=|I|$.
+1. Calculate $A_k=I_k\oplus 6 \oplus 5$.
+1. Generate candidates $A_{k-1}^{l} = 8\cdot A_k + l,0\leq l \leq 7$. These are all values
+which lead to $A_k$ after one iteration.
+1. For all $0\leq l \leq 7$ check, if $A_{k-1}^l$ produces $I_{k-1}$. Prune invalid 
+candidates, set $k = k - 1$ and repeat with the valid candidates $A_{k-1}^{l^*}$.
+1. Continue until we got $A_1^{l^*}$ and eventually return $\min_{l^*}A_1^{l^*}$.
+
+```{r get-solution-2}
+find_starting_value <- function(data, limit_n = length(data$code)){
+  goal <- tail(data$code, limit_n)
+  start <- tail(goal, 1L) %>% 
+    bXor64(6L) %>% 
+    bXor64(5L)
+  backtrack <- function(a, k) {
+    res <- NULL
+    if (k == 0L) {
+      res <-  as.character(a)
+    } else {
+      target <- goal[k]
+      candidates <- (8L * a + 0:7) %>% 
+        keep(~ get_next_digit(.x) == target)
+      res <- map(candidates, ~ backtrack(.x, k - 1L)) %>% 
+        unlist()
+    }
+    res
+  }
+  backtrack(start, length(goal) - 1L) %>% 
+    as.integer64(res) %>%
+    min()
+}
+
+find_starting_value(puzzle_data)
+```
