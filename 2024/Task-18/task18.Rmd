@@ -1,0 +1,262 @@
+---
+params:
+   task_nr: 18
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2024"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+library(cli)
+library(bit64)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  } 
+  res <- text_block %>% 
+    str_split(fixed(",")) %>% 
+    lapply(as.integer) %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("x", "y")) 
+  res[, c(2, 1)] + 1L
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+attr(puzzle_data, "dims") <- c(71, 71)
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+attr(example_data, "dims") <- c(7, 7)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We construct a graph to rely on a "shortest path" algorithm to solve this puzzle. We
+use `make_lattice` to make a full lattice graph first and then delete all edges which are
+incident to a wall. This approach is way fast rather than looping through all entries and
+creating each edge separately.
+
+```{r get-solution-1}
+show_map <- function(memory_map) {
+  apply(memory_map, 1, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat("\n")
+}
+
+make_vertex_id <- function(coord, end) {
+  start <- c(1L, 1L)
+  if (all(c(coord) == start)) {
+    "S"
+  } else if (all(c(coord) == end)) {
+    "E"
+  } else {
+    paste(coord - 1L, collapse = "/")
+  }
+}
+
+make_memory_map <- function(corrupted_bytes, 
+                            subset = 1:nrow(corrupted_bytes)) {
+  dd <- attr(corrupted_bytes, "dims")
+  map <- matrix(".", dd[1L], dd[2L])
+  map[corrupted_bytes[subset, ]] <- "#"
+  walls <- which(map == "#", arr.ind = TRUE)
+  G <- make_lattice(dd)
+  V(G)$name <- expand.grid(
+    col = seq(1L, dd[1L]),
+    row = seq(dd[2L], 1L)
+  ) %>%
+    rowwise() %>%
+    mutate(id = make_vertex_id(cbind(row, col), dd)) %>%
+    pull(id)
+  wall_ids <- apply(walls, 1, make_vertex_id, end = dd)
+  wall_edges <- do.call(c, incident_edges(G, wall_ids))
+  
+  V(G)$shape <- if_else(V(G)$name %in% wall_ids, "square", "circle")
+  V(G)$color <- case_when(
+    V(G)$name %in% wall_ids ~ "darkgray", 
+    V(G)$name %in% c("S", "E") ~ "firebrick",
+    TRUE ~ "beige")
+  V(G)$label.color <- if_else(V(G)$name %in% c("S", "E"), "white", "black")
+  G <- G %>% 
+    delete_edges(wall_edges)
+  G %>% 
+    set_graph_attr("layout", layout_on_grid(G)) %>% 
+    set_graph_attr("dims", dd) %>% 
+    set_graph_attr("data", corrupted_bytes)
+}
+
+
+find_path <- function(memory_map) {
+  distances(memory_map, "S", "E")
+}
+
+kb_map <- make_memory_map(puzzle_data, 1:1024)
+kb_map %>% 
+  find_path()
+```
+
+An example graph (after 12 ananoseconds of falling bytes) is visualized below:
+
+```{r visualize-example-graph}
+example_data <- structure(
+  c(5L, 3L, 6L, 1L, 2L, 4L, 5L, 6L, 7L, 4L, 7L, 2L, 3L,
+    6L, 6L, 6L, 5L, 5L, 5L, 2L, 2L, 1L, 6L, 7L, 1L, 6L, 
+    5L, 5L, 4L, 3L, 7L, 3L, 2L, 1L, 4L, 3L, 6L, 2L, 6L,
+    3L, 7L, 2L, 1L, 7L, 2L, 7L, 2L, 1L, 2L, 3L),
+  dim = c(25L, 2L), 
+  dimnames = list(NULL, c("x", "y")), dims = c(7, 7))
+
+ex_map <- make_memory_map(example_data, 1:12)
+
+plot(ex_map)
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+With the data stored as graph, the problem reduces to iteratively removing edges and to 
+check at each removal, whether start and end are still connected.
+
+```{r get-solution-2}
+check_critical_byte <- function(map, from_index) {
+  dd <- graph_attr(map, "dims")
+  data <- graph_attr(map, "data")
+  bytes_seq <- seq(from_index, nrow(data))
+  res <- NULL
+  for (byte_idx in bytes_seq) {
+    byte <- data[byte_idx, , drop = FALSE] 
+    byte_id <- make_vertex_id(byte, dd)
+    byte_edge <- incident(map, byte_id)
+    new_map <- map %>% 
+      delete_edges(byte_edge)
+    V(new_map)$shape[V(new_map)$name == byte_id] <- "square"
+    V(new_map)$color[V(new_map)$name == byte_id] <- "darkgray"
+    dis <- c(distances(new_map, "S", "E"))
+    if (is.infinite(dis)) {
+      res <- byte
+      break
+    }
+    map <- new_map
+  }
+  list(res = res[, 2:1] - 1L, before = map, after = new_map)
+}
+
+check_critical_byte(kb_map, 1025L)$res
+```
+
+We can visualize the example before and after the critical byte fell:
+
+```{r visualize-critical_path, fig.show = "hold", out.width = "50%"}
+ex_cp <- check_critical_byte(ex_map, 13L)
+plot(ex_cp$before)
+plot(ex_cp$after)
+```
+
