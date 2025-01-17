@@ -33,7 +33,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 18](https://thothal.github.io/AoC/2024_task18.html)
 - [x] [Day 19](https://thothal.github.io/AoC/2024_task19.html)
 - [ ] Day 20
-- [ ] Day 21
+- [x] [Day 21](https://thothal.github.io/AoC/2024_task21.html)
 - [ ] Day 22
 - [ ] Day 23
 - [ ] Day 24

@@ -1,0 +1,310 @@
+---
+params:
+   task_nr: 21
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2024"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(tibble)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(stringi)
+library(knitr)
+library(cli)
+library(bit64)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("")
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+This puzzle took my way longer than it should have. Anyways, the idea is as follows:
+
+1. Create graphs for both pads to facilitate calculating shorted paths between keys.
+1. To significantly reduce the amount of paths between 2 keys we use several heuristics:
+   1. As we always start at `A` we see that `<` is the most expensive key to reach, 
+   followed by `v`.
+   1. `^` and `<` have teh same costs, however, the former requires a `<` on the next
+   robot, making it slightly more expansive. Thus the cheapest keys to reach are `>`, 
+   `^`, `v` and `<` (in this order).
+   1. Consecutives moves in the same directiona re cheaper than alternating on the next
+   layer. `>>^` and `>^>` will end up on the same key, but the next robot needs more moves
+   to type the latter sequence: `vAA^<A` vs `vA^<A>vA`.
+1. We end up with a list of shortest moves. For some key combinations there are still 2
+options, for instance we can move from `A -> v` wither by `v|<` or via `<|v`.
+1. We maintain a list of all moves from each key to all the other keys. If an entry has
+only a single entry it means that there is just one optimal move, if it has 2, we have to
+calculate the length for both options. Becasue of the advantage of consecutive moves, 
+there are at most 2 paths from any key on the numeric pad to any other key.
+1. With this setting the algorithm is rather straight forward:
+   1. Start with the (numeric) code.
+   1. Tokenize the code, i.e. create the movments needed. For instance the code `540A`
+   translates to `[A,5], [5,4], [4,0], [0,A]` representing the movements needed.
+   1. Use the lookup table created before to get all key presses on the (next) directional
+   pad.
+   1. For each keypress sequence just generated recurse into the funciton 
+   increasing the depth counter until you reach the final depth.
+   1. If there was more than one option, calculate both options and keep track of the
+   minimum.
+   1. Add the result of the minimum path to the current string length.
+   1. Once you are at the final depth simply count the number of keys and stop.
+   1. We must keep a cache of lengths of certain key sequences at eahc depth, otherwise
+   we would end up in way too many recursions. That is if we found out that at depth 4 a
+   key seqeunce of `v|A` requires x keys at the final depth we store this information. The
+   next time we need to calculate the number of keys needed for `v|A` at depth 4, we 
+   **do not** recurse again, but ismply use the cached value.
+
+```{r get-solution-1}
+make_pad <- function(type = c("num", "dir")) {
+  type <- match.arg(type)
+  if (type == "num") {
+    G <- make_lattice(c(3L, 4L), directed = TRUE, mutual = TRUE)
+    V(G)$name <- c("--", "0", "A", 1:9)
+    E(G)$name <- c(">", "^", ">", "<", "^", "<", "^",
+                   rep(c(">", "^", "v", ">", "<", "^", "v", "<", "^", "v"), 2L),
+                   ">", "v", ">", "<", "v", "<", "v")
+  } else if (type == "dir") {
+    G <- make_lattice(c(3L, 2L), directed = TRUE, mutual = TRUE)
+    V(G)$name <- c("<", "v", ">", "--", "^", "A")
+    E(G)$name <- c(">", "^", ">", "<", "^", "<", "^",
+                   ">", "v", ">", "<", "v", "<", "v")
+  }
+  V(G)$shape <- "square"
+  V(G)$color <- "lightgray"
+  V(G)$size <- 50
+  E(G)$arrow.size <- 0
+  costs <- c(">" = 1, "^" = 2, "v" = 3, "<" = 4)
+  E(G)$weight <- costs[E(G)$name]
+  G %>% 
+    delete_edges(incident(G, "--")) %>% 
+    set_graph_attr("layout", layout_on_grid(G, width = 3L, height = 4L))
+}
+
+plot_graphs <- function(graphs) {
+  op <- par(mfrow = 1:2)
+  on.exit(par(op))
+  for (i in graphs) {
+    plot(i)
+  }
+}
+
+get_dup_length <- function(path) {
+  ## idea find paths which have many moves into the same direction
+  nodes <- str_split(path, "\\|")[[1L]]
+  len <- rle(nodes)$lengths
+  length(len) * (length(nodes) - max(len))
+}
+
+get_shortest_paths <- function(G) {
+  map(V(G)[name != "--"]$name, function(start) {
+    path <- all_shortest_paths(G, start, V(G)[name != "--"], mode = "out")
+    tibble(from = start,
+           to = map_chr(path$vpaths, ~ tail(.x, 1L)$name),
+           path = map_chr(path$epaths, 
+                          ~ E(G)[.x]$name %>% 
+                            c("A") %>% 
+                            paste(collapse = "|")),
+           dup_len = map_int(path, get_dup_length)
+    )
+  }) %>% 
+    list_rbind() %>% 
+    slice_min(dup_len, n = 1L, by = c(from, to))
+}
+
+tokenize_path <- function(path) {
+  nodes <- str_split(path, "\\|")[[1L]]
+  cbind(c("A", head(nodes, -1L)),
+        nodes) %>% 
+    apply(1, paste, collapse = "|")
+}
+
+graphs <- c("num", "dir") %>% 
+  set_names() %>% 
+  map(make_pad)
+
+shortest_paths <- map(graphs, get_shortest_paths) %>% 
+  list_rbind() %>% 
+  mutate(start = paste(from, to, sep = "|"),
+         end = path, .keep = "none") %>% 
+  summarize(path = list(end), .by = start) %>% 
+  deframe()
+
+get_input_length <- function(start, max_depth, shortest_paths) {
+  cache <- vector("list", max_depth + 2L)
+  get_next_sequence <- function(old_path, depth) {
+    if (old_path %in% names(cache[[depth + 1L]])) {
+      res <- cache[[depth + 1L]][[old_path]]
+    } else {
+      if (depth == max_depth + 1L) {
+        res <- str_remove_all(old_path, "\\|") %>% 
+          str_length() %>% 
+          as.integer64()
+      } else {
+        tokens <- tokenize_path(old_path)
+        res <- as.integer64(0L)
+        for (i in seq_along(tokens)) {
+          new_path <- shortest_paths[[tokens[[i]]]]
+          new_paths_lengths <- map(new_path, get_next_sequence, depth + 1L) %>% 
+            do.call(c, .)
+          res <- res + min(new_paths_lengths)
+        }
+      }
+      res <- res %>% 
+        set_names(old_path)
+      ## need this slightly awkward `if` because I cannot pre fill a list with
+      ## an empty int64 (if I try as.integer64(NULL) and `c` the results it gets 
+      ## messed up)
+      if (is.null(cache[[depth + 1L]])) {
+        cache[[depth + 1L]] <<- res
+      } else {
+        cache[[depth + 1L]] <<- c(cache[[depth + 1L]], 
+                                 res)
+      }
+    }
+    res
+  }
+  res <- get_next_sequence(start, 0L)
+  res
+}
+
+calculate_complexity <- function(codes, max_depth, shortest_paths) {
+  map(codes, function(code) {
+    int_code <- paste(code %>% head(-1L),
+                      collapse = "") %>% 
+      as.integer64()
+    code_len <- get_input_length(paste(code, collapse = "|"),
+                                 max_depth, shortest_paths)
+    int_code * code_len
+  }) %>% 
+    do.call(c, .) %>% 
+    as.integer64() %>% 
+    sum()
+}
+
+calculate_complexity(puzzle_data, 2L, shortest_paths)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+
+```{r get-solution-2}
+calculate_complexity(puzzle_data, 25L, shortest_paths)
+```
+
