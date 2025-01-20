@@ -32,9 +32,9 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 17](https://thothal.github.io/AoC/2024_task17.html)
 - [x] [Day 18](https://thothal.github.io/AoC/2024_task18.html)
 - [x] [Day 19](https://thothal.github.io/AoC/2024_task19.html)
-- [ ] Day 20
+- [x] [Day 20](https://thothal.github.io/AoC/2024_task20.html)
 - [x] [Day 21](https://thothal.github.io/AoC/2024_task21.html)
-- [ ] Day 22
+- [x] [Day 22](https://thothal.github.io/AoC/2024_task22.html)
 - [ ] Day 23
 - [ ] Day 24
 - [ ] Day 25
