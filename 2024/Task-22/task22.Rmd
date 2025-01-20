@@ -1,0 +1,252 @@
+---
+params:
+   task_nr: 22
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2024"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(tibble)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(stringi)
+library(knitr)
+library(cli)
+library(bit64)
+library(igraph)
+library(Rcpp)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    as.integer()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+Looking at the instructions we observe that these boil down to:
+
+1. Bit shift the input to the left by 6 bits, XOR it with the original result and keep
+only the first 24 bits.
+1. Bit shift to the right b< 5 bits, XOR and truncate as before.
+1. Ecentually bit shift to the left again, this time by 11 bits, XOR and truncate.
+
+While we could do so in R directly, it proves useful to write a samell C++ wrapper, as
+this will speed up the calculation tremendously. The implementation is straight forward
+and with respect to the second task, we return all (pseudo-) random numbers generated, as
+we will need them for the second part of this puzzle.
+
+```{Rcpp bit-shift, cache = TRUE}
+#include <Rcpp.h>
+
+// [[Rcpp::export]]
+Rcpp::NumericVector bit_shift(int number, int iterations) {
+  const long long MASK = 1LL << 24; 
+  Rcpp::NumericVector results(iterations);
+  
+  long long current = number; 
+  
+  for (int i = 0; i < iterations; i++) {
+    current = ((current << 6) ^ current) % MASK; 
+    current = ((current >> 5) ^ current) % MASK;          
+    current = ((current << 11) ^ current) % MASK;
+    
+    results[i] = current;
+  }
+  
+  return results;
+}
+```
+
+
+```{r get-solution-1}
+
+pseudos <- map(puzzle_data, ~ bit_shift(.x, 2000L))
+
+map(pseudos, ~ .x[2000L] %>% as.integer64()) %>% 
+  do.call(c, .) %>% 
+  sum()
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We use agai C++ to implement this solution with the following idea:
+
+1. For each starting pseudo random number create a vector of differences between the one
+digits among all 2000 pseudo random numbers.
+1. For each 4 consecutive differences add the final value to a hash table, iif the element
+key (concatenated differences) does not exist. That is fro each random number we maintain
+a hash table of unique differences, keeping their selling value at the first occurence.
+1. Once we have a hash table of all length 4 difference sequences, we create yet another
+hash table, where we add the sellign bids for each monkey.
+1. In a last loop we go through each ofd those entries and return the maximum price.
+
+```{Rcpp hash-map, cache = TRUE}
+#include <Rcpp.h>
+#include <unordered_map>
+#include <iostream>
+#include <string>
+#include <sstream>
+
+// [[Rcpp::export]]
+int get_max_revenue(Rcpp::List pseudo_random) {
+  std::vector<std::unordered_map<std::string, int>> hash_maps;
+  std::unordered_map<std::string, int> max_map;
+  int result = 0;
+  // create all hash maps
+  for (std::size_t i = 0; i < pseudo_random.size(); i++) {
+    std::unordered_map<std::string, int> hash_map;
+    Rcpp::IntegerVector vec = pseudo_random[i];
+    std::vector<int> diffs(vec.size());
+    diffs[0] = 0;
+    for (std::size_t j = 1; j < vec.size(); j++) {
+      diffs[j] = (vec[j] % 10) - (vec[j - 1] % 10);
+      if (j >= 3) {
+        std::ostringstream key_stream;
+        std::string key;
+        key_stream << diffs[j - 3] << "," << diffs[j - 2] << "," << 
+          diffs[j - 1] << "," << diffs[j];
+        key = key_stream.str();
+        if (hash_map.find(key) == hash_map.end()) {
+          hash_map[key] = vec[j] % 10;
+        }
+      }
+    } 
+    hash_maps.push_back(hash_map);
+  }
+  // loop through all hash maps and sum up the corresponding elements
+  for (const auto& hash : hash_maps) {
+    for (const auto& element: hash) {
+      if (max_map.find(element.first) == max_map.end()) {
+        max_map[element.first] = element.second;
+      } else {
+        max_map[element.first] += element.second;
+      }
+    }
+  }
+  for (const auto& max_element: max_map) {
+    if (max_element.second > result) {
+      result = max_element.second;
+    }
+  }
+  return result;
+}
+```
+
+
+```{r get-solution-2}
+get_max_revenue(pseudos)
+```
+
