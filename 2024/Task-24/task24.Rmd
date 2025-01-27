@@ -1,0 +1,462 @@
+---
+params:
+   task_nr: 24
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2024"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(tibble)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(stringi)
+library(knitr)
+library(cli)
+library(bit64)
+library(igraph)
+library(tidyr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/2024/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  assignments <- text_block %>% 
+    str_subset(":")
+  assignments <- str_extract(assignments, "\\d$") %>% 
+    as.integer() %>% 
+    set_names(assignments %>% 
+                str_remove(": \\d")) %>% 
+    as.list() %>% 
+    c(
+      AND = function(x, y) as.integer(x & y),
+      OR = function(x, y) as.integer(x | y),
+      XOR = function(x, y) as.integer(x != y)
+    ) %>% 
+    list2env()
+  rules <- text_block %>%
+    str_subset(":", TRUE) %>% 
+    str_match_all("([^ ]+) ([^ ]+) ([^ ]+) -> ([^ ]+)") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("_", "x", "op", "y", "res")) %>% 
+    as_tibble() %>% 
+    select(x:res)
+  
+  create_call <- function(x, op, y, res){
+    call("<-", as.name(res), call(op, as.name(x), as.name(y)))
+  }
+  
+  rules <- rules %>% 
+    mutate(cmd = do.call(Map, c(create_call, .)) %>% unname(),
+           is_atomic = str_detect(x, "^[xy]") &
+             str_detect(y, "^[xy]"))
+  list(assignments = assignments,
+       rules = rules)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The problem boils down to bringing the rows in the right direction, such that terms, which
+depend on other terms are not evaluated before.
+
+```{r get-solution-1}
+rearrange_rules <- function(data) {
+  rules <- data$rules
+  ordered_rules <- rules %>% filter(is_atomic)
+  rules <- rules %>% 
+    filter(!is_atomic)
+  while (nrow(rules) > 0) {
+    atoms <- ordered_rules %>% 
+      pivot_longer(c(x, y, res)) %>% 
+      pull(value)
+    for (i in seq_len(nrow(rules))) {
+      row <- rules[i, ]
+      if (row$x %in% atoms && row$y %in% atoms) {
+        ordered_rules <- rbind(ordered_rules, row)
+        rules <- rules[-i, ]
+        break
+      }
+    }
+  }
+  ordered_rules
+}
+
+evaluate_rules <- function(data, assignments = data$assignments) {
+  new_rules <- rearrange_rules(data)
+  walk(new_rules$cmd, ~ eval(.x, assignments))
+  res <- names(assignments) %>% 
+    str_subset("^z") %>% 
+    sort(decreasing = TRUE) %>% 
+    mget(assignments) %>% 
+    unlist() %>% 
+    paste(collapse = "") %>% 
+    str_pad(64L, pad = "0")
+  class(res) <- "bitstring"
+  list(res = as.integer64(res), new_rules = new_rules)
+}
+
+res <- evaluate_rules(puzzle_data)
+res$res
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For teh seocnd part we transform the rules into a graph first.
+
+```{r create_graph}
+create_calculator <- function(rules) {
+  G <- make_empty_graph(directed = TRUE)
+  rules <- rules %>% 
+    mutate(op = paste(x, op, y, sep = "_"))
+  nodes <- rules %>% 
+    select(x:res)  %>% 
+    pivot_longer(everything()) %>% 
+    pull(value) %>% 
+    unique()
+  G <- G %>% 
+    add_vertices(length(nodes), name = nodes) 
+  for (i in seq_len(nrow(rules))) {
+    row <- rules %>% 
+      slice(i)
+    G <- G %>% 
+      add_edges(c(row$x, row$op, row$y, row$op, row$op, row$res))
+  }
+  nms <- V(G)$name
+  V(G)$type <- case_when(
+    str_detect(nms, "AND|OR|XOR") ~ "operator",
+    str_detect(nms, "^[xy]") ~ "input",
+    str_detect(nms, "^z") ~ "output",
+    TRUE ~ "intermediate"
+  )
+  V(G)$op <- case_when(
+    str_detect(nms, "_AND_") ~ "AND",
+    str_detect(nms, "_XOR_") ~ "XOR",
+    str_detect(nms, "_OR_") ~ "OR",
+    TRUE ~ NA_character_
+  )
+  V(G)$color <- case_when(
+    V(G)$type == "input" ~ "#FF7F00",
+    V(G)$type == "output" ~ "forestgreen",
+    V(G)$type == "operator" ~ "steelblue",
+    V(G)$type == "intermediate" ~ "beige"
+  )
+  G %>% 
+    simplify()
+}
+
+use_calculator <- function(G, x, y) {
+  out_bits <- V(G)[type == "output"]$name %>% 
+    str_extract("\\d+") %>% 
+    unlist() %>% 
+    as.integer() %>% 
+    max()
+  in_bits <- V(G)[type == "input"]$name %>% 
+    str_extract("\\d+") %>% 
+    unlist() %>% 
+    as.integer() %>% 
+    max()
+  bitify <- . %>% 
+    as.integer64() %>% 
+    as.bitstring() %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    as.integer() %>% 
+    tail(in_bits + 1L)
+  
+  values <- rep(NA_integer_, vcount(G)) %>% 
+    set_names(V(G)$name)
+  values[sprintf("x%02d", in_bits:0)] <- bitify(x)
+  values[sprintf("y%02d", in_bits:0)] <- bitify(y)
+  sorted_nodes <- topo_sort(G, mode = "out")$name
+  calc_nodes <- sorted_nodes %>% 
+    setdiff(c(sprintf("x%02d", in_bits:0), sprintf("y%02d", in_bits:0)))
+  for (node in calc_nodes) {
+    me <- V(G)[node]
+    parents <- adjacent_vertices(G, node, "in")[[1L]]$name
+    if (me$type %in% c("output", "intermediate")) {
+      stopifnot(length(parents) == 1L)
+      val <- values[parents]
+    } else {
+      if (is.na(me$op) ||
+                length(parents) != 2L) browser()
+      if (me$op == "AND") {
+        val <-  as.integer(values[[parents[[1L]]]] & values[[parents[[2L]]]])
+      } else if (me$op == "OR") {
+        val <- as.integer(values[[parents[[1L]]]] | values[[parents[[2L]]]])
+      } else if (me$op == "XOR") {
+        val <- (values[[parents[[1L]]]] + values[[parents[[2L]]]]) %% 2L
+      }
+    }
+    values[[node]] <- val
+  }
+  res <- values[sprintf("z%02d", out_bits:0)] %>% 
+    paste(collapse = "")
+  class(res) <- "bitstring"
+  as.integer64(res)
+}
+
+G <- create_calculator(res$new_rules) 
+```
+
+The rules should form a calculator. Thus, we first check which bits are wrongly wired by 
+simply using $2^n, 0\leq n\leq 45$ and $0$ as inputs and check at which bits the results 
+mismatch:
+
+```{r get-wrong-bits, cache = TRUE}
+get_wrong_bits <- function(G) {
+  stringify <- . %>% 
+    as.integer64() %>% 
+    as.bitstring() %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    tail(45)
+  
+  map(
+    0:44,
+    function(i) {
+      a <- as.integer64(2 ^ i)
+      b <- as.integer64(0)
+      wr <- use_calculator(G, a, b)
+      tr <- a + b
+      mismatches <- rev(stringify(wr)) != rev(stringify(tr))
+      if (any(mismatches)) {
+        which(mismatches)
+      } 
+    }
+  ) %>% 
+    discard(is.null)
+}
+
+(wrong_bits <- get_wrong_bits(G))
+```
+
+Now that we have identified the wrong bits we can take a closer look to the respective 
+subgraph and cehck the wiring. Let's first look into a subgraph where the calculation works
+
+```{r working-bits}
+get_subgraph <- function(G, input_bit, label_bad = TRUE) {
+  input_path <- neighborhood(G, 4L, paste0(c("x", "y"), 
+                                          sprintf("%02d", input_bit)),
+                             mode = "out")
+  output_path <-  neighborhood(G, 4L, paste0(c("x", "y"), 
+                                          sprintf("%02d", input_bit - 1L)),
+                             mode = "out")
+  G <- subgraph(G,
+    V(G)[unlist(input_path), unlist(output_path)])
+  V(G)$label <- case_when(
+    str_detect(V(G)$name, "_OR_") ~ "||",
+    str_detect(V(G)$name, "_AND_") ~ "&&",
+    str_detect(V(G)$name, "_XOR_") ~ "^^",
+    TRUE ~ V(G)$name
+  )
+  V(G)$label.color <- if_else(V(G)$type == "intermediate", "black", "white")
+  carry_over <- neighborhood(G, nodes = V(G)[str_detect(name, "_OR_")], 
+                             mindist = 1, mode = "out") %>% 
+    unlist() %>% 
+    setdiff(V(G)[sprintf("z%02d", input_bit)])
+  V(G)[carry_over]$label <- "CO"
+  V(G)[carry_over]$color <- "#984EA3"
+  V(G)[carry_over]$label.color <- "white"
+  V(G)$size <- 22
+  E(G)$arrow.size <- .5
+  if (label_bad) {
+    V(G)[sprintf("z%02d", input_bit)]$color <- "firebrick"
+    V(G)[sprintf("z%02d", input_bit)]$label.color <- "white"
+  }
+  G %>% 
+    set_graph_attr("layout", layout_as_tree(G))
+}
+
+get_subgraph(G, 2, FALSE) %>% 
+  plot()
+```
+
+Let's look at the 3rd bit ($z_{02}$):
+1. First we calculate $x_{02} \oplus y_{02}$ (depicted by `^^` in the graph), which is 
+already very close to a binary addition: if both inputs equal 0 or 1 the result is 0, 
+otherwise it is one.
+1. However, we need to make sure that we also consider any carr-over from teh bits before.
+Thus, we have to XOR the result again with the previous carry-over. (`CO` in the graph), 
+which results in the final bit.
+1. The last thing to do is to calculate the new carry-over bit, which can be calculated by 
+the formula 
+$\text{CO}_n = \left(\text{CO}_{n-1} \land (x_n \oplus y_n)\right) \lor (x_n \land y_n)$,
+which translates to: either both bits on were 1, or at least one bit was 1 **and** the 
+previous carry-over was 1.
+
+Now that we know how a normal bit wiring should look like, we can look into the faulty 
+bits to check what is amiss:
+
+#### First Faulty Bit 
+
+```{r first-bit}
+get_subgraph(G, wrong_bits[[1L]][1L] - 1L) %>% 
+  plot()
+```
+
+We see that `z05` and `tst` are wrongly wired.
+
+#### Second Faulty Bit 
+
+```{r second-bit}
+get_subgraph(G, wrong_bits[[2L]][1L] - 1L) %>% 
+  plot()
+```
+
+We see that `z11` and `sps` are wrongly wired.
+
+
+#### Third Faulty Bit 
+
+```{r third-bit}
+get_subgraph(G, wrong_bits[[3L]][1L] - 1L) %>% 
+  plot()
+```
+
+We see that `z23` and `frt` are wrongly wired.
+
+
+#### Fourth Faulty Bit 
+
+```{r fourth-bit}
+get_subgraph(G, wrong_bits[[4L]][1L] - 1L) %>% 
+  plot()
+```
+
+We see that `cgh` and `pmd` are wrongly wired.
+
+Overall, wires `cgh,frt,pmd,sps,tst,z05,z11` and `z23` were wrongly wired and we see that
+by fixing those we have a working binary adder:
+
+```{r get-solution-2, cache = TRUE}
+switch_lines <- function(G, from, to) {
+  
+  from_sp <- adjacent_vertices(G, from, "in")[[1L]]$name
+  to_sp <- adjacent_vertices(G, to, "in")[[1L]]$name
+  ids <- G %>% 
+    get_edge_ids(c(from_sp, from, to_sp, to))
+  G %>% 
+    delete_edges(ids) %>% 
+    add_edges(c(from_sp, to, to_sp, from))
+}
+
+G2 <- G %>% 
+  switch_lines("z05", "tst") %>% 
+  switch_lines("z11", "sps") %>% 
+  switch_lines("z23", "frt") %>% 
+  switch_lines("cgh", "pmd")
+
+
+get_wrong_bits(G2)
+
+```
+
