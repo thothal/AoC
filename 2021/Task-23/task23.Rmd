@@ -1,0 +1,366 @@
+---
+params:
+   task_nr: 23
+   year: 2021
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2021"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{js sql-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(tibble)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(stringi)
+library(knitr)
+library(cli)
+library(bit64)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_subset("[ABCD]") %>% 
+    str_extract_all("[ABCD]") %>% 
+    list_transpose()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+We use a brute-force appraoch, where we simply try out all potential moevments. We could
+improve the code by carefully reflecting on smart moving strategies to avoid exploring
+the while space. However, the problem seems to be small enough that such improvements
+seem unnecessary.
+
+However, we had to fall back to `C++` code for efficiency reasons, as in `R` we have
+copy on modifcation semantics, which is, in eahc recursion we are copying lists, which
+significantly slows down the code.
+
+The idea of the `C++` is as follows:
+
+1. We define a  `State` class, which maintains the bots on the `hallway` and the bots
+in the `rooms`. The former is implemented as an `std::array<char, 11>` and the latter as 
+a `std::array<std::stack<char>, 4>`.
+1. The class defines functions for moving bots in and out, checking if a path is free and
+returning all movable bots in both the rooms and the hallway.
+1. It provides a `get_map_id()` function, which gives a condensed textual representation 
+of the current state, which later will serve as a key for the has map, where we maintain 
+the costs of any given mpa already calculated (to avoid re-calculating known costs).
+1. The main function `solve` is a recursive function, which
+  1. Checks if we have a final state, and returns cost zero (no more movements needed)
+  1. Checks if a certain satet was already calculated in the past and returns the cached 
+  value in this case.
+  1. Move all bots from the hallway home and recalls itself wiht this new state and sums
+  the costs.
+  1. Tries each possible space for a bot currently sitting in its false room and keeps
+  the cheapest solution in each recursion.
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+```{Rcpp cpp-algorithm, file = "bots.cpp", cache = TRUE}
+```
+
+```{r get-solution-1}
+bring_bots_home(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We simply call `bring_bots_home` with the extended rooms.
+
+```{r get-solution-2}
+new_rooms<- list(
+  c("A", "D", "D", "B"), 
+  c("D", "C", "B", "C"), 
+  c("B", "B", "A", "D"), 
+  c("C", "A", "C", "A")
+  ) 
+bring_bots_home(new_rooms)
+```
+
+# R Legacy Solution
+
+For the sake of completeness, here's the previous `R` codes, which is, however, due to the
+copy on change semantic not really performing well:
+
+```{r r-legacy-solution, eval = FALSE}
+encode_map <- function(data) {
+  hall <- data[2L, seq(2L, ncol(data) - 1L)]
+  rooms <- map(4L + 2L * 0:3, ~ data[seq(3L, nrow(data) - 1L), .x]) %>% 
+    set_names(LETTERS[1:4])
+  list(hall = hall, rooms = rooms)
+}
+
+get_map_id <- function(state) {
+  unlist(state) %>% 
+    paste(collapse = "")
+}
+
+is_done <- function(state) {
+  rooms <- state$rooms
+  reduce(names(rooms), function(res, room_id) {
+    res && all(rooms[[room_id]] == room_id)
+  }, .init = TRUE)
+}
+
+is_path_blocked <- function(bot, hall_pos, room_pos, hall) {
+  !all(hall[seq(hall_pos, room_pos)][-1L] %in% c(".", "x"))
+}
+
+get_cost <- function(bot, in_room_pos, room_pos, hall_pos) {
+  room_idx <- match(bot, LETTERS[1:4]) - 1L
+  vertical <- in_room_pos
+  horizontal <- abs(hall_pos - room_pos)
+  cost <- 10 ^ room_idx
+  (vertical + horizontal) * cost
+}
+
+get_new_position <- function(hall_pos, state, room_id = NA, dir = c("home", "out")) {
+  dir <- match.arg(dir)
+  hall <- state$hall
+  if (dir == "home") {
+    bot <- hall[hall_pos]
+    room_id <- bot
+    room <- state$rooms[[room_id]]
+    room_pos <- (match(bot, LETTERS) - 1L) * 2L + 3L
+  } else if (dir == "out") {
+    ## invariant: we do not call this function in the out direction with an empty room
+    stopifnot(!is.na(room_id))
+    room <- state$rooms[[room_id]]
+    bot <- room[which(room != ".")[1L]]
+    room_pos <- (match(room_id, LETTERS) - 1L) * 2L + 3L
+  }
+  room_size <- length(room)
+  if (is_path_blocked(bot, hall_pos, room_pos, hall)) {
+    in_room_pos <- NA
+  } else if (dir == "home") {
+    ## bot wants to move from hall to room
+    new_roomie <- bot
+    new_idler <- "."
+    cand <- which(room == ".")
+    if (length(cand) == 0L) {
+      ## no empty spaces
+      in_room_pos <- NA
+    } else if (length(cand) == room_size) {
+      ## all empty spaces
+      in_room_pos <- room_size
+    } else {
+      ## room has already some inhabitants
+      neighbors <- tail(room, room_size - max(cand))
+      if (all(neighbors == bot)) {
+        ## all inhabitants are of same type
+        in_room_pos <- max(cand)
+      } else {
+        in_room_pos <- NA
+      }
+    }
+  } else if (dir == "out") {
+    ## bot wants to move from room to hall
+    new_roomie <- "."
+    new_idler <- bot
+    if (hall[hall_pos] != ".") {
+      in_room_pos <- NA
+    } else {
+      in_room_pos <- which(room == bot)[1L]
+    }
+  }
+  if (!is.na(in_room_pos)) {
+    room[in_room_pos] <- new_roomie
+    hall[hall_pos] <- new_idler
+    state$rooms[[room_id]] <- room
+    state$hall <- hall
+    res <- list(
+      is_free = TRUE,
+      cost = get_cost(bot, in_room_pos, room_pos, hall_pos),
+      state = state
+    )
+  } else {
+    res <- list(
+      is_free = FALSE,
+      cost = NA_integer_,
+      state = list()
+    )
+  }
+  res
+}
+
+get_top_bot <- function(room) {
+  room_id <- names(room)
+  room <- room[[1L]]
+  if (all(room %in% c(".", room_id))) {
+    res <- NA_integer_
+  } else {
+    ## there is at least one wrong bot in here
+    res <- which(room != ".")[1L]
+  }
+  res
+}
+
+bring_bots_home <- function(initial_state) {
+  hash_list <- list()
+  i <- 1
+  move_bots <- function(state) {
+    if (i %% 1000 == 0) print(i)
+    i <<- i + 1
+    id <- get_map_id(state)
+    if (is_done(state)) {
+      return(0L)
+    }
+    if (!is.null(hash_list[[id]])) {
+      return(hash_list[[id]])
+    }
+    ## first move all hall bots home
+    hall <- state$hall
+    rooms <- state$rooms
+    for (hall_pos in seq_along(hall)) {
+      bot <- hall[hall_pos]
+      if (!bot %in% c(".", "x")) {
+        move_attempt <- get_new_position(hall_pos, state, dir = "home")
+        if (move_attempt$is_free) {
+          return(move_attempt$cost + Recall(move_attempt$state))
+        }
+      }
+    }
+    min_costs <- Inf
+    for (room_id in names(rooms)) {
+      top_bot_idx <- get_top_bot(rooms[room_id])
+      if (!is.na(top_bot_idx)) {
+        ## we can move a bot from this room
+         for (hall_pos in seq_along(hall)) {
+           move_attempt <- get_new_position(hall_pos, state, room_id, "out")
+           if (move_attempt$is_free) {
+             min_costs <- min(min_costs, move_attempt$cost + Recall(move_attempt$state))
+           }
+         }
+      }
+    }
+    hash_list[[id]] <<- min_costs
+    min_costs
+  }
+  
+  move_bots(initial_state)
+}
+
+initial_state <- encode_map(puzzle_data)
+bring_bots_home(initial_state)
+
+initial_state2 <- initial_state
+initial_state2$rooms <- list(A = c("A", "D", "D", "B"), 
+                             B = c("D", "C", "B", "C"),
+                             C = c("B", "B", "A", "D"), 
+                             D = c("C", "A", "C", "A"))
+bring_bots_home(initial_state2)
+```
+
