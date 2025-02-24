@@ -13,7 +13,7 @@ suppressWarnings(
 		library(cli)
 	})
 )
-force_year <- "2024"
+force_year <- "2021"
 
 edit_file <- function(lines, file, replace, start, idx = NULL) {
 	if (replace) {
