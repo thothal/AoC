@@ -125,6 +125,14 @@ example_data <- parse_puzzle_data()
 
 ## Part 1
 
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
 We use a brute-force appraoch, where we simply try out all potential moevments. We could
 improve the code by carefully reflecting on smart moving strategies to avoid exploring
 the while space. However, the problem seems to be small enough that such improvements
@@ -152,14 +160,6 @@ the costs of any given mpa already calculated (to avoid re-calculating known cos
   the costs.
   1. Tries each possible space for a bot currently sitting in its false room and keeps
   the cheapest solution in each recursion.
-
-### Description
-
-```{r show-puzzle-a, echo = FALSE, results = "asis"}
-cat(puzzle[[1]])
-```
-
-### Solution
 
 ```{Rcpp cpp-algorithm, file = "bots.cpp", cache = TRUE}
 ```
