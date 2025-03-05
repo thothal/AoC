@@ -21,9 +21,6 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# 2015
-
-
 # 2024
 
 * [Day 1](2024_task1.html)
@@ -79,4 +76,8 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 23](2021_task23.html)
 * [Day 24](2021_task24.html)
 * [Day 25](2021_task25.html)
+
+# 2015
+
+* [Day 1](2015_task1.html)
 
