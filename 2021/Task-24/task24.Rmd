@@ -1,0 +1,233 @@
+---
+params:
+   task_nr: 24
+   year: 2021
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2021"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+```{js sql-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(tibble)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(stringi)
+library(knitr)
+library(cli)
+library(rlang)
+library(DT)
+library(bit64)
+library(rlang)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  block_idx <- str_which(text_block, "^inp")
+  map2(block_idx, c(tail(block_idx, -1L) - 1L, length(text_block)), ~
+         text_block[.x:.y])
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+Our first observation is that the instructions are largely the same for each digit, except
+at positions 
+`r do.call(rbind, puzzle_data) %>% apply(2L, \(c) length(unique(c)) != 1L) %>% which()`.
+In particular the usage of the internal registers is the same for each instruction and 
+only some constants change.
+
+```{r show-instructions}
+codes <- do.call(rbind, puzzle_data) %>% 
+  set_colnames(paste("Step", 1:ncol(.))) %>% 
+  set_rownames(paste("Instruction", 1:nrow(.)))
+
+diffs <- do.call(rbind, puzzle_data) %>% 
+  apply(2L, \(c) length(unique(c)) != 1L) %>% 
+  which()
+
+datatable(
+  codes, 
+  class = c("compact", "nowrap", "hover", "row-border"),
+  options = list(
+    pageLength = nrow(codes),
+    dom = "t",
+    ordering = FALSE,
+    columnDefs = list(
+      list(
+        className = "dt-center", targets = "_all"
+      )
+    ))
+)%>% 
+  formatStyle(diffs, 
+              backgroundColor = "firebrick", 
+              color = "white", 
+              fontStyle = "italic")
+
+```
+
+Now we can translate each instruction set to native R code:
+
+* `r tt(puzzle_data[[1]][1])`: Read input (`d`, say) and store it in `w`: `w <- d`.
+* `r tt(puzzle_data[[1]][2:6])`: Copy the value of `z` to `x`, take it modulo 26 and add a
+constant `c1` (this was one of the changing instructions). Replace `z` by `z` divided by 
+`c2` (again a differnt constant for each instruction): `x <- z %% 26 + c1` and
+`z <- z %/% c2`.
+* `r tt(puzzle_data[[1]][7:8])`: Store 1 in `x`, if `x`does not equal `w`, otherwise store 
+0: `x <- as.integer(x != w)`.
+* `r tt(puzzle_data[[1]][9:12])`: Multiply `x`by 25 and add 1 and sore the reuslt in `y`:
+`y <- 25L * x + 1L`.
+* `r tt(puzzle_data[[1]][13])`: Multiply `z` by `y` and store it in `z`: 
+`z <- z * y`.
+* `r tt(puzzle_data[[1]][14:17])`: Add constant `c3` to to `w`, multiply by `x` and store
+the result in `y`: `y <- (w + c3) * x`.
+* `r tt(puzzle_data[[1]][18])`: Add `z` to `y` and store the result in `z`: 
+`z <- z + y`.
+
+To find valid codes, we start at the end where we know that `z` must equal 0 in order to
+result in a valid code. From there, with a given digit we simply brute-force all possible 
+`z` of the *previous* digit and recurse with all valid digits.
+
+Since this is a rather heavy brute-force algorithm, we fall back to C++ to gain a 
+considerable amount of speed.
+
+A smarter algorithm would be to limit the list of candidates `z` to make the search space
+smaller and to introduce some hash table to avoid recalculating known values.
+
+As a matter of fact the first version used a hash map which reduced the amount of runs by
+a factor of 11, but overall the algorithm was slower due to the overhead involved in 
+checking feasible values.
+
+```{Rcpp cpp-algorithm, file = "nomad.cpp", cache = TRUE}
+```
+
+
+```{r get-solution-1, cache = TRUE}
+consts <- map(puzzle_data, 
+              ~ str_extract(.x[c(5:6, 16)], "-?\\d+") %>% 
+                as.integer() %>% 
+                set_names(paste0("c", 1:3))) %>% 
+  do.call(rbind, .) %>% 
+  as_tibble()
+
+all_solutions <- solve_nomad(consts) %>% 
+  as.integer64()
+
+max(all_solutions)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+As we generated already all valid codes for part 1, we simply need to return the smallest
+code for this part.
+
+```{r get-solution-2}
+min(all_solutions)
+```
