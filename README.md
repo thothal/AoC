@@ -70,4 +70,6 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 24](https://thothal.github.io/AoC/2021_task24.html)
 - [x] [Day 25](https://thothal.github.io/AoC/2021_task25.html)
 
+### 2015
+
 </details>
