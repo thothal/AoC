@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-02-21" />
+        <meta name="date" content="2025-03-05" />
     
     <title>Task 23   </title>
 
@@ -1822,7 +1822,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-02-21</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-03-05</p>
            
 
    
@@ -2078,32 +2078,6 @@ puzzle_data &lt;- local({
 <h1><span class="header-section-number">2</span> Puzzle Day 23</h1>
 <div id="part-1" class="section level2" number="2.1">
 <h2><span class="header-section-number">2.1</span> Part 1</h2>
-<p>We use a brute-force appraoch, where we simply try out all potential moevments. We could
-improve the code by carefully reflecting on smart moving strategies to avoid exploring
-the while space. However, the problem seems to be small enough that such improvements
-seem unnecessary.</p>
-<p>However, we had to fall back to <code>C++</code> code for efficiency reasons, as in <code>R</code> we have
-copy on modifcation semantics, which is, in eahc recursion we are copying lists, which
-significantly slows down the code.</p>
-<p>The idea of the <code>C++</code> is as follows:</p>
-<ol style="list-style-type: decimal">
-<li>We define a <code>State</code> class, which maintains the bots on the <code>hallway</code> and the bots
-in the <code>rooms</code>. The former is implemented as an <code>std::array&lt;char, 11&gt;</code> and the latter as
-a <code>std::array&lt;std::stack&lt;char&gt;, 4&gt;</code>.</li>
-<li>The class defines functions for moving bots in and out, checking if a path is free and
-returning all movable bots in both the rooms and the hallway.</li>
-<li>It provides a <code>get_map_id()</code> function, which gives a condensed textual representation
-of the current state, which later will serve as a key for the has map, where we maintain
-the costs of any given mpa already calculated (to avoid re-calculating known costs).</li>
-<li>The main function <code>solve</code> is a recursive function, which</li>
-<li>Checks if we have a final state, and returns cost zero (no more movements needed)</li>
-<li>Checks if a certain satet was already calculated in the past and returns the cached
-value in this case.</li>
-<li>Move all bots from the hallway home and recalls itself wiht this new state and sums
-the costs.</li>
-<li>Tries each possible space for a bot currently sitting in its false room and keeps
-the cheapest solution in each recursion.</li>
-</ol>
 <div id="description" class="section level3" number="2.1.1">
 <h3><span class="header-section-number">2.1.1</span> Description</h3>
 <article class="day-desc">
@@ -2236,6 +2210,32 @@ Finally, the last Amber amphipod moves into its room, using <code>8</code> energ
 </div>
 <div id="solution" class="section level3" number="2.1.2">
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
+<p>We use a brute-force appraoch, where we simply try out all potential moevments. We could
+improve the code by carefully reflecting on smart moving strategies to avoid exploring
+the while space. However, the problem seems to be small enough that such improvements
+seem unnecessary.</p>
+<p>However, we had to fall back to <code>C++</code> code for efficiency reasons, as in <code>R</code> we have
+copy on modifcation semantics, which is, in eahc recursion we are copying lists, which
+significantly slows down the code.</p>
+<p>The idea of the <code>C++</code> is as follows:</p>
+<ol style="list-style-type: decimal">
+<li>We define a <code>State</code> class, which maintains the bots on the <code>hallway</code> and the bots
+in the <code>rooms</code>. The former is implemented as an <code>std::array&lt;char, 11&gt;</code> and the latter as
+a <code>std::array&lt;std::stack&lt;char&gt;, 4&gt;</code>.</li>
+<li>The class defines functions for moving bots in and out, checking if a path is free and
+returning all movable bots in both the rooms and the hallway.</li>
+<li>It provides a <code>get_map_id()</code> function, which gives a condensed textual representation
+of the current state, which later will serve as a key for the has map, where we maintain
+the costs of any given mpa already calculated (to avoid re-calculating known costs).</li>
+<li>The main function <code>solve</code> is a recursive function, which</li>
+<li>Checks if we have a final state, and returns cost zero (no more movements needed)</li>
+<li>Checks if a certain satet was already calculated in the past and returns the cached
+value in this case.</li>
+<li>Move all bots from the hallway home and recalls itself wiht this new state and sums
+the costs.</li>
+<li>Tries each possible space for a bot currently sitting in its false room and keeps
+the cheapest solution in each recursion.</li>
+</ol>
 <pre class="cpp"><code>#include &lt;Rcpp.h&gt;
 #include &lt;stack&gt;
 #include &lt;array&gt;
