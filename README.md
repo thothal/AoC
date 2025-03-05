@@ -73,7 +73,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 ### 2015
 
 - [x] [Day 1](https://thothal.github.io/AoC/2015_task1.html)
-- [ ] Day 2
+- [x] [Day 2](https://thothal.github.io/AoC/2015_task2.html)
 - [ ] Day 3
 - [ ] Day 4
 - [ ] Day 5
