@@ -166,7 +166,7 @@ cat(puzzle[[2]])
 We use the same overall idea, just adapting our regular expressions making use of 
 backreferences as before.
 
-```{r get-solution-2, cache = TRUE}
+```{r get-solution-2}
 filter_nice_words2 <- function(word_list) {
   contains_pair <- word_list %>% 
     str_subset("(..).*\\1")
