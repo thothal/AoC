@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 10
+   task_nr: 11
    year: 2015
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -46,6 +46,8 @@ editor_options:
 }
 ```
 
+```{js sql-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
@@ -75,6 +77,7 @@ library(dplyr)
 library(stringr)
 library(knitr)
 library(purrr)
+library(cli)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -96,10 +99,7 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       extract2(1L) %>% 
       keep(nzchar)
   }
-  text_block %>% 
-    str_split("") %>% 
-    extract2(1L) %>% 
-    as.integer()
+  text_block 
 }
 
 puzzle_data <- local({
@@ -125,25 +125,26 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We can use `rle` to get the run length encoded version of the input and build the string 
-from there.
+We work with letter positions rather than the letters themselves as it makes calculation 
+way easier.
+
+We use a function to validate a given password and another to increment it. We then 
+increment the password until we reach a valid password.
+
+The solution was first implemented in Rm but was slow-ish (it took more than 2 minutes to
+calculate the password). Hence, we re-implemented it using C++.
+
+The algorithm could be tremendously improved by not increasing passwords by one step at 
+a time, but jumping invalid passwords right away.
+
+However, the C++ solution was blasting fast anyways, so we did not bother to further 
+improve the solution.
+
+```{Rcpp cpp-algorithm, file = "pwgen.cpp", cache = TRUE}
+```
 
 ```{r get-solution-1}
-look_and_say <- function(code, reps) {
-  i <- 1
-  while (i <= reps) {
-    rl <- rle(code)  
-    n <- length(rl$lengths)
-    code <- rep(NA_integer_, 2L * n)
-    even <- seq(2L, by = 2L, length.out = n)
-    code[even] <- rl$values
-    code[even - 1L] <- rl$lengths
-    i <- i + 1
-  }
-  length(code)
-}
-
-look_and_say(puzzle_data, 40L)
+(res <- find_next_password(puzzle_data))
 ```
 
 ## Part 2
@@ -156,8 +157,72 @@ cat(puzzle[[2]])
 
 ### Solution
 
-All we need to do is to apply the same function 50 times now.
+All we need to do is to apply the same function to the previously generated password.
 
 ```{r get-solution-2}
-look_and_say(puzzle_data, 50L)
+ find_next_password(res)
 ```
+
+
+# R Legacy Solution
+
+```{r legacy-code, eval = FALSE}
+validate_password <- function(code) {
+  distance <- diff(code)
+  rld <- rle(distance)
+  rl <- rle(code)
+  idx_iol <- match(c("i", "o", "l"), letters)
+  any(rld$values == 1L & rld$lengths >= 2L) && ## 3 consecutive
+    !any(idx_iol %in% code) && ## no i, o or l
+    (any(rl$lengths >= 4) || sum(rl$lengths >= 2) >= 2) ## at least 2 pairs
+}
+
+increment_password <- function(code) {
+  n <- i <- length(code)
+  done <- FALSE
+  while (!done) {
+    new_digit <- max((code[i] + 1L) %% 27L, 1L)
+    done <- new_digit != 1L
+    code[i] <- new_digit
+    i <- if_else(i - 1 == 0, n, i - 1)
+  }
+  code
+}
+
+find_next_valid_password <- function(password) {
+  cli_progress_bar("Looking for valid passwords")
+  code <- str_split(password, "") %>% 
+    extract2(1L) %>% 
+    match(letters)
+  is_invalid <- TRUE
+  n <- length(code)
+  idx_iol <- match(c("i", "o", "l"), letters)
+  while (is_invalid) {
+    cli_progress_update()
+    i <- n
+    done <- FALSE
+    ## increment
+    while (!done) {
+      new_digit <- max((code[i] + 1L) %% 27L, 1L)
+      done <- new_digit != 1L
+      code[i] <- new_digit
+      i <- if_else(i - 1L == 0L, n, i - 1L)
+    }
+    ## check
+    distance <- diff(code)
+    rld <- rle(distance)
+    rl <- rle(code)
+    is_invalid <- !(
+      any(rld$values == 1L & rld$lengths >= 2L) && ## 3 consecutive
+      !any(idx_iol %in% code) && ## no i, o or l
+      (any(rl$lengths >= 4) || sum(rl$lengths >= 2) >= 2) ## at least 2 pairs
+    )
+  }
+  cli_progress_done()
+  letters[code] %>% 
+    paste(collapse = "")
+}
+
+find_next_valid_password(puzzle_data)
+```
+
