@@ -1,0 +1,174 @@
+---
+params:
+   task_nr: 9
+   year: 2015
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2015"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(tibble)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(stringi)
+library(knitr)
+library(cli)
+library(igraph)
+library(gtools)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split(" to | = ") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("from", "to", "weight")) %>% 
+    as_tibble() %>% 
+    mutate(weight = as.integer(weight))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- c("\"\"", "\"abc\"", "\"aaa\\\"aaa\"", "\"\\x27\"")
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+This is a `Travelling Salesman Path Problem` which is known to be NP hard. However, given
+the small amount of cities, we still can brute-force the solution. A quick and dirty 
+solution is to get all permutations of the cities, get the paths of these trips and sum up 
+their weights.
+
+```{r get-solution-1, cache = TRUE}
+get_all_trips <- function(data) {
+  G <- graph_from_data_frame(data, directed = FALSE)
+  trips <- permutations(vcount(G), vcount(G))
+  costs <- trips %>% 
+    apply(1L, function(path) {
+      idx <- get_edge_ids(G,
+                        c(head(path, 1L), 
+                          rep(path[c(-1L, -length(path))], each = 2L), 
+                          tail(path, 1L)))
+      costs <- E(G)[idx]$weight
+      sum(costs)
+    }) 
+  cbind(trips, costs)
+}
+trips <- get_all_trips(puzzle_data)
+min(trips[, 9])
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+As we generated all paths already in part 1, we simply need to return the maximum length 
+this time.
+
+```{r get-solution-2}
+max(trips[, 9])
+```
