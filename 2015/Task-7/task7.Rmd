@@ -1,0 +1,273 @@
+---
+params:
+   task_nr: 7
+   year: 2015
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2015"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(tibble)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(stringi)
+library(knitr)
+library(cli)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  ops <- text_block %>% 
+    str_split("\\s") %>% 
+    map(function(ops) {
+      c(rep(NA_character_, 5L - length(ops)), ops)
+    }) %>% 
+    do.call(rbind, .)
+  ops <- ops[, -4]
+  colnames(ops) <- c("lhs", "op", "rhs", "res")
+  as_tibble(ops)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We solve this puzzle by means of graph theory.
+
+1. For each operation `lhs op rhs -> res` we create the nodes `lhs -> op`, `rhs -> op` and
+`op -> res` (note that the  `NOT` operator has no `lhs` and a pure assignment has neither 
+`op` nor `lhs`).
+1. We sort the graph then topologically, that is nodes with no incoming nodes (this will
+be the number literals) come first, followed by their dependent nodes and so on.
+1. Then all what is left, is to iterate through the graph in topological order:
+   1. If we hit a node with a number literal, assign this value to the node.
+   1. If we hit an operator node, perform the corresponding operation with the value from 
+   its predecessors (some care has to be taken for the non-commutative `SHIFT` operators 
+   to make sure their operands are used in the right order)
+   1. If we hit a output node, simply copy the value from its predecessor.
+1. The final result will then be stored in node `a`.
+
+```{r get-solution-1}
+construct_graph <- function(ops) {
+  ops <- ops %>% 
+    mutate(
+      op_label = case_when(
+      is.na(op) ~ op,
+      is.na(lhs) ~ paste(op, rhs, sep = "_"),
+      TRUE ~ paste(lhs, op, rhs, sep = "_")
+    )
+    )
+  el <- matrix(character(0), 0, 2) %>% 
+    set_colnames(c("from", "to"))
+  for (i in seq_len(nrow(ops))) {
+    gate <- ops %>% 
+      slice(i) %>% 
+      as.list()
+    if (is.na(gate$op)) {
+      ## assignment operator
+      el <- el %>% 
+        rbind(
+          cbind(gate$rhs, gate$res)
+        )
+    } else if (gate$op == "NOT") {
+      el <- el %>% 
+        rbind(
+          cbind(gate$rhs, gate$op_label),
+          cbind(gate$op_label, gate$res)
+          )
+    } else {
+      el <- el %>% 
+        rbind(
+          cbind(gate$lhs, gate$op_label),
+          cbind(gate$rhs, gate$op_label),
+          cbind(gate$op_label, gate$res)
+        )
+    }
+  }
+  G <- graph_from_edgelist(
+    el
+  )
+  V(G)$type <- case_when(
+    !is.na(strtoi(V(G)$name)) ~ "literal",
+    str_detect(V(G)$name, "^NOT") ~ "not",
+    str_detect(V(G)$name, "_LSHIFT_") ~ "lshift",
+    str_detect(V(G)$name, "_RSHIFT_") ~ "rshift",
+    str_detect(V(G)$name, "_AND_") ~ "and",
+    str_detect(V(G)$name, "_OR_") ~ "or",
+    TRUE ~ "var"
+  )
+  G
+}
+
+calculate_wires <- function(G) {
+  V(G)$value <- NA_integer_
+  v_sorted <- topo_sort(G)
+  for (vi in v_sorted) {
+    me <- V(G)[vi]$name
+    nbs <- neighbors(G, vi, "in")
+    type <- V(G)[vi]$type
+    if (type == "literal") {
+      stopifnot(length(nbs) == 0L)
+      ## it is a literal node with a value
+      V(G)[vi]$value <- strtoi(V(G)[vi]$name)
+    } else if (type == "var") {
+      stopifnot(length(nbs) == 1L)
+      V(G)[vi]$value <- nbs$value
+    } else if (type == "not") {
+      stopifnot(length(nbs) == 1L)
+      V(G)[vi]$value <- bitwNot(nbs$value) %% 2 ^ 16
+    } else if (type == "and") {
+      stopifnot(length(nbs) == 2L)
+      V(G)[vi]$value <- bitwAnd(nbs[1L]$value, nbs[2L]$value) %% 2L ^ 16L
+    } else if (type == "or") {
+      stopifnot(length(nbs) == 2L)
+      V(G)[vi]$value <- bitwOr(nbs[1L]$value, nbs[2L]$value) %% 2L ^ 16L
+    } else if (type == "lshift") {
+      stopifnot(length(nbs) == 2L)
+      parts <- str_split(me, "_[^_]+_") %>% 
+        extract2(1L)
+      nbs <- nbs[match(nbs$name, parts)]
+      V(G)[vi]$value <- bitwShiftL(nbs[1L]$value, nbs[2L]$value) %% 2L ^ 16L
+    } else if (type == "rshift") {
+      stopifnot(length(nbs) == 2L)
+      parts <- str_split(me, "_[^_]+_") %>% 
+        extract2(1L)
+      nbs <- nbs[match(nbs$name, parts)]
+      V(G)[vi]$value <- bitwShiftR(nbs[1L]$value, nbs[2L]$value) %% 2L ^ 16L
+    }
+  }
+  G
+}
+  
+G <- construct_graph(puzzle_data) %>% 
+  calculate_wires()
+
+(res <- V(G)["a"]$value)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We have to simply rename the incoming node to `b` to hold the result from part 1 and 
+recalculate the graph.
+
+```{r get-solution-2}
+rewire_graph <- function(G, new_val) {
+  b_in <- neighbors(G, "b", "in")
+  V(G)[b_in]$name <- new_val
+  G
+}
+
+G2 <- rewire_graph(G, res) %>% 
+  calculate_wires()
+V(G2)["a"]$value
+```
