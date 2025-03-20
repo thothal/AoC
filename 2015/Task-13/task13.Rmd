@@ -1,0 +1,206 @@
+---
+params:
+   task_nr: 13
+   year: 2015
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2015"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(tibble)
+library(igraph)
+library(gtools)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  who <- str_extract(text_block, "^\\S+")
+  neighbor <- str_extract(text_block, "\\S+$") %>% 
+    str_remove("\\.$")
+  pts <- str_extract(text_block, "-?\\d+")
+  sign <- str_extract(text_block, "lose|gain")
+  tibble(
+    from = who,
+    to = neighbor,
+    pts = as.integer(pts) * if_else(sign == "lose", -1L, 1L)
+  )
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We construct a complete graph with the sympathy as edge weight, then we need to find a 
+cylce with maximum weight.
+
+```{r get-solution-1}
+find_cycles <- function(G) {
+  n <- vcount(G)
+  id <- 2:n
+  ## we have a complete graph, thus to get all cycles we fix the first seat and
+  ## permute all the other seats
+  all_cycles <- cbind(
+    1L, 
+    permutations(n - 1L, n - 1L, id)
+  )
+  apply(all_cycles, 1, function(ids) {
+    ## first we need to get an vertex sequence: 1 -> 2, 2 -> 3, ..., n -> 1
+    es <- ids[c(1L, rep(2:length(ids), each = 2L), 1L)]
+    ## next we want to get the opposing vertex sequence: 2 -> 1, 3 -> 2, ..., 1 -> n
+    ## thus, we fist get the even indices of es
+    idx <- seq(2L, length(es), by = 2L)
+    ## c(rbind(x, y)) == c(x[1], y[1], x[2], y[2], ...)
+    ## this results in the proper indices c(2, 1, 4, 3, 6, 5, ...)
+    idx <- c(rbind(idx, idx - 1L))
+    ## finally we get the reversed vertex sequence
+    es_rev <- es[idx]
+    ## get the edge ids
+    left_cycle <- get_edge_ids(G, es)
+    right_cycle <- get_edge_ids(G, es_rev)
+    ## mix them together as before
+    E(G)[c(rbind(left_cycle, right_cycle))]
+  },
+  simplify = FALSE)
+}
+
+find_maximum_cycle <- function(cycles) {
+  sympathy <- map_int(cycles, ~ sum(.x$pts))
+  max(sympathy)
+}
+
+G <- graph_from_data_frame(puzzle_data)
+all_cycles <- find_cycles(G)
+find_maximum_cycle(all_cycles)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we need to find the minimum sum of sympathy between two neighbors. 
+This will be the place, where we sit the new person (this will split up the worst sympathy 
+rating and replace it by the value of 0). We subtract this minimum from the total sum of
+sympathy and get the result.
+
+```{r get-solution-2}
+find_augmented_maximum_cycle <- function(cycles) {
+  sympathy <- map_int(cycles, function(cycle) {
+    weight <- cycle$pts
+    idx <- seq(1L, length(weight), by = 2L)
+    mutual_sympathy <- weight[idx] + weight[idx + 1L]
+    best_place <- min(mutual_sympathy)
+    sum(weight) - best_place
+  })
+  max(sympathy)
+}
+
+find_augmented_maximum_cycle(all_cycles)
+```
