@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 11
+   task_nr: 12
    year: 2015
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -46,9 +46,6 @@ editor_options:
 }
 ```
 
-```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
-```
-
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
                       dev.args = list(bg = "transparent"))
@@ -71,13 +68,10 @@ tt <- function(x) {
 ```{r libs, warning = FALSE}
 library(httr)
 library(xml2)
-library(tibble)
 library(magrittr)
-library(dplyr)
-library(stringr)
-library(knitr)
 library(purrr)
-library(cli)
+library(stringr)
+library(jsonlite)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -125,26 +119,18 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We work with letter positions rather than the letters themselves as it makes calculation 
-way easier.
-
-We use a function to validate a given password and another to increment it. We then 
-increment the password until we reach a valid password.
-
-The solution was first implemented in R, but was slow-ish (it took more than 2 minutes to
-calculate the password). Hence, we re-implemented it using C++.
-
-The algorithm could be tremendously improved by not increasing passwords by one step at 
-a time, but jumping invalid passwords right away.
-
-However, the C++ solution was blasting fast anyways, so we did not bother to further 
-improve the solution.
-
-```{Rcpp cpp-algorithm, file = "pwgen.cpp", cache = TRUE}
-```
+We rely on exiting JSON parsers to parse the string, then we extract all numbers and sum
+them up.
 
 ```{r get-solution-1}
-(res <- find_next_password(puzzle_data))
+sum_numbers <- function(json_data) {
+ unlist(json_data) %>% 
+   as.integer() %>% 
+   suppressWarnings() %>% 
+   sum(na.rm = TRUE)
+}
+json_data <- fromJSON(puzzle_data, simplifyVector = FALSE)
+sum_numbers(json_data)
 ```
 
 ## Part 2
@@ -157,72 +143,32 @@ cat(puzzle[[2]])
 
 ### Solution
 
-All we need to do is to apply the same function to the previously generated password.
+We use a recursive function to iterate through the elements. Whenever `red` is part of the
+elements we do nothing, else we add the numbers to the final results. We jsut have to make
+sure that we apply this logic only to JSON objects. To identify whether the original JSON
+string was an object or an array, we check whether the slot has names (in this case it was
+an object), otherwise it was an array.
 
 ```{r get-solution-2}
- find_next_password(res)
-```
-
-
-# R Legacy Solution
-
-```{r legacy-code, eval = FALSE}
-validate_password <- function(code) {
-  distance <- diff(code)
-  rld <- rle(distance)
-  rl <- rle(code)
-  idx_iol <- match(c("i", "o", "l"), letters)
-  any(rld$values == 1L & rld$lengths >= 2L) && ## 3 consecutive
-    !any(idx_iol %in% code) && ## no i, o or l
-    (any(rl$lengths >= 4) || sum(rl$lengths >= 2) >= 2) ## at least 2 pairs
-}
-
-increment_password <- function(code) {
-  n <- i <- length(code)
-  done <- FALSE
-  while (!done) {
-    new_digit <- max((code[i] + 1L) %% 27L, 1L)
-    done <- new_digit != 1L
-    code[i] <- new_digit
-    i <- if_else(i - 1 == 0, n, i - 1)
-  }
-  code
-}
-
-find_next_valid_password <- function(password) {
-  cli_progress_bar("Looking for valid passwords")
-  code <- str_split(password, "") %>% 
-    extract2(1L) %>% 
-    match(letters)
-  is_invalid <- TRUE
-  n <- length(code)
-  idx_iol <- match(c("i", "o", "l"), letters)
-  while (is_invalid) {
-    cli_progress_update()
-    i <- n
-    done <- FALSE
-    ## increment
-    while (!done) {
-      new_digit <- max((code[i] + 1L) %% 27L, 1L)
-      done <- new_digit != 1L
-      code[i] <- new_digit
-      i <- if_else(i - 1L == 0L, n, i - 1L)
+sum_filtered_numbers <- function(json_data) {
+  sum_list <- function(branch) {
+    is_object <- branch %>% 
+      names() %>% 
+      is.null() %>% 
+      not()
+    slot_sum <- children_sum <- 0L
+    if (!is_object || !"red" %in% branch) {
+      slot_sum <- keep(branch, is.numeric) %>% 
+        unlist() %>% 
+        sum()
+      children_sum <- keep(branch, is.list) %>% 
+        map_int(sum_list) %>% 
+        sum()
     }
-    ## check
-    distance <- diff(code)
-    rld <- rle(distance)
-    rl <- rle(code)
-    is_invalid <- !(
-      any(rld$values == 1L & rld$lengths >= 2L) && ## 3 consecutive
-      !any(idx_iol %in% code) && ## no i, o or l
-      (any(rl$lengths >= 4) || sum(rl$lengths >= 2) >= 2) ## at least 2 pairs
-    )
+    slot_sum + children_sum
   }
-  cli_progress_done()
-  letters[code] %>% 
-    paste(collapse = "")
+  sum_list(json_data)
 }
 
-find_next_valid_password(puzzle_data)
+sum_filtered_numbers(json_data)
 ```
-
