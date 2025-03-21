@@ -121,24 +121,32 @@ cat(puzzle[[1]])
 ### Solution
 
 We solve this puzzle via dynamic programming. We create a vector where each entry 
-represents the amount of ways to reach a sum equal to the index. That is $dp_0$ indicates
-the amount of ways to build a sum equal 0. We set $dp_0$ to 1 (there is only one way to
+represents the amount of ways to reach a sum equal to the index. That is $z_0$ indicates
+the amount of ways to build a sum equal 0. We set $z_0$ to 1 (there is only one way to
 build the sum 0, namely by adding no numbers as all numbers are greater than 0).
 
-We then use two loops, the forst iterates over each number, the second loops from the 
-maximum capacity down to the current number. We updated the vector simply by adding the
-up the values.
+We then use two loops, the first iterates over each number, the second loops from the 
+maximum capacity down to the current number. Let's assume that $x_i$ denotes the current
+number from the list. Now to count the number of ways to reach a sum of $y$, we simply
+have to add the number of ways how we reach  $y-x_i$ to get the proper count.
 
 ```{r get-solution-1}
 count_sums <- function(numbers, capacity) {
-  res <- vector("integer", capacity + 1L)
-  res[1L] <- 1L
+  nr_ways <- vector("integer", capacity + 1L)
+  nr_ways[1L] <- 1L
   walk(numbers, function(nr) {
     for (i in capacity:nr) {
-      res[i + 1L] <<- res[i + 1L] + res[i - nr + 1L] 
+      ## idea: 
+      ## 1. res[i + 1L] counts the number of ways we can build the sum `i` (the plus one
+      ##    is there because R is 1-based)
+      ## 2. Likewise res[i - nr + 1L] counts the number of ways we can build sum `i - nr`
+      ## 3. We are currently examining summand `nr`, thus we can add `nr` to `i - nr` to
+      ##    end up at `i`. Hence, we simply add the number of ways to reach `i - nr` to
+      ##    the number of ways we reached `i` (in earlier iterations) 
+      nr_ways[i + 1L] <<- nr_ways[i + 1L] + nr_ways[i - nr + 1L] 
     }
   })
-  tail(res, 1L)
+  tail(nr_ways, 1L)
 }
 count_sums(puzzle_data, 150)
 ```
@@ -153,27 +161,36 @@ cat(puzzle[[2]])
 
 ### Solution
 
-This time we need also to keep track about the amount of summands.
+This time we need also to keep track about the amount of summands. The algorithm follows
+largely the same ideas as before, but this time we check if the previous sum was reached
+with less then current number of operands plus one, if so, we take this number of ways as 
+new minimum and update teh values accordingly. If we are already on the track of smallest
+number of summands, we update the number of ways as before by adding the value of the 
+partial sum.
 
 ```{r get-solution-2}
 count_min_sums <- function(numbers, capacity) {
-  dp <- rep(Inf, capacity + 1L)
-  ways <- rep(0L, capacity + 1L) 
+  nr_operands <- rep(Inf, capacity + 1L)
+  nr_ways <- rep(0L, capacity + 1L) 
   
-  dp[1L] <- 0L
-  ways[1L] <- 1L
+  nr_operands[1L] <- 0L
+  nr_ways[1L] <- 1L
   walk(numbers, function(nr) {
-    for (j in capacity:nr) {
-      if (dp[j - nr + 1L] + 1L < dp[j + 1L]) {
-        dp[j + 1L] <<- dp[j - nr + 1L] + 1L
-        ways[j + 1L] <<- ways[j - nr + 1L]
-      } else if (dp[j - nr + 1L] + 1L == dp[j + 1L]) {
-        ways[j + 1L] <<- ways[j + 1L] + ways[j - nr + 1L]
+    for (i in capacity:nr) {
+      if (nr_operands[i - nr + 1L] + 1L < nr_operands[i + 1L]) {
+        ## we got `i - nr` with less summands minus one (the one we would be adding now)
+        ## update teh numebr of operands (one more) and overwrite the number of ways 
+        ## (we want to count only the minumum, hence not adding but simply overwriting)
+        nr_operands[i + 1L] <<- nr_operands[i - nr + 1L] + 1L
+        nr_ways[i + 1L] <<- nr_ways[i - nr + 1L]
+      } else if (nr_operands[i - nr + 1L] + 1L == nr_operands[i + 1L]) {
+        ## same as before if we are on the track of smallest number of operands
+        nr_ways[i + 1L] <<- nr_ways[i + 1L] + nr_ways[i - nr + 1L]
       }
     }
   }
   )
-  list(min_count = dp[capacity + 1L], min_ways = ways[capacity + 1L])
+  list(min_count = nr_operands[capacity + 1L], min_ways = nr_ways[capacity + 1L])
 }
 count_min_sums(puzzle_data, 150L)
 ```
