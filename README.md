@@ -90,7 +90,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 16](https://thothal.github.io/AoC/2015_task16.html)
 - [x] [Day 17](https://thothal.github.io/AoC/2015_task17.html)
 - [x] [Day 18](https://thothal.github.io/AoC/2015_task18.html)
-- [ ] Day 19
+- [x] [Day 19](https://thothal.github.io/AoC/2015_task19.html)
 - [ ] Day 20
 - [ ] Day 21
 - [ ] Day 22
