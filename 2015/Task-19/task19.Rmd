@@ -1,0 +1,294 @@
+---
+params:
+   task_nr: 19
+   year: 2015
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2015"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(tidyr)
+library(kableExtra)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  rules <- str_subset(text_block, "=>") %>% 
+    str_split(" => ") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("from", "to")) %>% 
+    as_tibble()
+  molecule <- str_subset(text_block, "=>", TRUE)
+  list(rules = rules, molecule = molecule)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- list(
+  rules = tibble(
+    from = c("e", "e", "H", "H", "O"),
+    to = c("H", "O", "HO", "OH", "HH")
+  ),
+  molecule = "HOHOHO"
+)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use regular expressions to solve this task.
+
+```{r get-solution-1}
+count_new_molecules <- function(molecule, rules) {
+  unique_patterns <- rules %>% 
+    pull(from) %>% 
+    unique()
+  replace_molecule <- function(molecule, start, end, to) {
+    str_sub(molecule, start, end) <- to
+    molecule
+  }
+  all_matches <- map(unique_patterns, function(reg) {
+    pos <- str_locate_all(molecule, reg) %>%
+      extract2(1L) %>% 
+      as_tibble()
+    to <- rules %>% 
+      filter(from == reg) %>% 
+      pull(to)
+    pos %>% 
+      mutate(to = list(to)) %>% 
+      mutate(from = reg, .before = 1L) %>% 
+      unnest(cols = c(to))
+  }) %>% 
+    list_rbind() %>% 
+    rowwise()
+  all_matches %>% 
+    mutate(new_molecule = replace_molecule(molecule, start, end, to)) %>% 
+    pull(new_molecule) %>% 
+    unique() %>% 
+    length()
+}
+
+count_new_molecules(puzzle_data$molecule, puzzle_data$rules)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+This was a tough nut to crack. First approaches of (guided) brute-force leaded nowhere, 
+neither some ideas to parse the string into a nested list, which can be eventually 
+transformed into a tree. There, we walked from the bottom to the top, reducing 
+`Rn` `Ar` brackets one after another. However, teh remaining top level string was
+still too large to brute force all possible rule combinations.
+
+Some observations we amade along the efforst were:
+
+1. Rules that do **not** contain `Y`, `Rn` or `Ar`.
+1. Rules that are of the form `x Rn z Ar` where `x` and `z` are single atoms.
+1. Rules that are of the form `x Rn (z Y w)+ Ar` where `x`, `z` and `w` are single atoms.
+
+We can regard `Rn` as  `(`, `Ar` as `)` and `Y` as `,`. This translates the relevant rules 
+to the following:
+
+```{r show-rules}
+puzzle_data$rules %>% 
+  filter(str_detect(to, "Ar")) %>% 
+  mutate(to = str_replace_all(to, c(Ar = ")", Y = ",", Rn = "("))) %>%
+  mutate(" => " = " => ", .after = 1L) %>% 
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>% 
+  column_spec(1:3, monospace = TRUE)
+```
+
+Furthermore, we observe that there are only 4 types of production rules (`X` being a 
+terminal symbol, i.e. **not** `(`, `)` or `,`):
+
+1. `XX => X` or `XX => e`
+1. `X(X) => X`
+1. `X(X,X) => X`
+1. `X(X,X,X) => X`
+
+That is, each rule (when applied from the full string), reduces the string length 
+(measured as number of tokens and not characters) either by 1 (when we apply rule (1)),
+3 (rule (2)), 5 (rule (3)) or 7 (rule (4)). To reduce a string of length `n` to a string 
+of length 1 we would need `n - 1 steps` if we applied only rules of type (1). Applying
+a bracket rule (2) - (4) needs the same amount of steps, but we reduce the brackets for 
+free. Applying a rule with a comma, gets 2 symbols for free (`,` and `X`). Thus we 
+simply need to count number of brackets, commas and tokens and get an analytical solution.
+
+This gives us the correct answer~~, however, our idea to implement a reducing 
+algorithm failed~~.
+
+*N.B.* This problem kept bothering me and after reading more on the underlying problem,
+I figured that it can be solved via an adapted version of the
+[Cocke–Younger–Kasami algorithm](https://en.wikipedia.org/wiki/CYK_algorithm). I include
+my working C++ code for solving this issue with means of the CYK algorithm in the 
+appendix.
+
+```{r get-solution-2}
+count_reduction_steps <- function(molecule) {
+  str_count(molecule, "[A-Z][a-z]?") - 
+    str_count(molecule, "Rn|Ar") -
+    2 * str_count(molecule, "Y") -
+    1
+}
+
+count_reduction_steps(puzzle_data$molecule)
+```
+
+# CYK Algorithm
+
+The Cocke–Younger–Kasami algorithm (CYK) determines whether a given string is part of
+a grammar. However, this grammar must be a context-free grammar given in 
+[Chomsky normal form (CNF)](https://en.wikipedia.org/wiki/Chomsky_normal_form). 
+
+The CNF dictates that every rule `NT` must resolve either to a single terminal, or to
+exactly 2 non terminals. Thus, we needed first to translate the given rules into the
+CNF and could then apply the CYK. 
+
+The CYK in its original form uses dynamic programming to
+determine whether a substring starting at position `i` up to position `j` can be built 
+using the rules. It starts with single tokens (they can be built if there is a unit 
+production rule producing this terminal). In subsequent iterations it uses the previously
+calculated values to determine whether a longer string can be formed. The idea being, to 
+determine whether we can build a substring from position 1 to 2 for example, we simply 
+look whether we can build this string from the rules producing string (if at all) from 1 
+to 1 and a rule producing a string from 2 to 2. So if rule `NT1` produced a string from
+position 1 to 1, and `NT2` produced the string from position 2 to 2 **and** we have a rule
+producing `NT1 NT2` we can deduce that also a string from position to 2 can be produced.
+
+The deeper we go into the iteration the more combinations must be checked, but eventually
+we fill the last cell. If in the end this cell is not empty (or more generally can be 
+reduced to the starting symbol), we can conclude that the string can be built. 
+
+In the orignal form it test simply for existance, but in our adapted form we count number
+of replacements on the way (becuase we needed to transfrom the problem to CNF upfront, we
+must take care to count only the original and not the synthetical rules, which were simply
+introduced to satisfy the CNF requirement). 
+
+A great visual tool for understanding the CYK algorithm 
+[can be found here](https://www.cip.ifi.lmu.de/~lindebar/).
+
+```{Rcpp cpp-algorithm, file = "grammar.cpp", cache = TRUE}
+```
+
+```{r result-cyk}
+rules <- puzzle_data$rules %>% 
+  mutate(to = str_split(to, "(?<=\\w)(?=[A-Z])"))
+
+rules <- rules %>% 
+  pull(to) %>% 
+  set_names(rules %>% 
+              pull(from))
+count_replacements(rules, puzzle_data$molecule)
+```
+
