@@ -1,0 +1,189 @@
+---
+params:
+   task_nr: 22
+   year: 2015
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2015"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(tidyr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  stats <- str_extract_all(text_block, "\\d+") %>% 
+    flatten() %>% 
+    as.integer() %>% 
+    set_names(c("boss_HP", "dmg")) %>% 
+    as.list()
+  spells <- tibble(
+    name = c("Magic Missile",
+             "Drain",
+             "Shield",
+             "Poison",
+             "Recharge"),
+    damage = c(4L, 2L, 0L, 3L, 0L),
+    heal = c(0L, 2L, 0L, 0L, 0L),
+    armor = c(0L, 0L, 7L, 0L, 0L),
+    mana = c(0L, 0L, 0L, 0L, 101L),
+    duration = c(0L, 0L, 6L, 6L, 5L),
+    costs = c(53L, 73L, 113L, 173L, 229L)
+  )
+  list(stats = c(stats, mana = 500L, hp = 50L), spells = spells)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+This was a difficult puzzle, where we overread a lot of details in hte first iterations 
+(e.g. that buffs are applied not only before the player's turn but also before the
+boss' turn). We started out with a recursive  R implementation, but as there are quite 
+some combinations to check, R's copy on modify semantic became soon a deal-breaker. Thus, 
+we switched to C++.
+
+We learned an aweful lot about smart pointers (`unique_ptr` with its move semantics and
+`shared_ptr`) just to realize that using a **unique** pointer, for something which 
+effectively should be shared, is not the smartest move.
+
+We needed a lot of iterations before the code worked, which was due to the self inflicted 
+complications with moving unique pointers and even more importantly due to not following 
+the instructions of the game.
+
+Eventually We came up with the following solution (after switching from a recursive 
+function to an iterative method). The idea is that we save the current state, cast an 
+affordable spell (which is not yet casted) and add the new state to the stack. 
+If we find a solution (i.e. the boss is dead), we update the mana count. During 
+the process, if we hit a state which is more expensive than the best solution so far, 
+we pruned to save some iterations.
+
+```{Rcpp cpp-algorithm, file = "wizard_game.cpp", cache = TRUE}
+```
+
+```{r get-solution-1}
+get_lowest_mana(puzzle_data$stats, puzzle_data$spells)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+While the first part of the solution took a considerable amount of time, the second one
+was very easy, as we simply had to add another game step. This time we understood the
+instructions properly and just added a flag to the algorithm to determine which version
+we want to simulate.
+
+```{r get-solution-2}
+get_lowest_mana(puzzle_data$stats, puzzle_data$spells, TRUE)
+```
