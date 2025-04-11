@@ -1,0 +1,279 @@
+---
+params:
+   task_nr: 23
+   year: 2015
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2015"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(tidyr)
+library(igraph)
+library(glue)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block 
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+To understand the algorithm, we draw it first as a graph.
+
+```{r make-graph, fig.height = 12}
+make_flow_chart <- function(ops) {
+  parse_nodes <- function(op) {
+    str_match_all(op, "(...) ([^ ,]+)(?:, )?([-+]\\d+)?") %>% 
+      do.call(rbind, .) %>% 
+      set_colnames(c("string", "op", "reg", "offset")) %>% 
+      as_tibble() %>% 
+      mutate(id = 1:n(), .before = 1L) %>% 
+      mutate(offset = if_else(op == "jmp",  reg, offset),
+             reg = if_else(op == "jmp", NA_character_, reg),
+             offset = as.integer(offset),
+             label = case_when(
+               op == "jio" ~ glue("{reg} == 1?"),
+               op == "jie" ~ glue("{reg} %% 2 == 0?"),
+               op == "inc" ~ glue("{reg}++"),
+               op == "tpl" ~ glue("{reg} = 3\U00B7{reg}"),
+               op == "hlf" ~ glue("{reg} = {reg} / 2")
+             ),
+             target = if_else(!is.na(offset), id + offset, NA_integer_))
+
+  }
+  ops_data <- parse_nodes(ops)
+  ops_data_no_jmp <- ops_data %>% 
+    filter(op != "jmp")
+  n <-  nrow(ops_data_no_jmp) + 1L ## for exit
+  G <- make_empty_graph(n)
+  V(G)$name <- ops_data_no_jmp %>% 
+    pull(id) %>% 
+    paste0("E", .) %>% 
+    c(glue("E{nrow(ops_data) + 1L}"))
+  V(G)$type <- ops_data_no_jmp %>% 
+    pull(op) %>% 
+    c("out")
+  V(G)$label <- ops_data_no_jmp %>% 
+    pull(label) %>% 
+    c("Ouput b")
+  V(G)$shape <- "rectangle"
+  V(G)$size <- case_match(
+    V(G)$type,
+    "inc" ~ 40L,
+    c("tpl", "hlf", "jio") ~ 60L,
+    .default = 100L)
+  V(G)$size2 <- 65L
+  V(G)$color <- case_when(
+    V(G)$label == "b++" ~ "firebrick",
+    V(G)$type %in% c("jio", "jie") ~ "steelblue",
+    V(G)$type %in% c("inc", "tpl", "hlf") ~ "gray80",
+    V(G)$type == "out" ~ "forestgreen"
+    
+  ) 
+  V(G)$label.color <- if_else(
+    V(G)$color == "gray80", "black", "white"
+  )
+  double_jmp <- ops_data %>% 
+    inner_join(ops_data, c(target = "id")) %>%
+    filter(op.y == "jmp") %>% 
+    mutate(id, target = target.y, .keep = "none")
+  ops_data <- ops_data %>% 
+    rows_update(double_jmp, "id")
+  edges <- ops_data %>% 
+    mutate(
+      edge_str = if_else(lead(op) == "jmp", 
+                         glue("{id},{lead(target)}"),
+                         glue("{id},{if_else(is.na(target), id + 1L, target)}")
+      ),
+      edge_str = if_else(op %in% c("jio", "jie"),
+                         glue("{edge_str},{id},{id + 1L}"),
+                         edge_str)
+      ) %>% 
+    filter(op != "jmp") %>%
+    pull(edge_str) %>%
+    str_extract_all("\\d+") %>%
+    unlist() %>%
+    paste0("E", .)
+  
+  G <- G %>% 
+     add_edges(edges)
+  E(G)$arrow.size <- .75
+  E(G)$arrow.width <- .75
+  lay <- matrix(c(0L, -2L, -2L, -2L, -2L, -2L, -2L, -2L, -2L, -2L, 
+                  -2L, -2L, -2L, -2L, -2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 
+                  2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 2L, 0L, -2L, 
+                  -2L, -3L, -3L, -1L, 0L, 28L, 27L, 26L, 25L, 24L, 23L, 22L, 21L, 
+                  20L, 19L, 18L, 17L, 16L, 15L, 14L, 27L, 26L, 25L, 24L, 23L, 22L, 
+                  21L, 20L, 19L, 18L, 17L, 16L, 15L, 14L, 13L, 12L, 11L, 10L, 9L, 
+                  8L, 7L, 6L, 5L, 4L, 3L, 2L, 1L, 2L, 0L), ncol = 2L)
+  G <- set_graph_attr(G, "layout", lay)
+  G <- set_graph_attr(G, "rescale", FALSE)
+  G
+}
+
+G <- make_flow_chart(puzzle_data) 
+plot(G, ylim = c(0, 28), xlim = c(-3.5, 2.5), margin = 0, asp = 0)
+```
+
+We can see that the algorithm calculates a starting value for `a` (Depending on whether
+we started with 1 or any other value (0 in our case)) and then does a loop:
+
+1. If `a` equals 1 stop.
+1. Else if it is even divide `a` by 2 otherwise multiply by 3 and add 1.
+1. Repeat.
+1. Return the number of iterations.
+
+This is known as the **Collatz conjecture**. 
+
+```{r get-starting-value-0, echo = FALSE}
+a0 <- (((0L + 2L) * 27L + 2L) * 3L + 2L) * 27L + 1L
+```
+
+
+For `a == 0L` the starting value is `r format(a0, big.mark = ",")`.
+
+
+```{r get-solution-1}
+<<get-starting-value-0>>
+collatz_conjecture <- function(n) {
+  b <- 0L
+  while (n != 1L) {
+    b <- b + 1L
+    if (n %% 2L == 0L) {
+      n <- n / 2L
+    } else {
+      n <- 3L * n + 1L
+    }
+  }
+  b
+}
+
+collatz_conjecture(a0)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+```{r get-starting-value-1, echo = FALSE}
+a1 <- ((((((((1L * 3L) + 2L) * 3L + 2L) * 9L + 2L) * 3L + 1L) * 3L + 1L) * 3L + 2L) * 
+         3L + 1L) * 9L +1L
+```
+
+This time we simply walk the other branch which yields another starting value 
+(`r format(a1, big.mark = ",")`).
+
+```{r get-solution-2}
+<<get-starting-value-1>>
+collatz_conjecture(a1)
+```
