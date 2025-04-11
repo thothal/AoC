@@ -1,0 +1,175 @@
+---
+params:
+   task_nr: 24
+   year: 2015
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2015"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(tidyr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    as.integer()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use a backtracking algorithm in C++ as always when we need to backtack a significant
+amount of time with heavy data structures (`R` would make endless copies and slowing down
+the process significantly).
+
+The workhorse function is `can_partition` which checks whether the numbers can be split
+into partition of the same sum. If we want to partition a vector into `k` groups, the
+sum of all numbers must be dividable by k, and the sum divided by k must be the target 
+sum. Then in the backtracking algorithm, we try to add a number to the partition and 
+recurse. If the sum of selected numbers equals the target, we recurse again, decreasing 
+the number of groups by one. Thta is, we found one partition and check whtehr the 
+remaining numbers can also form partitions of the same sum, but we need one group less 
+(the very one we just formed).
+
+If there is only one number left, the algorithm returns `true`, as per definition this
+number must equal the target. If at any stage the recursion returned `false`, we backtrack 
+by deslecting this number and tring the next one. If we did not return with `true` from
+the recursion we return `false` as we could not find a valid partition.
+
+With this workhorse function what is left is to loop through all group sizes from 1 to
+the number of elements in our vector. We create all combinations of this size, form the
+first group with these combinations (only if the partial sum equals the target) 
+and check whether we can partition the remaining
+numbers into k - 1 groups. If this is possible, we store the result, keeping the best
+solution (minimum group size, and minimum quantum energy).
+
+As soon as we found the first minimum solution, we stop, as we do not need to look for
+larger groups.
+
+```{Rcpp cpp-algorithm, file = "quantum.cpp", cache = TRUE}
+```
+
+```{r get-solution-1}
+find_min_quantum_entanglement(puzzle_data, 3L)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+
+```{r get-solution-2}
+find_min_quantum_entanglement(puzzle_data, 4L)
+```
