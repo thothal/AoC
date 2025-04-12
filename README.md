@@ -96,6 +96,6 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 22](https://thothal.github.io/AoC/2015_task22.html)
 - [x] [Day 23](https://thothal.github.io/AoC/2015_task23.html)
 - [x] [Day 24](https://thothal.github.io/AoC/2015_task24.html)
-- [ ] Day 25
+- [x] [Day 25](https://thothal.github.io/AoC/2015_task25.html)
 
 </details>
