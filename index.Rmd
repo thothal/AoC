@@ -77,6 +77,10 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 24](2021_task24.html)
 * [Day 25](2021_task25.html)
 
+# 2016
+
+* [Day 1](2016_task1.html)
+
 # 2015
 
 * [Day 1](2015_task1.html)
@@ -99,6 +103,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 18](2015_task18.html)
 * [Day 19](2015_task19.html)
 * [Day 20](2015_task20.html)
+* [Day 21](2015_task21.html)
 * [Day 22](2015_task22.html)
 * [Day 23](2015_task23.html)
 * [Day 24](2015_task24.html)
