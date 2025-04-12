@@ -1,0 +1,187 @@
+---
+params:
+   task_nr: 25
+   year: 2015
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2015"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(tidyr)
+library(bit64)
+library(Rcpp)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  list(start_value = 20151125L,
+       target = 
+         text_block %>% 
+         str_extract_all("\\d+") %>% 
+         unlist() %>% 
+         as.integer() %>% 
+         set_names(c("row", "col")))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The algorithm is rather straight forward:
+
+1. Find out the index `n` of the element.
+1. Iterate `n - 1` times and apply the algorithm.
+
+However, as loops are rather slow in `R` (as usual), we use a C++ function (the R function
+remains for reference).
+
+```{r get-solution-1}
+get_index <- function(row, col) {
+  diagonal <- row + col - 1L
+  (diagonal * (diagonal - 1L)) / 2 + col
+}
+
+get_code <- function(row, col, start) {
+  i <- 1
+  n <- get_index(row, col)
+  x <- as.integer64(start)
+  while(i < n) {
+    x <- (x * 252533L) %% 33554393L 
+    i <- i + 1L
+    if (i %% 100000L == 0) {
+      cat("Iteration:", i, "\n")
+    }
+  }
+  x
+}
+
+cppFunction(
+  '
+  long long get_code_cpp(const int n, const int start) {
+    long long x = start;
+    for (int j = 1; j < n; ++j) {
+       x = (x * 252533) % 33554393;
+    }
+    return x;
+  } 
+  '
+)
+
+get_code_cpp(get_index(puzzle_data$target["row"], puzzle_data$target["col"]), 
+             puzzle_data$start_value)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We succesfully solved all puzzles in this year. CU next year! Ho-Ho-Ho!
+```{r get-solution-2}
+```
