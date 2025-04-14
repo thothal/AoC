@@ -84,6 +84,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 3](2016_task3.html)
 * [Day 4](2016_task4.html)
 * [Day 5](2016_task5.html)
+* [Day 6](2016_task6.html)
 
 # 2015
 
