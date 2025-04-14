@@ -1,0 +1,195 @@
+---
+params:
+   task_nr: 4
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_extract_all("[a-z]+(-[a-z]+)*|\\d+|(?=\\[)[a-z]+(?=\\])$") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("room", "sector", "check_sum")) %>% 
+    as_tibble() %>% 
+    mutate(sector = as.integer(sector))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data(
+  c("aaaaa-bbb-z-y-x-123[abxyz]",
+    "a-b-c-d-e-f-g-h-987[abcde]",
+    "not-a-real-room-404[oarel]",
+    "totally-real-room-200[decoy]")
+)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We loop through all rows and check wheterh the check sum is correct.
+
+```{r get-solution-1}
+is_decoy <- function(room, check_sum) {
+  tokens <- room %>% 
+    str_remove_all(fixed("-")) %>% 
+    str_split("") %>% 
+    table()
+  cutoff <- sort(tokens, TRUE)[5L]
+  res <- tokens[tokens >= cutoff] %>% 
+    sort(TRUE) %>% 
+    extract(1:5) %>% 
+    names() %>% 
+    paste(collapse = "")
+  res != check_sum
+}
+
+room_list <- puzzle_data %>% 
+  mutate(is_decoy = map2_lgl(room, check_sum, is_decoy))
+
+room_list %>% 
+  filter(!is_decoy) %>% 
+  summarize(result = sum(sector))
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We apply the shift-cipher to all real rooms and look at the list of words
+
+```{r get-solution-2}
+deshift <- function(room, sector) {
+  new_codes <- room %>% 
+    str_remove_all(fixed("-")) %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    match(letters) %>% 
+    subtract(1L) %>% ## map a to 0 and z to 25
+    add(sector) %>%  ## add shift
+    mod(26L) %>% ## use modulo to account for cyclic nature of shift 
+    add(1L) ## add 1 again to map a to 1
+  dash_pos <- room %>% 
+    str_locate_all("-") %>% 
+    extract2(1L)
+  dash_pos <- dash_pos[, "start"]
+  new_word <- rep("-", length(new_codes) + length(dash_pos))
+  new_word[-dash_pos] <- letters[new_codes]
+  paste(new_word, collapse = "")
+}
+room_list %>% 
+  filter(!is_decoy) %>% 
+  mutate(room_name = map2_chr(room, sector, deshift)) %>% 
+  select(room_name, sector) %>% 
+  filter(str_detect(room_name, "northpole"))
+```
