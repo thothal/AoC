@@ -1,0 +1,200 @@
+---
+params:
+   task_nr: 9
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(glue)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+We use the following algorithm:
+
+1. Get everything up to (but not including) the first (from the left) `(nxm)` marker.
+1. Add the length of this tring to the result.
+1. Extract the `(nxm)` pattern and add `n * m` to the result (we repeat a substring of
+length `n` `m` times.)
+1. Remove the marker plus `n` characters from the string.
+1. Repeat until the string is fully consumed.
+
+### Solution
+
+```{r get-solution-1}
+get_decompressed_length <- function(string) {
+   compression_pattern <- "\\((\\d+)x(\\d+)\\)"
+   ## everything from start to the next pattern
+   chunk_pattern <- glue("^.*?(?={compression_pattern})") 
+   len <- 0
+
+   while (str_length(string) > 0L) {
+     left <- str_extract(string, chunk_pattern)
+     rest <- str_remove(string, chunk_pattern)
+     len <- len + str_length(left)
+     compression <- str_match_all(rest, glue("^{compression_pattern}")) %>% 
+       extract2(1L) %>% 
+       c() %>% 
+       extract(-1L) %>% 
+       as.integer()
+     len <- len + prod(compression)
+     string <- str_remove(rest, glue("^{compression_pattern}.{{{compression[1L]}}}"))
+   }
+   len
+}
+
+get_decompressed_length(puzzle_data)
+
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+This time we us a recursive version of the same idea. Instead of simply discarding the
+next `n` characters, we recurse with this substring and multiply it by the outer `m`.
+
+```{r get-solution-2}
+get_decompressed_length_recursive <- function(string) {
+  len <- 0
+  compression_pattern <- "\\((\\d+)x(\\d+)\\)"
+  chunk_pattern <- glue("^.*?(?={compression_pattern})")
+  if (!str_detect(string, compression_pattern)) {
+    ## no more compression markers
+    len <- str_length(string)
+  } else {
+    ## everything from start to the next pattern
+    left <- str_extract(string, chunk_pattern)
+    rest <- str_remove(string, chunk_pattern)
+    len <- len + str_length(left)
+    compression <- str_match_all(rest, glue("^{compression_pattern}")) %>% 
+      extract2(1L) %>% 
+      c() %>% 
+      extract(-1L) %>% 
+      as.integer()
+    next_chunk <- str_remove(rest, glue("^{compression_pattern}")) %>% 
+      str_extract(glue(".{{{compression[1L]}}}"))
+    rest <- str_remove(rest, glue("^{compression_pattern}.{{{compression[1L]}}}"))
+    len <- len + compression[2L] * Recall(next_chunk) + Recall(rest)
+  }
+  len
+}
+
+get_decompressed_length_recursive(puzzle_data)
+```
