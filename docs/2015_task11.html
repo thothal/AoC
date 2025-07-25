@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-03-19" />
+        <meta name="date" content="2025-07-25" />
     
     <title>Task 11   </title>
 
@@ -1822,7 +1822,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-03-19</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-07-25</p>
            
 
    
@@ -2138,12 +2138,16 @@ calculate the password). Hence, we re-implemented it using C++.</p>
 a time, but jumping invalid passwords right away.</p>
 <p>However, the C++ solution was blasting fast anyways, so we did not bother to further
 improve the solution.</p>
-<pre class="cpp"><code>#include &lt;Rcpp.h&gt;
-#include &lt;string&gt;
-#include &lt;array&gt;
-#include &lt;algorithm&gt;
-
+<pre class="cpp"><code>#ifndef STANDALONE
+#include &lt;Rcpp.h&gt;
 using namespace Rcpp;
+#else
+#include &lt;iostream&gt;
+#endif
+
+#include &lt;algorithm&gt;
+#include &lt;array&gt;
+#include &lt;string&gt;
 
 bool validate_pw(const std::array&lt;unsigned int, 8&gt;&amp; code) {
   bool test_passed = false;
@@ -2156,9 +2160,8 @@ bool validate_pw(const std::array&lt;unsigned int, 8&gt;&amp; code) {
   if (!test_passed) {
     return false;
   }
-  test_passed = !std::any_of(code.begin(), code.end(), [](unsigned int n) {
-    return n == 9 || n == 12 || n == 15;
-  });
+  test_passed = !std::any_of(
+      code.begin(), code.end(), [](unsigned int n) { return n == 9 || n == 12 || n == 15; });
   if (!test_passed) {
     return false;
   }
@@ -2166,7 +2169,7 @@ bool validate_pw(const std::array&lt;unsigned int, 8&gt;&amp; code) {
   for (size_t i = 0; i &lt; code.size() - 1; ++i) {
     if (code[i] == code[i + 1]) {
       ++pairCount;
-      ++i; 
+      ++i;
     }
   }
   test_passed = pairCount &gt;= 2;
@@ -2195,7 +2198,7 @@ void increment_pw(std::array&lt;unsigned int, 8&gt;&amp; code) {
 std::string find_next_password(std::string pw) {
   std::array&lt;unsigned int, 8&gt; code;
   size_t i = 0;
-  for (auto const&amp; c: pw) {
+  for (auto const&amp; c : pw) {
     code[i++] = static_cast&lt;char&gt;(c) - &#39;a&#39; + 1;
   }
   bool done = false;
@@ -2205,19 +2208,26 @@ std::string find_next_password(std::string pw) {
     done = validate_pw(code);
     i++;
   }
-  auto stringify {
-    [](const std::array&lt;unsigned int, 8&gt;&amp; code)
-    {
-      std::string result;
-      for (auto d: code) {
-        char letter = &#39;a&#39; + (d - 1);
-        result += letter;
-      }
-      return result;
+  auto stringify {[](const std::array&lt;unsigned int, 8&gt;&amp; code) {
+    std::string result;
+    for (auto d : code) {
+      char letter = &#39;a&#39; + (d - 1);
+      result += letter;
     }
-  };
+    return result;
+  }};
   return stringify(code);
-}</code></pre>
+}
+
+#ifdef STANDALONE
+int main() {
+  std::string password = &quot;ghijklmn&quot;;
+  std::string next_password = find_next_password(password);
+  std::cout &lt;&lt; &quot;Original password: &quot; &lt;&lt; password &lt;&lt; &quot; Next password: &quot; &lt;&lt; next_password
+            &lt;&lt; std::endl;
+  return 0;
+}
+#endif // STANDALONE</code></pre>
 <pre class="r"><code>(res &lt;- find_next_password(puzzle_data))</code></pre>
 <pre><code>## [1] &quot;cqjxxyzz&quot;</code></pre>
 </div>
