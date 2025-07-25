@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-04-11" />
+        <meta name="date" content="2025-07-25" />
     
     <title>Task 24   </title>
 
@@ -1821,7 +1821,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-04-11</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-07-25</p>
            
 
    
@@ -2142,32 +2142,40 @@ numbers into k - 1 groups. If this is possible, we store the result, keeping the
 solution (minimum group size, and minimum quantum energy).</p>
 <p>As soon as we found the first minimum solution, we stop, as we do not need to look for
 larger groups.</p>
-<pre class="cpp"><code>#include &lt;Rcpp.h&gt;
-#include &lt;vector&gt;
+<pre class="cpp"><code>#ifndef STANDALONE
+#include &lt;Rcpp.h&gt;
+using namespace Rcpp;
+#else
+#include &lt;iostream&gt;
+#endif
+
 #include &lt;algorithm&gt;
 #include &lt;functional&gt;
 #include &lt;numeric&gt;
-
-using namespace Rcpp;
+#include &lt;vector&gt;
 
 long long product(const std::vector&lt;int&gt;&amp; nums) {
   long long p = 1;
-  for (int n : nums) p *= n;
+  for (int n : nums)
+    p *= n;
   return p;
 }
 
-bool can_partition(const std::vector&lt;int&gt;&amp; nums, int k, 
-                   int target, int start, std::vector&lt;bool&gt;&amp; used) {
+bool can_partition(const std::vector&lt;int&gt;&amp; nums,
+                   int k,
+                   int target,
+                   int start,
+                   std::vector&lt;bool&gt;&amp; used) {
   if (k == 1) {
-    return true;  
+    return true;
   }
   std::function&lt;bool(int, int)&gt; dfs = [&amp;](int idx, int group_sum) {
     if (group_sum == target) {
-      return can_partition(nums, k - 1, target, 0, used);  
+      return can_partition(nums, k - 1, target, 0, used);
     }
     for (size_t i = idx; i &lt; nums.size(); ++i) {
       if (used[i] || group_sum + nums[i] &gt; target) {
-        continue;  
+        continue;
       }
       used[i] = true;
       if (dfs(i + 1, group_sum + nums[i])) {
@@ -2177,47 +2185,45 @@ bool can_partition(const std::vector&lt;int&gt;&amp; nums, int k,
     }
     return false;
   };
-  
-  return dfs(start, 0); 
+
+  return dfs(start, 0);
 }
 
-// [[Rcpp::export]]
-long long find_min_quantum_entanglement(IntegerVector weights, int k) {
-  std::vector&lt;int&gt; nums = as&lt;std::vector&lt;int&gt;&gt;(weights);
+long long find_min_quantum_entanglement(std::vector&lt;int&gt; nums, int k) {
   int total = std::accumulate(nums.begin(), nums.end(), 0);
   if (total % k != 0) {
     return -1;
   }
   int target = total / k;
   std::sort(nums.begin(), nums.end(), std::greater&lt;&gt;());
-  
+
   int n = nums.size();
   long long best_qe = LLONG_MAX;
   size_t min_group_size = INT_MAX;
-  
+
   for (int size = 1; size &lt;= n; ++size) {
     std::vector&lt;bool&gt; bitmask(size, true);
     bitmask.resize(n, false);
-    
+
     do {
       std::vector&lt;int&gt; group;
       for (int i = 0; i &lt; n; ++i) {
         if (bitmask[i]) {
-          group.push_back(nums[i]);  
+          group.push_back(nums[i]);
         }
       }
-      
+
       if (std::accumulate(group.begin(), group.end(), 0) != target) {
         continue;
       }
-      
+
       std::vector&lt;bool&gt; used(n, false);
       for (int i = 0; i &lt; n; ++i) {
         if (bitmask[i]) {
-          used[i] = true; 
+          used[i] = true;
         }
       }
-      
+
       if (can_partition(nums, k - 1, target, 0, used)) {
         long long qe = product(group);
         if (group.size() &lt; min_group_size || (group.size() == min_group_size &amp;&amp; qe &lt; best_qe)) {
@@ -2225,17 +2231,31 @@ long long find_min_quantum_entanglement(IntegerVector weights, int k) {
           best_qe = qe;
         }
       }
-      
+
     } while (std::prev_permutation(bitmask.begin(), bitmask.end()));
-    
+
     if (best_qe != LLONG_MAX) {
       // we found a solution, no need to check groups with more elements
-      break; 
+      break;
     }
   }
-  
-  return (best_qe == LLONG_MAX) ? -1 : best_qe; 
-}</code></pre>
+
+  return (best_qe == LLONG_MAX) ? -1 : best_qe;
+}
+#ifndef STANDALONE
+// [[Rcpp::export]]
+long long find_min_quantum_entanglement(IntegerVector weights, int k) {
+  std::vector&lt;int&gt; nums = as&lt;std::vector&lt;int&gt;&gt;(weights);
+  return find_min_quantum_entanglement(nums, k);
+}
+#else
+int main() {
+  std::vector&lt;int&gt; weights = {1, 2, 3, 4, 5, 7, 8, 9, 10, 11};
+  int k = 4;
+  long long result = find_min_quantum_entanglement(weights, k);
+  std::cout &lt;&lt; &quot;Minimum quantum entanglement: &quot; &lt;&lt; result &lt;&lt; std::endl;
+}
+#endif</code></pre>
 <pre class="r"><code>find_min_quantum_entanglement(puzzle_data, 3L)</code></pre>
 <pre><code>## [1] 10439961859</code></pre>
 </div>

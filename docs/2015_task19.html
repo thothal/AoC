@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-04-01" />
+        <meta name="date" content="2025-07-25" />
     
     <title>Task 19   </title>
 
@@ -2046,7 +2046,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-04-01</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-07-25</p>
            
 
    
@@ -2727,60 +2727,62 @@ must take care to count only the original and not the synthetical rules, which w
 introduced to satisfy the CNF requirement).</p>
 <p>A great visual tool for understanding the CYK algorithm
 <a href="https://www.cip.ifi.lmu.de/~lindebar/">can be found here</a>.</p>
-<pre class="cpp"><code>#include &lt;Rcpp.h&gt;
+<pre class="cpp"><code>#ifndef STANDALONE
+#include &lt;Rcpp.h&gt;
+using namespace Rcpp;
+#endif
+
+#include &lt;iostream&gt;
+#include &lt;map&gt;
+#include &lt;memory&gt;
+#include &lt;optional&gt;
 #include &lt;set&gt;
 #include &lt;string&gt;
 #include &lt;utility&gt;
-#include &lt;optional&gt;
-#include &lt;iostream&gt;
 #include &lt;vector&gt;
-#include &lt;map&gt;
-#include &lt;memory&gt;
-
 
 using Token = std::string;
 using DoubleToken = std::pair&lt;Token, std::optional&lt;Token&gt;&gt;;
 
-using namespace Rcpp;
-
 class Grammar {
-private:
-  std::set&lt;Token&gt; terminals;
-  std::set&lt;Token&gt; non_terminals;
-  std::set&lt;Token&gt; original_rules;
-  std::map&lt;Token, size_t&gt; bin_cnts;
-  std::map&lt;Token, std::set&lt;DoubleToken&gt;&gt; rules;
-  std::map&lt;DoubleToken, std::set&lt;Token&gt;&gt; inverse_rules;
-  
-  Token make_nonterminal(const Token&amp;, bool);
-  std::vector&lt;Token&gt; tokenize_input(const Token&amp;) const;
-  void add_rule(const Token&amp;, const std::vector&lt;Token&gt;&amp;);
-  
-  bool is_original_rule(const Token&amp;, const DoubleToken&amp;) const;
-  
-  std::map&lt;Token, unsigned int&gt; run_cyk(const std::vector&lt;Token&gt;&amp;) const;
-public:
-  Grammar(const std::map&lt;Token, std::vector&lt;std::vector&lt;Token&gt;&gt;&gt;&amp;);
-  
-  bool is_member(const Token&amp;) const;
-  bool is_member(const std::vector&lt;Token&gt;&amp;) const;
-  
-  unsigned int get_nr_replacements(const Token&amp;) const;
-  unsigned int get_nr_replacements(const std::vector&lt;Token&gt;&amp;) const;
-  
-  friend std::ostream&amp; operator &lt;&lt;(std::ostream&amp;, const Grammar&amp;);
+  private:
+    std::set&lt;Token&gt; terminals;
+    std::set&lt;Token&gt; non_terminals;
+    std::set&lt;Token&gt; original_rules;
+    std::map&lt;Token, size_t&gt; bin_cnts;
+    std::map&lt;Token, std::set&lt;DoubleToken&gt;&gt; rules;
+    std::map&lt;DoubleToken, std::set&lt;Token&gt;&gt; inverse_rules;
+
+    Token make_nonterminal(const Token&amp;, bool);
+    std::vector&lt;Token&gt; tokenize_input(const Token&amp;) const;
+    void add_rule(const Token&amp;, const std::vector&lt;Token&gt;&amp;);
+
+    bool is_original_rule(const Token&amp;, const DoubleToken&amp;) const;
+
+    std::map&lt;Token, unsigned int&gt; run_cyk(const std::vector&lt;Token&gt;&amp;) const;
+
+  public:
+    Grammar(const std::map&lt;Token, std::vector&lt;std::vector&lt;Token&gt;&gt;&gt;&amp;);
+
+    bool is_member(const Token&amp;) const;
+    bool is_member(const std::vector&lt;Token&gt;&amp;) const;
+
+    unsigned int get_nr_replacements(const Token&amp;) const;
+    unsigned int get_nr_replacements(const std::vector&lt;Token&gt;&amp;) const;
+
+    friend std::ostream&amp; operator&lt;&lt;(std::ostream&amp;, const Grammar&amp;);
 };
 
 Grammar::Grammar(const std::map&lt;Token, std::vector&lt;std::vector&lt;Token&gt;&gt;&gt;&amp; rules) {
-  for (const auto&amp; [symbol, rule]: rules) {
-    for (const auto&amp; r: rule) {
+  for (const auto&amp; [symbol, rule] : rules) {
+    for (const auto&amp; r : rule) {
       add_rule(symbol, r);
     }
   }
 }
 
 bool Grammar::is_member(const std::vector&lt;Token&gt;&amp; word_list) const {
-  return run_cyk(word_list).size() &gt; 0;  
+  return run_cyk(word_list).size() &gt; 0;
 }
 
 bool Grammar::is_member(const Token&amp; word) const {
@@ -2790,7 +2792,7 @@ bool Grammar::is_member(const Token&amp; word) const {
 unsigned int Grammar::get_nr_replacements(const std::vector&lt;Token&gt;&amp; word_list) const {
   std::map&lt;Token, unsigned int&gt; cyk_results = run_cyk(word_list);
   unsigned int result = -1; // set to maximum value
-  for (const auto&amp; [key, n]: cyk_results) {
+  for (const auto&amp; [key, n] : cyk_results) {
     result = (n &lt; result) ? n : result;
   }
   return result;
@@ -2800,12 +2802,12 @@ unsigned int Grammar::get_nr_replacements(const Token&amp; word) const {
   return get_nr_replacements(tokenize_input(word));
 }
 
-std::ostream&amp; operator &lt;&lt;(std::ostream&amp; stream, const Grammar&amp; grammar) {
+std::ostream&amp; operator&lt;&lt;(std::ostream&amp; stream, const Grammar&amp; grammar) {
   stream &lt;&lt; &quot;Terminals:&quot; &lt;&lt; std::endl &lt;&lt; &quot;\t[&quot;;
   for (auto it = grammar.terminals.begin(); it != grammar.terminals.end(); ++it) {
     stream &lt;&lt; &quot;\&quot;&quot; &lt;&lt; *it &lt;&lt; &quot;\&quot;&quot;;
     if (next(it) != grammar.terminals.end()) {
-      stream&lt;&lt; &quot;, &quot;;
+      stream &lt;&lt; &quot;, &quot;;
     }
   }
   stream &lt;&lt; &quot;]&quot; &lt;&lt; std::endl;
@@ -2821,12 +2823,12 @@ std::ostream&amp; operator &lt;&lt;(std::ostream&amp; stream, const Grammar&amp;
   for (auto it = grammar.original_rules.begin(); it != grammar.original_rules.end(); ++it) {
     stream &lt;&lt; *it;
     if (next(it) != grammar.original_rules.end()) {
-      stream&lt;&lt; &quot;, &quot;;
+      stream &lt;&lt; &quot;, &quot;;
     }
   }
-  stream &lt;&lt; &quot;]&quot; &lt;&lt; std::endl &lt;&lt; &quot;Rules:&quot; &lt;&lt; std::endl;;
+  stream &lt;&lt; &quot;]&quot; &lt;&lt; std::endl &lt;&lt; &quot;Rules:&quot; &lt;&lt; std::endl;
   for (const auto&amp; rule : grammar.rules) {
-    stream &lt;&lt; &quot;\t&quot;  &lt;&lt; rule.first &lt;&lt; &quot; =&gt; &quot;;
+    stream &lt;&lt; &quot;\t&quot; &lt;&lt; rule.first &lt;&lt; &quot; =&gt; &quot;;
     auto it = rule.second.begin();
     while (it != rule.second.end()) {
       if (it-&gt;second) {
@@ -2844,7 +2846,7 @@ std::ostream&amp; operator &lt;&lt;(std::ostream&amp; stream, const Grammar&amp;
   return stream;
 }
 
-Token Grammar::make_nonterminal(const Token&amp; symbol, bool add_suffix = false){
+Token Grammar::make_nonterminal(const Token&amp; symbol, bool add_suffix = false) {
   Token nt = &quot;NT_&quot; + symbol;
   if (add_suffix) {
     size_t suffix = bin_cnts[symbol] + 1;
@@ -2868,7 +2870,6 @@ std::vector&lt;Token&gt; Grammar::tokenize_input(const Token&amp; word) const {
   return word_list;
 }
 
-
 void Grammar::add_rule(const Token&amp; lhs, const std::vector&lt;Token&gt;&amp; rhs) {
   DoubleToken p1;
   Token nt_lhs, nt_rhs_left, nt_rhs_right, nt_prev;
@@ -2886,7 +2887,7 @@ void Grammar::add_rule(const Token&amp; lhs, const std::vector&lt;Token&gt;&amp;
      * NT_H_3 =&gt; NT_Y NT_H_4   [3]
      * NT_H_4 =&gt; NT_F NT_Ar    [4]
      * NT_H =&gt; &quot;H&quot;
-     * NT_C =&gt; &quot;C&quot; 
+     * NT_C =&gt; &quot;C&quot;
      * NT_Rn = &quot;Rn&quot;
      * NT_F =&gt; &quot;F&quot;
      * NT_Y =&gt; &quot;Y&quot;,
@@ -2896,7 +2897,7 @@ void Grammar::add_rule(const Token&amp; lhs, const std::vector&lt;Token&gt;&amp;
     terminals.insert(rhs[i + 1]);
     nt_rhs_left = make_nonterminal(rhs[i]); // NT_C
     p1 = std::make_pair(rhs[i], std::nullopt);
-    rules[nt_rhs_left].insert(p1); // NT_c =&gt; &quot;C&quot;
+    rules[nt_rhs_left].insert(p1); // NT_C =&gt; &quot;C&quot;
     inverse_rules[p1].insert(nt_rhs_left);
     if (need_bin &amp;&amp; i != (rhs.size() - 2)) {
       nt_rhs_right = make_nonterminal(lhs, true);
@@ -2917,32 +2918,31 @@ void Grammar::add_rule(const Token&amp; lhs, const std::vector&lt;Token&gt;&amp;
 }
 
 bool Grammar::is_original_rule(const Token&amp; rule, const DoubleToken&amp; rhs) const {
-  return original_rules.find(rule) != original_rules.end() &amp;&amp;
-    rhs.second.has_value();
+  return original_rules.find(rule) != original_rules.end() &amp;&amp; rhs.second.has_value();
 }
 
 std::map&lt;Token, unsigned int&gt; Grammar::run_cyk(const std::vector&lt;Token&gt;&amp; word_list) const {
   DoubleToken p1;
   std::set&lt;Token&gt; rhs;
   size_t n = word_list.size();
-  
+
   std::map&lt;int, std::map&lt;int, std::map&lt;Token, unsigned int&gt;&gt;&gt; token_table;
-  for (size_t j = 0; j &lt; n; ++j){
+  for (size_t j = 0; j &lt; n; ++j) {
     p1 = std::make_pair(word_list[j], std::nullopt);
     if (inverse_rules.find(p1) != inverse_rules.end()) {
       rhs = inverse_rules.at(p1);
-      for (const auto&amp; r: rhs) {
+      for (const auto&amp; r : rhs) {
         token_table[j][j][r] = 0U;
       }
     }
     for (int i = j; i &gt;= 0; --i) {
       for (size_t k = i; k &lt;= j; ++k) {
-        for (const auto&amp; [rl, il]: token_table[i][k]) {
-          for (const auto&amp; [rr, ir]: token_table[k + 1][j]) {
+        for (const auto&amp; [rl, il] : token_table[i][k]) {
+          for (const auto&amp; [rr, ir] : token_table[k + 1][j]) {
             p1 = std::make_pair(rl, rr);
             if (inverse_rules.find(p1) != inverse_rules.end()) {
               rhs = inverse_rules.at(p1);
-              for (const auto&amp; r: rhs) {
+              for (const auto&amp; r : rhs) {
                 token_table[i][j][r] = il + ir + (is_original_rule(r, p1) ? 1U : 0U);
               }
             }
@@ -2954,7 +2954,7 @@ std::map&lt;Token, unsigned int&gt; Grammar::run_cyk(const std::vector&lt;Token&
   return token_table[0][n - 1];
 }
 
-
+#ifndef STANDALONE
 // [[Rcpp::export]]
 unsigned int count_replacements(List rules, Token molecule) {
   Token symbol;
@@ -2967,7 +2967,19 @@ unsigned int count_replacements(List rules, Token molecule) {
   }
   Grammar grammar(rule_map);
   return grammar.get_nr_replacements(molecule);
-}</code></pre>
+}
+#else
+int main() {
+  std::map&lt;Token, std::vector&lt;std::vector&lt;Token&gt;&gt;&gt; rules = {{&quot;H&quot;, {{&quot;H&quot;, &quot;O&quot;}, {&quot;O&quot;, &quot;H&quot;}}},
+                                                            {&quot;O&quot;, {{&quot;H&quot;, &quot;H&quot;}}}};
+  Grammar grammar(rules);
+  Token molecule = &quot;HOH&quot;;
+  unsigned int replacements = grammar.get_nr_replacements(molecule);
+  std::cout &lt;&lt; &quot;Number of replacements for molecule &#39;&quot; &lt;&lt; molecule &lt;&lt; &quot;&#39;: &quot; &lt;&lt; replacements
+            &lt;&lt; std::endl;
+  return 0;
+}
+#endif</code></pre>
 <pre class="r"><code>rules &lt;- puzzle_data$rules %&gt;% 
   mutate(to = str_split(to, &quot;(?&lt;=\\w)(?=[A-Z])&quot;))
 
