@@ -3,14 +3,18 @@
         {
             "name": "Win32",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "C:/Users/tthaler/AppData/Local/R/win-library/4.5/Rcpp/include",
+                "C:/Program Files/R/R-4.5.1/include"
             ],
             "defines": [
                 "_DEBUG",
                 "UNICODE",
                 "_UNICODE"
             ],
+            "compilerPath": "C:/rtools45/ucrt64/bin/g++.exe",
             "cStandard": "c17",
+            "cppStandard": "gnu++17",
             "intelliSenseMode": "windows-gcc-x64"
         }
     ],

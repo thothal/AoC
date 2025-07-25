@@ -1,9 +1,13 @@
+#ifndef STANDALONE
 #include <Rcpp.h>
-#include <string>
-#include <array>
-#include <algorithm>
-
 using namespace Rcpp;
+#else
+#include <iostream>
+#endif
+
+#include <algorithm>
+#include <array>
+#include <string>
 
 bool validate_pw(const std::array<unsigned int, 8>& code) {
   bool test_passed = false;
@@ -16,9 +20,8 @@ bool validate_pw(const std::array<unsigned int, 8>& code) {
   if (!test_passed) {
     return false;
   }
-  test_passed = !std::any_of(code.begin(), code.end(), [](unsigned int n) {
-    return n == 9 || n == 12 || n == 15;
-  });
+  test_passed = !std::any_of(
+      code.begin(), code.end(), [](unsigned int n) { return n == 9 || n == 12 || n == 15; });
   if (!test_passed) {
     return false;
   }
@@ -26,7 +29,7 @@ bool validate_pw(const std::array<unsigned int, 8>& code) {
   for (size_t i = 0; i < code.size() - 1; ++i) {
     if (code[i] == code[i + 1]) {
       ++pairCount;
-      ++i; 
+      ++i;
     }
   }
   test_passed = pairCount >= 2;
@@ -55,7 +58,7 @@ void increment_pw(std::array<unsigned int, 8>& code) {
 std::string find_next_password(std::string pw) {
   std::array<unsigned int, 8> code;
   size_t i = 0;
-  for (auto const& c: pw) {
+  for (auto const& c : pw) {
     code[i++] = static_cast<char>(c) - 'a' + 1;
   }
   bool done = false;
@@ -65,16 +68,23 @@ std::string find_next_password(std::string pw) {
     done = validate_pw(code);
     i++;
   }
-  auto stringify {
-    [](const std::array<unsigned int, 8>& code)
-    {
-      std::string result;
-      for (auto d: code) {
-        char letter = 'a' + (d - 1);
-        result += letter;
-      }
-      return result;
+  auto stringify {[](const std::array<unsigned int, 8>& code) {
+    std::string result;
+    for (auto d : code) {
+      char letter = 'a' + (d - 1);
+      result += letter;
     }
-  };
+    return result;
+  }};
   return stringify(code);
 }
+
+#ifdef STANDALONE
+int main() {
+  std::string password = "ghijklmn";
+  std::string next_password = find_next_password(password);
+  std::cout << "Original password: " << password << " Next password: " << next_password
+            << std::endl;
+  return 0;
+}
+#endif // STANDALONE

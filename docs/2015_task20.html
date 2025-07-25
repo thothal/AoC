@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-04-02" />
+        <meta name="date" content="2025-07-25" />
     
     <title>Task 20   </title>
 
@@ -1821,7 +1821,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-04-02</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-07-25</p>
            
 
    
@@ -2117,7 +2117,12 @@ the number. However since the sequence is not monotonously decreasing, a simple 
 search won’t do and we have to iterate. Since iterations is not one of R’s strength, we
 fall back to C++. To get the number of divisors. we look up all numbers between 1 and
 the square root of n and add the reciprocal number (unless it is the exact square root).</p>
-<pre class="cpp"><code>#include &lt;Rcpp.h&gt;
+<pre class="cpp"><code>#ifndef STANDALONE
+#include &lt;Rcpp.h&gt;
+using namespace Rcpp;
+#else
+#include &lt;iostream&gt;
+#endif
 
 int get_sum_of_divisors(unsigned int num, unsigned int limit = -1) {
   int sum = 0;
@@ -2137,14 +2142,21 @@ int get_sum_of_divisors(unsigned int num, unsigned int limit = -1) {
 }
 
 // [[Rcpp::export]]
-unsigned int find_house_number(unsigned int num, unsigned int reward = 10, 
+unsigned int find_house_number(unsigned int num,
+                               unsigned int reward = 10,
                                unsigned int limit = -1) {
   int i = 1;
-  while(reward * get_sum_of_divisors(i, limit) &lt; num) {
+  while (reward * get_sum_of_divisors(i, limit) &lt; num) {
     i++;
   }
   return i;
-}</code></pre>
+}
+
+#ifdef STANDALONE
+int main() {
+  std::cout &lt;&lt; &quot;House Number: &quot; &lt;&lt; find_house_number(130, 10, -1) &lt;&lt; std::endl;
+}
+#endif</code></pre>
 <pre class="r"><code>find_house_number(puzzle_data)</code></pre>
 <pre><code>## [1] 665280</code></pre>
 </div>

@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-04-14" />
+        <meta name="date" content="2025-07-25" />
     
     <title>Task 5   </title>
 
@@ -1821,7 +1821,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-04-14</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-07-25</p>
            
 
    
@@ -2112,30 +2112,34 @@ Given the actual Door ID, <em>what is the password</em>?
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
 <p>This is similar to <a href="2015_task4.html">Task 4 @ 2015</a> and we can reuse those ideas. However,
 since we have to run quite some iterations we defer the calculation to C++.</p>
-<pre class="cpp"><code>#include &lt;Rcpp.h&gt;
-#include &lt;openssl/evp.h&gt;
-#include &lt;string&gt;
-#include &lt;sstream&gt;
-#include &lt;iomanip&gt;
-#include &lt;regex&gt;
-
+<pre class="cpp"><code>#ifndef STANDALONE
+#include &lt;Rcpp.h&gt;
 using namespace Rcpp;
+#else
+#include &lt;iostream&gt;
+#endif
+
+#include &lt;iomanip&gt;
+#include &lt;openssl/evp.h&gt;
+#include &lt;regex&gt;
+#include &lt;sstream&gt;
+#include &lt;string&gt;
 
 std::string get_md5(const std::string&amp; input) {
   EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
   const EVP_MD* md = EVP_md5();
   unsigned char md_value[EVP_MAX_MD_SIZE];
   unsigned int md_len;
-  
+
   EVP_DigestInit_ex(mdctx, md, NULL);
   EVP_DigestUpdate(mdctx, input.c_str(), input.size());
   EVP_DigestFinal_ex(mdctx, md_value, &amp;md_len);
-  
+
   std::ostringstream oss;
   for (size_t i = 0; i &lt; md_len; ++i) {
     oss &lt;&lt; std::hex &lt;&lt; std::setw(2) &lt;&lt; std::setfill(&#39;0&#39;) &lt;&lt; static_cast&lt;int&gt;(md_value[i]);
   }
-  
+
   EVP_MD_CTX_free(mdctx);
   return oss.str();
 }
@@ -2167,7 +2171,7 @@ std::string get_improved_code(std::string door_id, int len_out, int nr_zeros) {
     key = door_id + std::to_string(i++);
     md5 = get_md5(key);
     if (std::regex_search(md5, re)) {
-      std::string pos_str(1, md5[nr_zeros]); 
+      std::string pos_str(1, md5[nr_zeros]);
       pos = std::stoi(pos_str, nullptr, 16);
       if (pos &lt; len_out &amp;&amp; code[pos] == &#39;x&#39;) {
         code[pos] = md5[nr_zeros + 1];
@@ -2177,7 +2181,12 @@ std::string get_improved_code(std::string door_id, int len_out, int nr_zeros) {
   }
   return code;
 }
-</code></pre>
+
+#ifdef STANDALONE
+int main() {
+  std::cout &lt;&lt; &quot;Code: &quot; &lt;&lt; get_code(&quot;abc&quot;, 8, 5) &lt;&lt; std::endl;
+}
+#endif</code></pre>
 <pre class="r"><code>get_code(puzzle_data, 8L, 5L)</code></pre>
 <pre><code>## [1] &quot;c6697b55&quot;</code></pre>
 </div>
