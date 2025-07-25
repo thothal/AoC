@@ -1,58 +1,68 @@
+#ifndef STANDALONE
 #include <Rcpp.h>
-#include <stack>
+using namespace Rcpp;
+#endif
+
+#include <algorithm>
 #include <array>
-#include <vector>
 #include <iostream>
+#include <iterator>
+#include <limits>
+#include <sstream>
+#include <stack>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 constexpr unsigned int MAX_COST = std::numeric_limits<unsigned int>::max();
 
-using namespace Rcpp;
-
 class State {
-public:
-  State(const List&);
-  
-  std::string get_map_id() const;
-  std::vector<unsigned int> get_hallbots() const;
-  std::unordered_map<unsigned int, std::vector<unsigned int>> get_homebots() const;
-  
-  unsigned int move_home(unsigned int);
-  unsigned int move_out(unsigned int, unsigned int);
-  bool is_done() const;
-private:
-  const unsigned int room_size;
-  
-  const std::array<char, 4> room_labels = {'A', 'B', 'C', 'D'};
-  const std::array<unsigned int, 4> moving_costs = {1, 10, 100, 1000};
-  const std::array<unsigned int, 4> room_pos = {2, 4, 6, 8};
-  
-  std::array<std::stack<char>, 4> rooms; 
-  std::array<char, 11> hallway;
-  
-  bool validate_layout(const List&) const;
-  bool can_get_home(unsigned int) const;
-  bool can_move(unsigned int, unsigned int) const;
-  
-  unsigned int get_bot_idx(char) const;
-  unsigned int get_cost(unsigned int, unsigned int, unsigned int) const;
-  
-  friend std::ostream& operator<<(std::ostream&, const State&);
+  public:
+    State(const std::vector<std::vector<char>>&);
+
+    std::string get_map_id() const;
+    std::vector<unsigned int> get_hallbots() const;
+    std::unordered_map<unsigned int, std::vector<unsigned int>> get_homebots() const;
+
+    unsigned int move_home(unsigned int);
+    unsigned int move_out(unsigned int, unsigned int);
+    bool is_done() const;
+
+  private:
+    const unsigned int room_size;
+
+    const std::array<char, 4> room_labels = {'A', 'B', 'C', 'D'};
+    const std::array<unsigned int, 4> moving_costs = {1, 10, 100, 1000};
+    const std::array<unsigned int, 4> room_pos = {2, 4, 6, 8};
+
+    std::array<std::stack<char>, 4> rooms;
+    std::array<char, 11> hallway;
+
+    bool validate_layout(const std::vector<std::vector<char>>&) const;
+    bool can_get_home(unsigned int) const;
+    bool can_move(unsigned int, unsigned int) const;
+
+    unsigned int get_bot_idx(char) const;
+    unsigned int get_cost(unsigned int, unsigned int, unsigned int) const;
+
+    friend std::ostream& operator<<(std::ostream&, const State&);
 };
 
-State::State(const List& initial_layout) : 
-  room_size(Rf_xlength(initial_layout[0])) {
+State::State(const std::vector<std::vector<char>>& initial_layout)
+    : room_size(initial_layout[0].size())
+    , rooms()
+    , hallway() {
   if (!validate_layout(initial_layout)) {
-    stop("all elements of 'initial_input' must have the same length");
+    throw std::runtime_error("all elements of 'initial_input' must have the same length");
   }
   hallway.fill('.');
   size_t i = 0;
-  for (const auto& l: initial_layout) {
+  for (const auto& l : initial_layout) {
     std::stack<char> room;
-    CharacterVector room_layout = l;
-    for(auto j = room_layout.end() - 1; j >= room_layout.begin(); --j) {
-      room.push(as<char>(*j));
+    std::vector<char> room_layout = l;
+    for (auto j = room_layout.end() - 1; j >= room_layout.begin(); --j) {
+      room.push(*j);
     }
     rooms[i++] = room;
   }
@@ -61,10 +71,10 @@ State::State(const List& initial_layout) :
 std::string State::get_map_id() const {
   std::ostringstream key_stream;
   std::string key;
-  for (const auto s: hallway) {
+  for (const auto s : hallway) {
     key_stream << s;
   }
-  for (auto room: rooms) {
+  for (auto room : rooms) {
     while (room.size() != room_size) {
       room.push('.');
     }
@@ -88,8 +98,7 @@ std::vector<unsigned int> State::get_hallbots() const {
   return bot_idx;
 }
 
-std::unordered_map<unsigned int, 
-                   std::vector<unsigned int>> State::get_homebots() const {
+std::unordered_map<unsigned int, std::vector<unsigned int>> State::get_homebots() const {
   std::unordered_map<unsigned int, std::vector<unsigned int>> bot_idx;
   for (size_t i = 0; i < rooms.size(); ++i) {
     std::stack<char> room = rooms[i];
@@ -99,10 +108,8 @@ std::unordered_map<unsigned int,
         room.pop();
       } else {
         for (size_t j = 0; j < hallway.size(); ++j) {
-          if (can_move(j, i) && 
-              std::find(std::begin(room_pos),
-                        std::end(room_pos), 
-                        j) == std::end(room_pos)) {
+          if (can_move(j, i) &&
+              std::find(std::begin(room_pos), std::end(room_pos), j) == std::end(room_pos)) {
             free_spaces.push_back(j);
           }
         }
@@ -113,13 +120,13 @@ std::unordered_map<unsigned int,
       }
     }
   }
-  return bot_idx;  
+  return bot_idx;
 }
 
-bool State::validate_layout(const List& initial_layout) const {
+bool State::validate_layout(const std::vector<std::vector<char>>& initial_layout) const {
   bool result = true;
-  for (const auto& l: initial_layout) {
-    result = result && (Rf_xlength(l) == room_size);
+  for (const auto& l : initial_layout) {
+    result = result && (l.size() == room_size);
   }
   return result;
 }
@@ -130,8 +137,7 @@ bool State::can_get_home(unsigned int hall_pos) const {
   // need an offset b/c we do not want to test the starting field
   int offset = (hall_pos < room_pos[home_idx]) ? 1 : -1;
   std::stack<char> room = rooms[home_idx];
-  bool result = can_move(hall_pos + offset, home_idx) &&
-    room.size() != room_size;
+  bool result = can_move(hall_pos + offset, home_idx) && room.size() != room_size;
   while (!room.empty() && result) {
     result = result && (room.top() == bot);
     room.pop();
@@ -172,14 +178,14 @@ unsigned int State::get_bot_idx(char bot) const {
   return bot - 'A';
 }
 
-unsigned int State::get_cost(unsigned int hall_pos, unsigned int room_idx,
+unsigned int State::get_cost(unsigned int hall_pos,
+                             unsigned int room_idx,
                              unsigned int bot_idx) const {
-  unsigned int distance = abs(
-    static_cast<int>(hall_pos) - 
-      static_cast<int>(room_pos[room_idx])) + // horizontal distance
+  unsigned int distance = abs(static_cast<int>(hall_pos) -
+                              static_cast<int>(room_pos[room_idx])) + // horizontal distance
       (room_size - rooms[room_idx].size()) + // vertical distance
       // if we move out we need to count the last step
-      (hallway[hall_pos] == '.' ? 1 : 0); 
+      (hallway[hall_pos] == '.' ? 1 : 0);
   return distance * moving_costs[bot_idx];
 }
 
@@ -204,7 +210,7 @@ std::ostream& operator<<(std::ostream& stream, const State& x) {
   size_t col, row, n_col, n_row;
   std::fill_n(std::ostream_iterator<char>(stream), x.hallway.size() + 2, '#');
   stream << std::endl << '#';
-  for (const auto& s: x.hallway) {
+  for (const auto& s : x.hallway) {
     stream << s;
   }
   stream << '#' << std::endl;
@@ -248,7 +254,7 @@ unsigned int solve(State state) {
   if (hash.find(id) != hash.end()) {
     return hash[id];
   }
-  for(const auto hall_pos: state.get_hallbots()) {
+  for (const auto hall_pos : state.get_hallbots()) {
     moving_costs = state.move_home(hall_pos);
     costs = solve(state);
     if (costs <= MAX_COST - moving_costs) {
@@ -258,8 +264,8 @@ unsigned int solve(State state) {
     }
   }
   branch_costs = MAX_COST;
-  for (const auto& [home_pos, cand_pos]: state.get_homebots()) {
-    for (const auto hall_pos: cand_pos) {
+  for (const auto& [home_pos, cand_pos] : state.get_homebots()) {
+    for (const auto hall_pos : cand_pos) {
       State new_state(state);
       moving_costs = new_state.move_out(home_pos, hall_pos);
       costs = solve(new_state);
@@ -268,13 +274,32 @@ unsigned int solve(State state) {
       }
     }
   }
-  costs = branch_costs; 
+  costs = branch_costs;
   hash[id] = costs;
   return costs;
 }
 
+#ifndef STANDALONE
 // [[Rcpp::export]]
 unsigned int bring_bots_home(const List& initial_layout) {
-  State state(initial_layout);;
+  std::vector<std::vector<char>> layout;
+  for (const auto& l : initial_layout) {
+    CharacterVector room_layout = l;
+    std::vector<char> room;
+    for (auto j = room_layout.begin(); j < room_layout.end(); ++j) {
+      room.push_back(as<char>(*j));
+    }
+    layout.push_back(room);
+    room.clear();
+  }
+  State state(layout);
   return solve(state);
 }
+#else
+int main() {
+  std::vector<std::vector<char>> initial_layout = {{'B', 'A'}, {'C', 'D'}, {'B', 'C'}, {'D', 'A'}};
+  State state(initial_layout);
+  std::cout << "Least amount of Energy:" << solve(state) << std::endl;
+  return 0;
+}
+#endif

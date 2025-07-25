@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-04-10" />
+        <meta name="date" content="2025-07-25" />
     
     <title>Task 22   </title>
 
@@ -1821,7 +1821,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-04-10</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-07-25</p>
            
 
    
@@ -2242,7 +2242,11 @@ affordable spell (which is not yet casted) and add the new state to the stack.
 If we find a solution (i.e. the boss is dead), we update the mana count. During
 the process, if we hit a state which is more expensive than the best solution so far,
 we pruned to save some iterations.</p>
-<pre class="cpp"><code>#include &lt;Rcpp.h&gt;
+<pre class="cpp"><code>#ifndef STANDALONE
+#include &lt;Rcpp.h&gt;
+using namespace Rcpp;
+#endif
+
 #include &lt;algorithm&gt;
 #include &lt;iostream&gt;
 #include &lt;limits&gt;
@@ -2253,103 +2257,98 @@ we pruned to save some iterations.</p>
 #include &lt;utility&gt;
 #include &lt;vector&gt;
 
-using namespace Rcpp;
-
-enum Player {
-  BOSS,
-  PLAYER
-};
+enum Player { BOSS, PLAYER };
 
 struct Stats {
-  int my_hp;
-  int boss_hp;
-  int mana;
-  int armor;
-  int round;
-  int mana_spent;
+    int my_hp;
+    int boss_hp;
+    int mana;
+    int armor;
+    int round;
+    int mana_spent;
 };
 
 class Spell {
-public:
-  Spell(const std::string, const std::unordered_map&lt;std::string, int&gt; &amp;);
-  void cast(Stats &amp;);
-  void apply(Stats &amp;);
-  int get_cost() const;
-  std::string get_name() const;
-  int get_duration() const;
-  bool is_buff() const;
-  
-  friend std::ostream &amp;operator&lt;&lt;(std::ostream &amp;, const Spell &amp;);
-  
-private:
-  std::string name;
-  int damage;
-  int heal;
-  int armor;
-  int mana;
-  int costs;
-  int duration;
+  public:
+    Spell(const std::string, const std::unordered_map&lt;std::string, int&gt;&amp;);
+    void cast(Stats&amp;);
+    void apply(Stats&amp;);
+    int get_cost() const;
+    std::string get_name() const;
+    int get_duration() const;
+    bool is_buff() const;
+
+    friend std::ostream&amp; operator&lt;&lt;(std::ostream&amp;, const Spell&amp;);
+
+  private:
+    std::string name;
+    int damage;
+    int heal;
+    int armor;
+    int mana;
+    int costs;
+    int duration;
 };
 
 struct ActiveBuffs {
-  std::shared_ptr&lt;Spell&gt; spell;
-  int usages;
+    std::shared_ptr&lt;Spell&gt; spell;
+    int usages;
 };
 
 class GameController {
-public:
-  GameController(Stats, int, 
-                 const std::unordered_map&lt;std::string, 
-                                          std::unordered_map&lt;std::string, int&gt;&gt; &amp;);
-  void apply_buffs();
-  void attack();
-  void cast(const std::string &amp;);
-  void sting();
-  bool is_dead(Player) const;
-  bool can_cast(const std::string &amp;) const;
-  int get_mana_spent() const;
-  std::vector&lt;std::string&gt; get_spells() const;
-  
-private:
-  std::vector&lt;ActiveBuffs&gt; buffs;
-  std::vector&lt;std::string&gt; spells;
-  std::unordered_map&lt;std::string, std::shared_ptr&lt;Spell&gt;&gt; spell_library;
-  Stats stats;
-  int boss_damage;
-  
-  bool is_active(const std::string &amp;) const;
+  public:
+    GameController(Stats,
+                   int,
+                   const std::unordered_map&lt;std::string, std::unordered_map&lt;std::string, int&gt;&gt;&amp;);
+    void apply_buffs();
+    void attack();
+    void cast(const std::string&amp;);
+    void sting();
+    bool is_dead(Player) const;
+    bool can_cast(const std::string&amp;) const;
+    int get_mana_spent() const;
+    std::vector&lt;std::string&gt; get_spells() const;
+
+  private:
+    std::vector&lt;ActiveBuffs&gt; buffs;
+    std::vector&lt;std::string&gt; spells;
+    std::unordered_map&lt;std::string, std::shared_ptr&lt;Spell&gt;&gt; spell_library;
+    Stats stats;
+    int boss_damage;
+
+    bool is_active(const std::string&amp;) const;
 };
 
 class Game {
-public:
-  Game();
-  int start_game(int, int, int, int, 
-                 const std::unordered_map&lt;std::string, 
-                                          std::unordered_map&lt;std::string, int&gt;&gt; &amp;,
-                                          bool);
-  
-private:
-  int simulate(GameController, bool);
+  public:
+    Game();
+    int start_game(int,
+                   int,
+                   int,
+                   int,
+                   const std::unordered_map&lt;std::string, std::unordered_map&lt;std::string, int&gt;&gt;&amp;,
+                   bool);
+
+  private:
+    int simulate(GameController, bool);
 };
 
-Spell::Spell(const std::string spell_name,
-             const std::unordered_map&lt;std::string, int&gt; &amp;stats) : 
-  name(spell_name),
-  damage(stats.at(&quot;damage&quot;)),
-  heal(stats.at(&quot;heal&quot;)),
-  armor(stats.at(&quot;armor&quot;)),
-  mana(stats.at(&quot;mana&quot;)),
-  costs(stats.at(&quot;costs&quot;)),
-  duration(stats.at(&quot;duration&quot;)) {
-}
+Spell::Spell(const std::string spell_name, const std::unordered_map&lt;std::string, int&gt;&amp; stats)
+    : name(spell_name)
+    , damage(stats.at(&quot;damage&quot;))
+    , heal(stats.at(&quot;heal&quot;))
+    , armor(stats.at(&quot;armor&quot;))
+    , mana(stats.at(&quot;mana&quot;))
+    , costs(stats.at(&quot;costs&quot;))
+    , duration(stats.at(&quot;duration&quot;)) { }
 
-void Spell::cast(Stats &amp;stats) {
+void Spell::cast(Stats&amp; stats) {
   stats.mana_spent += costs;
   stats.mana -= costs;
   stats.round++;
 }
 
-void Spell::apply(Stats &amp;stats) {
+void Spell::apply(Stats&amp; stats) {
   // 1. boss loses hp
   stats.boss_hp -= damage;
   // 2. 1 heal
@@ -2376,19 +2375,20 @@ std::string Spell::get_name() const {
   return name;
 }
 
-std::ostream &amp;operator&lt;&lt;(std::ostream &amp;stream, const Spell &amp;spell) {
+std::ostream&amp; operator&lt;&lt;(std::ostream&amp; stream, const Spell&amp; spell) {
   stream &lt;&lt; spell.name &lt;&lt; &quot; [Damage: &quot; &lt;&lt; spell.damage &lt;&lt; &quot;, Heal: &quot; &lt;&lt; spell.heal;
   stream &lt;&lt; &quot;, Armor: &quot; &lt;&lt; spell.armor &lt;&lt; &quot;, Mana: &quot; &lt;&lt; spell.mana &lt;&lt; &quot;, Costs: &quot;;
   stream &lt;&lt; spell.costs &lt;&lt; &quot;]&quot; &lt;&lt; &quot; @&quot; &lt;&lt; spell.duration;
   return stream;
 }
 
-GameController::GameController(Stats start_stats, int damage, 
-                               const std::unordered_map&lt;std::string, 
-                                                        std::unordered_map&lt;std::string, 
-                                                                           int&gt;&gt; &amp;all_spells) :
-  stats(start_stats), boss_damage(damage) {
-  for (const auto &amp;[name, stats] : all_spells) {
+GameController::GameController(
+    Stats start_stats,
+    int damage,
+    const std::unordered_map&lt;std::string, std::unordered_map&lt;std::string, int&gt;&gt;&amp; all_spells)
+    : stats(start_stats)
+    , boss_damage(damage) {
+  for (const auto&amp; [name, stats] : all_spells) {
     spell_library[name] = std::make_shared&lt;Spell&gt;(name, stats);
     spells.push_back(name);
   }
@@ -2413,7 +2413,7 @@ void GameController::attack() {
   stats.my_hp -= std::max&lt;int&gt;(boss_damage - stats.armor, 1);
 }
 
-void GameController::cast(const std::string &amp;spell_name) {
+void GameController::cast(const std::string&amp; spell_name) {
   auto spell = spell_library[spell_name];
   spell-&gt;cast(stats);
   if (spell-&gt;is_buff()) {
@@ -2435,13 +2435,13 @@ bool GameController::is_dead(Player who) const {
   }
 }
 
-bool GameController::can_cast(const std::string &amp;spell_name) const {
+bool GameController::can_cast(const std::string&amp; spell_name) const {
   auto spell = spell_library.at(spell_name);
   return stats.mana &gt;= spell-&gt;get_cost() &amp;&amp; !is_active(spell_name);
 }
 
-bool GameController::is_active(const std::string &amp;name) const {
-  return std::any_of(buffs.begin(), buffs.end(), [&amp;](const ActiveBuffs &amp;b) {
+bool GameController::is_active(const std::string&amp; name) const {
+  return std::any_of(buffs.begin(), buffs.end(), [&amp;](const ActiveBuffs&amp; b) {
     return b.spell-&gt;get_name() == name;
   });
 }
@@ -2454,14 +2454,15 @@ std::vector&lt;std::string&gt; GameController::get_spells() const {
   return spells;
 }
 
-Game::Game() {
-}
+Game::Game() { }
 
-int Game::start_game(int boss_damage, int boss_hp, int my_hp, int mana, 
-                     const std::unordered_map&lt;std::string,
-                                              std::unordered_map&lt;std::string, 
-                                                                 int&gt;&gt; &amp;spell_library,
-                                                                 bool hard_game = false) {
+int Game::start_game(
+    int boss_damage,
+    int boss_hp,
+    int my_hp,
+    int mana,
+    const std::unordered_map&lt;std::string, std::unordered_map&lt;std::string, int&gt;&gt;&amp; spell_library,
+    bool hard_game = false) {
   Stats stats;
   stats.my_hp = my_hp;
   stats.boss_hp = boss_hp;
@@ -2476,27 +2477,26 @@ int Game::start_game(int boss_damage, int boss_hp, int my_hp, int mana,
 
 int Game::simulate(GameController start_controller, bool hard_game) {
   struct SimulationState {
-    GameController controller;
-    size_t next_spell_index = 0;
+      GameController controller;
+      size_t next_spell_index = 0;
   };
   std::vector&lt;std::string&gt; spells = start_controller.get_spells();
   std::stack&lt;SimulationState&gt; stack;
-  stack.push({start_controller,
-             0});
-  
+  stack.push({start_controller, 0});
+
   int best_mana = std::numeric_limits&lt;int&gt;::max();
   bool found_solution = false;
-  
+
   while (!stack.empty()) {
-    SimulationState &amp;current = stack.top();
-    
+    SimulationState&amp; current = stack.top();
+
     if (current.next_spell_index &gt;= spells.size()) {
       stack.pop();
       continue;
     }
-    
-    const std::string &amp;spell = spells[current.next_spell_index++];
-    
+
+    const std::string&amp; spell = spells[current.next_spell_index++];
+
     GameController controller_copy = current.controller;
     if (hard_game) {
       controller_copy.sting();
@@ -2524,30 +2524,57 @@ int Game::simulate(GameController start_controller, bool hard_game) {
     if (controller_copy.get_mana_spent() &gt;= best_mana) {
       continue;
     }
-    stack.push({controller_copy,
-               0});
+    stack.push({controller_copy, 0});
   }
   return found_solution ? best_mana : -1;
 }
-
+#ifndef STANDALONE
 // [[Rcpp::export]]
 int get_lowest_mana(List stats, DataFrame spells, bool hard_game = false) {
   std::unordered_map&lt;std::string, std::unordered_map&lt;std::string, int&gt;&gt; spell_library;
   std::vector&lt;std::string&gt; names = spells[&quot;name&quot;];
-  std::vector&lt;std::string&gt; fields = {&quot;damage&quot;, &quot;heal&quot;, &quot;armor&quot;, &quot;mana&quot;, &quot;duration&quot;, 
-                                     &quot;costs&quot;};
+  std::vector&lt;std::string&gt; fields = {&quot;damage&quot;, &quot;heal&quot;, &quot;armor&quot;, &quot;mana&quot;, &quot;duration&quot;, &quot;costs&quot;};
   for (int i = 0; i &lt; spells.nrows(); ++i) {
     std::unordered_map&lt;std::string, int&gt; spell_stats;
-    for (const std::string &amp;field : fields) {
+    for (const std::string&amp; field : fields) {
       spell_stats[field] = as&lt;std::vector&lt;int&gt;&gt;(spells[field])[i];
     }
     spell_library[names[i]] = std::move(spell_stats);
   }
   Game game;
-  int result = game.start_game(stats[&quot;dmg&quot;], stats[&quot;boss_HP&quot;], stats[&quot;hp&quot;],
-                               stats[&quot;mana&quot;], spell_library, hard_game);
+  int result = game.start_game(
+      stats[&quot;dmg&quot;], stats[&quot;boss_HP&quot;], stats[&quot;hp&quot;], stats[&quot;mana&quot;], spell_library, hard_game);
   return result;
-}</code></pre>
+}
+#else
+int main() {
+  // Example usage
+  Game game;
+  int mana_spent = game.start_game(
+      8,
+      13,
+      10,
+      250,
+      {{&quot;Magic Missile&quot;,
+        {{&quot;damage&quot;, 4}, {&quot;heal&quot;, 0}, {&quot;armor&quot;, 0}, {&quot;mana&quot;, 0}, {&quot;costs&quot;, 53}, {&quot;duration&quot;, 0}}},
+       {&quot;Drain&quot;,
+        {{&quot;damage&quot;, 2}, {&quot;heal&quot;, 2}, {&quot;armor&quot;, 0}, {&quot;mana&quot;, 0}, {&quot;costs&quot;, 73}, {&quot;duration&quot;, 0}}},
+       {&quot;Shield&quot;,
+        {{&quot;damage&quot;, 0}, {&quot;heal&quot;, 0}, {&quot;armor&quot;, 7}, {&quot;mana&quot;, 0}, {&quot;costs&quot;, 113}, {&quot;duration&quot;, 6}}},
+       {&quot;Poison&quot;,
+        {{&quot;damage&quot;, 3}, {&quot;heal&quot;, 0}, {&quot;armor&quot;, 0}, {&quot;mana&quot;, 0}, {&quot;costs&quot;, 173}, {&quot;duration&quot;, 6}}},
+       {&quot;Recharge&quot;,
+        {{&quot;damage&quot;, 0},
+         {&quot;heal&quot;, 0},
+         {&quot;armor&quot;, 0},
+         {&quot;mana&quot;, 101},
+         {&quot;costs&quot;, 229},
+         {&quot;duration&quot;, 5}}}},
+      false);
+  std::cout &lt;&lt; &quot;Mana spent: &quot; &lt;&lt; mana_spent &lt;&lt; std::endl;
+  return 0;
+}
+#endif</code></pre>
 <pre class="r"><code>get_lowest_mana(puzzle_data$stats, puzzle_data$spells)</code></pre>
 <pre><code>## [1] 1269</code></pre>
 </div>
