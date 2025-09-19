@@ -46,6 +46,9 @@ editor_options:
 }
 ```
 
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
@@ -123,46 +126,20 @@ cat(puzzle[[1]])
 
 ### Solution
 
+We use an *A Star search algorithm* where the current distance to the top floor plus the 
+moves mad so far serve as the estimation of the costs and the actual costs respectively.
+
+To avoid infinite loops, we keep track of the states visited so far and consider a new
+state only if we did not see in the past. To further limit the amounts of states to 
+investigate, we also exclude states which are a mere permutation. That is, two
+states are equivalent, if they differ only by a permutation of microchip/generator pairs.
+To achieve this, we use the canonical 
+
+```{Rcpp cpp-algorithm, file = "lab.cpp", cache = TRUE}
+```
+
 ```{r get-solution-1}
-is_compatible <- function(chip, gen, floors, current_floor) {
-  chip_type <- str_remove(chip, " .*$")
-  gen_type <- str_remove(gen, " .*$")
-  if (is.na(chip)) {
-    if (is.na(gen)) {
-      FALSE
-    } else {
-      setdiff(floors[[current_floor]], gen)
-    }
-    
-  } && is.na(gen)) {
-    FALSE
-  } 
-}
-
-generate_candidates <- function(chips, gens, floors, current_floor) {
-  cands <- tibble(e1 = character(0L), e2 = character(0L), floor = integer(0L))
-  for (chip in c(NA_character_, chips)) {
-    for (gen in c(NA_character_, gens)) {
-      if (is_compatible(chip, gen, floors, current_floor)) {
-        floors <- get_valid_floors(chip, gen, floors, current_floor)
-        if (length(floors) > 0L) {
-          cands <- rows_append(cands, tibble(e1 = chip, e2 = gen, floor = floors))
-        }
-      }
-    }
-  }
-  cands
-}
-
-count_moves <- function(floors, current_floor) {
-  if (all(lengths(floors[1:3]) == 0L)) {
-    ## floors 1 - 3 are empty (i.e. everything is in floor 4) 
-    return(0)
-  }
-  chips <- str_subset(floors[[current_floor]], fixed("microchip"))
-  gens <-  str_subset(floors[[current_floor]], fixed("generator"))
-  cand <- generate_candidates(chips, gens, floors, current_floor)
-}
+count_moves(puzzle_data)
 ```
 
 ## Part 2
@@ -175,5 +152,12 @@ cat(puzzle[[2]])
 
 ### Solution
 
+Thanks to the significant reduction of the workspace, we can use the same algorithm.
+
 ```{r get-solution-2}
+extended_puzzle_data <- puzzle_data
+extended_puzzle_data[[1L]] <- c(extended_puzzle_data[[1L]], 
+                                c("elerium generator", "elerium microchip",
+                                  "dilithium generator", "dilithium microchip"))
+count_moves(extended_puzzle_data)
 ```
