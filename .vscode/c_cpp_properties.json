@@ -1,10 +1,27 @@
 {
     "configurations": [
         {
-            "name": "Win32",
+            "name": "Win32-Work",
             "includePath": [
                 "${workspaceFolder}/**",
                 "C:/Users/tthaler/AppData/Local/R/win-library/4.5/Rcpp/include",
+                "C:/Program Files/R/R-4.5.1/include"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ],
+            "compilerPath": "C:/rtools45/ucrt64/bin/g++.exe",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "windows-gcc-x64"
+        },
+        {
+            "name": "Win32-Home",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "C:/Users/thothal/Documents/6. R/win-library/4.5/Rcpp/include",
                 "C:/Program Files/R/R-4.5.1/include"
             ],
             "defines": [

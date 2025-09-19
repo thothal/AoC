@@ -1,8 +1,8 @@
-.libPaths(c(
-  "C:/Users/tthaler/AppData/Local/R/win-library/4.5",
-  "C:/Users/tthaler/AppData/Local/R/win-library/4.4", 
-  "C:/Users/tthaler/AppData/Local/Programs/R/R-4.4.1/library")
-)
+# .libPaths(c(
+#   "C:/Users/tthaler/AppData/Local/R/win-library/4.5",
+#   "C:/Users/tthaler/AppData/Local/R/win-library/4.4", 
+#   "C:/Users/tthaler/AppData/Local/Programs/R/R-4.4.1/library")
+# )
 
 suppressWarnings(
   suppressPackageStartupMessages({
