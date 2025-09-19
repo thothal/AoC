@@ -1,0 +1,244 @@
+---
+params:
+   task_nr: 13
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(collections)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    as.integer()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use an A Star algorithm with the Manhatten distance as the heuristic.
+
+```{r get-solution-1}
+popcount <- function(n) {
+  vapply(n, \(n) sum(as.integer(intToBits(n))), integer(1L))
+}
+
+is_wall <- function(coord, key) {
+  x <- coord[, 1]
+  y <- coord[, 2]
+  popcount((x + y) ^ 2L + 3L * x + y + key) %% 2 == 1L
+}
+
+get_neighbors <- function(pos, end, visited, wall_fn, key) {
+  coords <- c("x", "y")
+  dirs <- matrix(c(-1, 0, 1, 0, 0, -1, 0, 1), 4, 2)
+  colnames(dirs) <- coords
+  nbs <- t(c(pos[, coords]) + t(dirs))
+  nbs <- nbs[nbs[, 1L] >= 0L & nbs[, 2L] >= 0L, ]
+  was_there <- duplicated(rbind(visited[, coords, drop = FALSE], nbs))[-(1:nrow(visited))]
+  nbs <- nbs[!was_there, , drop = FALSE]
+  is_free <- !wall_fn(nbs, key)
+  nbs <- nbs[is_free, , drop = FALSE]
+  if (nrow(nbs) > 0L) {
+    nbs <- cbind(nbs, costs = pos[, "costs"] + 1, 
+                 heuristic = heuristic(nbs[, coords, drop = FALSE], end))
+    rownames(nbs) <- NULL
+    nbs
+  } else {
+    NULL
+  }
+}
+
+heuristic <- function(pos, end) {
+  -rowSums(abs(t(t(pos) - end)))
+}
+
+add_to_queue <- function(pq, nbs) {
+  coords <- c("x", "y")
+  for (i in 1:nrow(nbs)) {
+    nb <- nbs[i, , drop = FALSE]
+    prio <- nb[, "heuristic"] - nb[, "costs"]
+    q_elems <- pq$as_list() %>% 
+      lapply(\(x) x[, coords, drop = FALSE])
+    if (!list(nb[, coords, drop = FALSE]) %in% q_elems) {
+      pq$push(nb, prio)
+    }
+  }
+}
+
+find_shortest_path <- function(start, end, wall_fn = is_wall, key = puzzle_data) {
+  pq <- priority_queue()
+  start <- matrix(c(start, 0L, 0L), 1L)
+  coords <- c("x", "y")
+  colnames(start) <- c(coords, "costs", "heuristic")
+  visited <- start[, coords, drop = FALSE]
+  nbs <- get_neighbors(start, end, visited, wall_fn, key)
+  add_to_queue(pq, nbs)
+  sol <- NULL
+  i <- 1
+  while (pq$size() > 0) {
+    nb <- pq$pop()
+    visited <- rbind(visited, nb[, coords, drop = FALSE])
+    if (all(nb[, coords] == end)) {
+      sol <- nb
+      break
+    }
+    nbs <- get_neighbors(nb, end, visited, wall_fn, key)
+    if (!is.null(nbs)) {
+      add_to_queue(pq, nbs)
+    }
+  }
+  sol[, "costs"]
+}
+
+find_shortest_path(c(1L, 1L), c(31L, 39L), is_wall, puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We reuse the algorithms from before, even though we do not need the heuristic part, simply
+because we do not have to reinvent the wheel. We add new(!) neighbors if they are within 
+the range and count finally the number of visited nodes.
+
+```{r get-solution-2}
+random_walk <- function(start, limit, wall_fn = is_wall, key = puzzle_data) {
+  pq <- priority_queue()
+  start <- matrix(c(start, 0L, 0L), 1L)
+  coords <- c("x", "y")
+  colnames(start) <- c(coords, "costs", "heuristic")
+  visited <- start[, c(coords, "costs"), drop = FALSE]
+  end <- c(51L, 51L) # needed for unused heuristic
+  nbs <- get_neighbors(start, end, visited, wall_fn, key)
+  add_to_queue(pq, nbs)
+  while (pq$size() > 0) {
+    nb <- pq$pop()
+    visited <- rbind(visited, nb[, c(coords, "costs"), drop = FALSE])
+    nbs <- get_neighbors(nb, end, visited, wall_fn, key)
+    if (!is.null(nbs)) {
+      nbs <- nbs[nbs[, "costs"] <= limit, , drop = FALSE]
+      if (nrow(nbs) > 0L) {
+        add_to_queue(pq, nbs)
+      }
+    }
+  }
+  nrow(visited)
+}
+random_walk(c(1L, 1L), 50L, is_wall, puzzle_data)
+```
+
+
+
