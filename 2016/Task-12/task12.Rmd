@@ -1,0 +1,266 @@
+---
+params:
+   task_nr: 12
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+col_text <- function(x, bg_col, fg_col = "black") {
+  sprintf("<span style='background-color:%s; color: %s'>%s</span>",
+          bg_col, fg_col, x)
+}
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(DT)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  str_split(text_block, " ") %>% 
+    map(~ c(., NA_character_)[1:3] %>% 
+          set_names(c("op", "arg1", "arg2"))) %>% 
+    bind_rows()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The instructions are the following:
+```{r show-instructions}
+codes <- puzzle_data  %>% 
+  set_colnames(c("Operation", "Argument 1", "Argument 2")) %>% 
+  mutate(outer_block = c(0L, 0L, 0L, 0L, 0L, 0L, 1L, 0L, 1L, 2L, 1L, 0L, 
+                         1L, 0L, 0L, 2L, 0L, 3L, 1L, 0L, 1L, 0L, 3L))
+
+datatable(
+  codes, 
+  class = c("compact", "nowrap", "hover", "row-border"),
+  options = list(
+    pageLength = nrow(codes),
+    dom = "t",
+    ordering = FALSE,
+    columnDefs = list(
+      list(
+        className = "dt-center", targets = "_all"
+      ),
+      list(
+        visible = FALSE,
+        targets = 4
+      )
+    ))
+) %>% 
+  formatStyle(1:3,
+              "outer_block",
+              target = "cell",
+              backgroundColor = styleEqual(0:3, c("transparent", "#FDE725FF", "#440154FF", 
+                                                  "#21908CFF")), 
+              color = styleEqual(0:3, rep(c("black", "white", "black"), c(2L, 1L, 1L))) 
+  ) 
+
+
+```
+
+Analyzing the instructions one will notice certain patterns:
+
+1. A `inc a | dec b | jnz b -2` block first increases `a` by one, the decreases `b` by one
+and jumps back two instructions - that is repeats this sequence until `b` equals zero. 
+This is the same as adding `b` to `a` (we will refer to this pattern as *addition loop*).
+1. More generally, a `dec a | jnz a -n` sequence forms a loop, which repeats the previous
+`n` lines `a` times.
+1. Finally, a `jnz a n` with a positive `n` skips the next `n` lines conditionally on `a`.
+
+With these observations we conclude that
+
+1. Lines 6 to 9 are skipped.
+1. We have 2 addition loops marked in `r col_text("yellow", "#FDE725FF")` (not counting 
+the skipped loop in lines 6 to 9).
+1. We have 2 outer loops marked in `r col_text("turquoise", "#21908CFF")` and 
+`r col_text("purple", "#440154FF", "white")` respectively.
+1. The `r col_text("turquoise loop", "#21908CFF")` simply adds the value of `d` `c` times.
+
+```{r get-solution-1}
+get_code <- function(a, b, c, d) {
+  for (i in 1:d) {
+    c <- a
+    a <- a + b
+    b <- c
+  }
+  a + 14L * 14L
+}
+get_code(1L, 1L, 0L, 26L)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+With a different starting value for `c` we now include lines 6 - 9, which simply set 
+different values for `c` and `d`.
+
+```{r get-solution-2}
+get_code(1L, 1L, 7L, 33L)
+```
+
+
+## Brute Force Algorithm
+
+If you simply follow the rules line by line you could use the following algorithm. 
+However, since this would introduce a lot of loops where a simple addition would do the 
+same job, it would be awefully slow (imagine calculating `a + 100` by adding 1 to `a` a
+hundred times).
+
+```{r brute-force, eval = FALSE}
+automata <- function(ops = puzzle_data) {
+  reg = c(a = 0L, b = 0L, c = 0L, d = 0L)
+  line <- 1
+  cpy <- function(arg1, arg2) {
+    new <- suppressWarnings(as.integer(arg1))
+    if (is.na(new)) {
+      new <- reg[arg1]
+    }
+    reg[arg2] <<- new
+    line <<- line + 1L
+  }
+  inc <- function(arg1, arg2) {
+    reg[arg1] <<- reg[arg1] + 1L
+    line <<- line + 1L
+  }
+  dec <- function(arg1, arg2) {
+    reg[arg1] <<- reg[arg1] - 1L
+    line <<- line + 1L
+  }
+  jnz <- function(arg1, arg2) {
+    arg2 <- as.integer(arg2)
+    chk <- suppressWarnings(as.integer(arg1))
+    if (is.na(chk)) {
+      chk <- reg[arg1]
+    }
+    if (chk != 0L) {
+      line <<- line + arg2
+    } else {
+      line <<- line + 1
+    }
+  }
+  n <- nrow(ops)
+  while (line <= n) {
+    ops %>% 
+      slice(line) %>% 
+      rename(name = op) %>% 
+      as.list() %>% 
+      do.call(call, .) %>% 
+      eval()
+  }
+  reg["a"]
+}
+```
