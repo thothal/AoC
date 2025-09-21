@@ -1,0 +1,188 @@
+---
+params:
+   task_nr: 20
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+width: 100%;
+}
+
+.back {
+font-size: 2rem;
+}
+
+.day-desc {
+border: 2px dotted;
+border-radius: 6px;
+border-color: var(--blockquote-border-color);
+padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_extract_all("\\d+") %>% 
+    map(~ set_names(as.integer64(.x), c("from", "to")))
+  
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+For the first part, we first order all ranges and then merge intervals. The lowest IP can 
+be then found next to the first merged interval.
+
+
+```{r get-solution-1}
+does_intersect <- function(i1, i2) {
+  i1["from"] <= i2["to"] + 1L & i1["to"] + 1L >= i2["from"]
+}
+
+merge_intervals <- function(intervals) {
+  ord <- lapply(intervals, min) %>% 
+    do.call(c, .) %>% 
+    order()
+  intervals <- intervals[ord]
+  merged <- intervals[1]
+  for (i in 2:length(intervals)) {
+    last <- tail(merged, 1L)
+    if (does_intersect(last[[1L]], intervals[[i]])) {
+      merged[length(merged)] <-  
+        c(last, intervals[i]) %>% 
+        do.call(c, .) %>% 
+        range() %>% 
+        set_names(c("from", "to")) %>% 
+        list()
+    } else {
+      merged <- c(merged, intervals[i])
+    }
+  }
+  merged
+}
+
+merged_intervals <- merge_intervals(puzzle_data)
+merged_intervals[[1L]]["to"]+ 1L
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we simply have to sum up the gaps between the merged intervals.
+
+```{r get-solution-2}
+count_gaps <- function(intervals) {
+  gaps <- 0L
+  for (i in 2:length(intervals)) {
+    gaps <- gaps + intervals[[i]]["from"] - intervals[[i - 1L]]["to"] - 1L
+  }
+  gaps <- gaps + intervals[[1L]]["from"]
+  gaps <- gaps + as.integer64(2L ^ 32L) - tail(intervals, 1L)[[1L]]["to"] - 1L
+  gaps
+} 
+count_gaps(merged_intervals)
+```
