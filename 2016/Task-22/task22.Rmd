@@ -73,6 +73,7 @@ col_text <- function(x, bg_col, fg_col = "black") {
 ## Libraries
 
 ```{r libs, warning = FALSE}
+library(here)
 library(httr)
 library(xml2)
 library(magrittr)
@@ -81,6 +82,7 @@ library(purrr)
 library(stringr)
 library(igraph)
 library(viridisLite)
+library(magick)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -206,6 +208,7 @@ make_graph <- function(df) {
   V(G)$color[V(G)$type == "sink"] <- "steelblue"
   V(G)$color[V(G)$type == "start"] <- "firebrick"
   V(G)$color[V(G)$type == "dest"] <- "forestgreen"
+  V(G)$orig_color[V(G)$type == "dest"] <- "forestgreen"
   V(G)$is_sink <- V(G)$type == "sink"
   V(G)$shape <- "circle"
   V(G)$shape[V(G)$type %in% c("start", "dest")] <- "square"
@@ -263,15 +266,17 @@ empty_node <- puzzle_data %>%
 
 empty_node$col + ## moves to the left
   empty_node$row + ## moves to the top
-  cols - 1L + ## moves on the top row to the left
+  cols - 1L + ## moves on the top row to the right
   5L * (cols - 1L) + ## circle moves to push the data towards the goal node
   1L ## final push to reach the goal node
 ```
 
+### Visualization
+
 The following plot shows the solution:
 
-```{r create-solution, cache = TRUE}
-G_orig <- G
+```{r create-solution, eval = !file.exists(here("2016", "Task-22", "node_walk.gif"))}
+
 move_sink <- function(dir = c("U", "R", "D", "L"), G) {
   dir <- match.arg(dir)
   cur_idx <- V(G)$is_sink
@@ -296,26 +301,115 @@ move_sink <- function(dir = c("U", "R", "D", "L"), G) {
   V(G)$color[cur_idx] <- orig_color
   V(G)$color[dest_idx] <- "steelblue"
   V(G)$is_sink[cur_idx] <- FALSE
-  V(G)$is_sink[dest_idx <- TRUE]
+  V(G)$is_sink[dest_idx] <- TRUE
   V(G)$label <- V(G)$name
-  png()
-  plot(G, vertex.name = NA)
   invisible(G)
 }
 
-start <- list(row = V(G)$row[V(G)$is_sink],
-              col = V(G)$col[V(G)$is_sink])
-plot(G, vertex.name = NA)
-for (i in 1:start$col) {
+move_load <- function(G) {
+  sink_idx <- V(G)$is_sink
+  sink_col <- V(G)$col[sink_idx]
+  sink_row <- V(G)$row[sink_idx]
+  load_row <- sink_row
+  load_col <- sink_col + 1L
+  load_idx <- V(G)$col == load_col & V(G)$row == load_row
+  GS <- vector("list", 5L)
+  ## 1. Move load to the left
+  V(G)$color[sink_idx] <- "firebrick"
+  V(G)$color[load_idx] <- "steelblue"
+  V(G)$is_sink[sink_idx] <- FALSE
+  V(G)$is_sink[load_idx] <- TRUE
+  GS[[1L]] <- G
+  ## 2. Move Sink down
+  G <- move_sink("D", G)
+  GS[[2L]] <- G
+  ## 3. Move Sink left
   G <- move_sink("L", G)
-}
-
-for(i in 1:start$row) {
+  GS[[3L]] <- G
+  ## 4. Move sink left
+  G <- move_sink("L", G)
+  GS[[4L]] <- G
+  ## 5. Move sink up
   G <- move_sink("U", G)
+  GS[[5L]] <- G
+  GS
 }
 
-for (i in 1:(start$col - 1L)) {
-  G <- move_sink("R", G)
+move_to_dest <- function(G) {
+  sink_idx <- V(G)$is_sink
+  sink_col <- V(G)$col[sink_idx]
+  sink_row <- V(G)$row[sink_idx]
+  free_row <- sink_row
+  free_col <- sink_col + 1L
+  free_idx <- V(G)$col == free_col & V(G)$row == free_row
+  V(G)$color[sink_idx] <- "firebrick"
+  V(G)$color[free_idx] <- "steelblue"
+  G
 }
+
+save_plot <- function(G, j, base_dir, redo) {
+  fn <- sprintf("cluster_%03d.png", j)
+  if (redo || !file.exists(file.path(base_dir, fn))) {
+    cat("Saving Plot <", fn, ">...\n", sep = "")
+    png(file.path(base_dir, fn), 
+        width = 12, height = 8, units = "in", res = 96, bg = "transparent")
+    plot(G, vertex.label = NA)
+    dev.off()
+  }
+}
+
+create_gif <- function(G, redo = FALSE) {
+  j <- 1
+  base_dir <- here("2016", "Task-22", "img")
+  dims <- list(start_row = V(G)$row[V(G)$is_sink],
+               start_col = V(G)$col[V(G)$is_sink],
+               nrow = max(V(G)$row),
+               ncol = max(V(G)$col))
+  save_plot(G, j, base_dir, redo)
+  j <- j +1
+  for (i in 1:dims$start_col) {
+    G <- move_sink("L", G)
+    save_plot(G, j, base_dir, redo)
+    j <- j + 1
+  }
+  
+  for(i in 1:dims$start_row) {
+    G <- move_sink("U", G)
+    save_plot(G, j, base_dir, redo)
+    j <- j + 1
+  }
+  
+  for (i in 1:(dims$ncol - 1L)) {
+    G <- move_sink("R", G)
+    save_plot(G, j, base_dir, redo)
+    j <- j + 1
+  }
+  
+  for (i in 1:(dims$ncol - 1L)) {
+    GS <- move_load(G)
+    for (k in seq_along(GS)) {
+      G <- GS[[k]]
+      save_plot(G, j, base_dir, redo)
+      j <- j + 1
+    }
+  }
+  
+  G <- move_to_dest(G)
+  save_plot(G, j, base_dir, redo)
+  
+  gif <- list.files(base_dir, pattern = "\\.png$", full.names = TRUE) %>% 
+    lapply(image_read) %>% 
+    image_join() %>% 
+    image_animate(fps = 2L)
+  image_write(image = gif, path = here("2016", "Task-22", "node_walk.gif"))
+  gif
+}
+
+gif <- create_gif(G)
 ```
+
+```{r show-walk, echo = FALSE}
+knitr::include_graphics(here("2016", "Task-22", "node_walk.gif"))
+```
+
 
