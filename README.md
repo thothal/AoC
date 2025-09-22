@@ -92,8 +92,8 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 18](https://thothal.github.io/AoC/2016_task18.html)
 - [x] [Day 19](https://thothal.github.io/AoC/2016_task19.html)
 - [x] [Day 20](https://thothal.github.io/AoC/2016_task20.html)
-- [ ] Day 21
-- [ ] Day 22
+- [x] [Day 21](https://thothal.github.io/AoC/2016_task21.html)
+- [x] [Day 22](https://thothal.github.io/AoC/2016_task22.html)
 - [ ] Day 23
 - [ ] Day 24
 - [ ] Day 25

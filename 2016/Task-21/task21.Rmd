@@ -1,0 +1,286 @@
+---
+params:
+   task_nr: 21
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  sw_pos <- str_which(text_block, fixed("swap position"))
+  sw_let <- str_which(text_block, fixed("swap letter"))
+  rot_pos <- str_which(text_block, "rotate (left|right)")
+  rot_let <- str_which(text_block, fixed("rotate based"))
+  rev_pos <- str_which(text_block, fixed("reverse position"))
+  move_pos <- str_which(text_block, fixed("move"))
+  tibble(op = text_block) %>% 
+    mutate(id = 1:n(), .before = op,
+           call = case_when(
+             id %in% c(sw_pos, sw_let) ~ "swap",
+             id %in% c(rot_pos, rot_let) ~ "rotate",
+             id %in% rev_pos ~ "reverse",
+             id %in% move_pos ~ "move"
+           ),
+           type = case_when(
+             id %in% sw_pos ~ "position",
+             id %in% c(sw_let, rot_let) ~ "letter",
+             id %in% rot_pos ~ str_extract(op, "left|right"),
+             TRUE ~ NA_character_
+           ),
+           arg1 = case_when(
+             id %in% c(sw_pos, rot_pos, rev_pos, move_pos) ~ str_extract(op, "\\d+"),
+             id %in% c(sw_let, rot_let) ~ str_extract(op, "letter .") %>% 
+               str_remove("letter ")
+           ),
+           arg2 = case_when(
+             id %in% c(sw_pos, rev_pos, move_pos) ~ str_extract(op, "\\d+$"),
+             id %in% sw_let ~ str_extract(op, "letter .$") %>% 
+               str_remove("letter ")
+             )
+    )
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The solution is rather straight forward: implement the instructions and apply them one by 
+one.
+
+
+```{r get-solution-1}
+swap <- function(key, type, arg1, arg2) {
+  if (type == "letter") {
+    arg1 <- str_locate(key, arg1)[, "start"] - 1L
+    arg2 <- str_locate(key, arg2)[, "start"] - 1L
+  }
+  arg1 <- as.integer(arg1)
+  arg2 <- as.integer(arg2)
+  x <- str_sub(key, arg1 + 1L, arg1 + 1L)
+  y <- str_sub(key, arg2 + 1L, arg2 + 1L)
+  str_sub(key, arg1 + 1L, arg1 + 1L) <- y
+  str_sub(key, arg2 + 1L, arg2 + 1L) <- x
+  key
+}
+
+rotate <- function(key, type, arg1, arg2) {
+  do_rotate <- function(key, dir, arg1) {
+    dir <- if_else(dir == "right", -1L, 1L)
+    letters <- str_split(key, "")[[1L]]
+    idx <- (seq_along(letters) + dir * arg1  - 1L) %% n + 1L
+    str_c(letters[idx], collapse = "")
+  }
+  find_shift <- function(key, arg1) {
+    arg1 <- str_locate(key, arg1)[, "start"]
+    arg1 + if_else(arg1 >= 5, 1L, 0L)
+  }
+  n <- str_length(key)
+  if (type == "letter") {
+    arg1 <- find_shift(key, arg1)
+    type <- "right"
+  } else if (type == "inverse") {
+    for (i in 1:n) {
+      ## find shift index such that letter shift would lead to this word
+      ## since letter shift position is not injective we cannot do 
+      ## w/o try and error loop
+      cand <- do_rotate(key, "left", i)
+      if (do_rotate(cand, "right", find_shift(cand, arg1)) == key) {
+        arg1 <- i
+        break
+      }
+    }
+    type <- "left"
+  }
+  arg1 <- as.integer(arg1)
+  do_rotate(key, type, arg1)
+}
+
+reverse <- function(key, type, arg1, arg2) {
+  arg1 <- as.integer(arg1)
+  arg2 <- as.integer(arg2)
+  str_sub(key, arg1 + 1L, arg2 + 1L) <- str_sub(key, arg1 + 1L, arg2 + 1L) %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    rev() %>% 
+    str_c(collapse = "")
+  key
+}
+
+move <- function(key, type, arg1, arg2) {
+  arg1 <- as.integer(arg1)
+  arg2 <- as.integer(arg2)
+  letter <- str_sub(key, arg1 + 1L, arg1 + 1L)
+  str_sub(key, arg1 + 1L, arg1 + 1L) <- ""
+  str_sub(key, arg2 + 1L) <- str_c(letter, str_sub(key, arg2 + 1L), 
+                                              collaspe = "")
+  key
+}
+
+process_word <- function(key, ops = puzzle_data) {
+  for (i in 1:nrow(ops)) {
+    fn <- ops %>% 
+      slice(i) %>% 
+      select(call:arg2) %>% 
+      as.list
+    args <- fn[-1]
+    args$key <- key
+    key <- do.call(fn[[1]], args)
+  }
+  key
+}
+
+process_word("abcdefgh", puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we first revert the instructions and then apply them to the key word.
+
+```{r get-solution-2}
+revert_instructions <- function(ops = puzzle_data) {
+  rev_ops <- ops %>% 
+    slice(0L)
+  for (i in 1:nrow(ops)) {
+    op <- ops %>% 
+      slice(i) %>% 
+      as.list()
+    ## swap and rev are self inverse
+    if (op$call == "move") {
+      ## move: to undo a move just revert positions
+      arg1 <- op$arg1
+      op$arg1 <- op$arg2
+      op$arg2 <- arg1
+    } else if (op$call == "rotate") {
+      if (op$type == "letter") {
+        ## create an inverse rotation to delegate rotation to the function
+        op$type <- "inverse"
+      } else {
+        ## for left / right rotate simply switch direction
+        op$type <- if_else(op$type == "right", "left", "right")
+      }
+    }
+    rev_ops <- rev_ops %>% 
+        bind_rows(op)
+  }
+  rev_ops %>% 
+    slice(n():1) %>% 
+    select(id:arg2)
+}
+inv_ops <- revert_instructions(puzzle_data)
+process_word("fbgdceah", inv_ops)
+```
