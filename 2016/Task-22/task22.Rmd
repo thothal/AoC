@@ -1,0 +1,415 @@
+---
+params:
+   task_nr: 22
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+col_text <- function(x, bg_col, fg_col = "black") {
+  sprintf("<span style='background-color:%s; color: %s; padding: 2px 5px'>%s</span>",
+          bg_col, fg_col, x)
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(here)
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+library(viridisLite)
+library(magick)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  ## skip first 2 lines
+  res <- text_block %>% 
+    extract(-(1:2)) %>% 
+    str_extract_all("\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("col", "row", "size", "used", "avail", "use_perc"))
+  storage.mode(res) <- "integer"
+  as_tibble(res)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The first part is as easy as using an inner self join where the used space fits into the
+available data.
+
+```{r get-solution-1}
+count_viable_pairs <- function(free_space = puzzle_data) {
+  free_space %>% 
+    select(row:col, used) %>% 
+    inner_join(free_space %>% 
+                 select(row:col, avail),
+               join_by(x$used <= y$avail),
+               suffix = c(".source", ".target")) %>%
+    filter(row.source != row.target | col.source != col.target, 
+           used > 0) %>% 
+    nrow()
+}
+
+count_viable_pairs(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we first print the grid.
+
+```{r plot-grid, fig.width = 12, fig.height = 8}
+make_graph <- function(df) {
+  dims <- df %>% 
+    summarize(ncol = max(col) + 1L,
+              nrow = max(row) + 1L) %>% 
+    as.list()
+  df <- df %>% 
+    arrange(row, col)
+  G <- make_lattice(c(dims$ncol, dims$nrow), directed = TRUE, mutual = TRUE)
+  ids <- df %>% 
+    mutate(id = paste(row, col, sep = "-")) %>% 
+    pull(id)
+  V(G)$name <- ids
+  V(G)$capacity <- df %>% 
+    pull(size)
+  V(G)$load <- df %>% 
+    pull(used)
+  V(G)$type <- df %>% 
+    mutate(type = case_when(
+      used == 0L ~ "sink",
+      row == 0 & col == max(col) ~ "start",
+      row == 0 & col == 0 ~ "dest",
+      TRUE ~ "intermediate"
+    )) %>% 
+    pull(type)
+  edges_to_delete <- discard(E(G),
+                             ~ tail_of(G, .x)$load <= head_of(G, .x)$capacity)
+  G <- delete_edges(G, edges_to_delete)
+  outgoing <- incident_edges(G, V(G), mode = "out") %>% 
+    lengths()
+  col_pal <- inferno(4)
+  V(G)$row <- df %>% 
+    pull(row)
+  V(G)$col <- df %>% 
+    pull(col)
+  V(G)$orig_color <- col_pal[outgoing]
+  V(G)$color <- col_pal[outgoing]
+  V(G)$color[V(G)$type == "sink"] <- "steelblue"
+  V(G)$color[V(G)$type == "start"] <- "firebrick"
+  V(G)$color[V(G)$type == "dest"] <- "forestgreen"
+  V(G)$orig_color[V(G)$type == "dest"] <- "forestgreen"
+  V(G)$is_sink <- V(G)$type == "sink"
+  V(G)$shape <- "circle"
+  V(G)$shape[V(G)$type %in% c("start", "dest")] <- "square"
+  V(G)$size <- 3.5
+  V(G)$label <- case_when(
+    V(G)$type == "dest" ~ "G",
+    V(G)$type == "start" ~ "S",
+    V(G)$type == "sink" ~ "#",
+    TRUE ~ NA)
+  V(G)$label.cex <- .8
+  V(G)$label.color <- c("white", "black")[(!outgoing %in% 1:2) + 1L]
+  V(G)$label.color[V(G)$type %in% c("sink", "start", "dest")] <- "white"
+  start <- ends(G, E(G))[, 1]
+  E(G)$degree <- degree(G, mode = "out")[start]
+    
+  E(G)$arrow.mode <- ifelse(E(G)$degree %in% 3:4, 0, 2)
+  E(G)$arrow.size <- .7
+  lay <- df %>% 
+    select(col, row) %>% 
+    as.matrix()
+  lay[, 2] <- 24 - lay[, 2]
+  lay[, 1] <- 2 * lay[, 1] 
+  G %>% 
+    set_graph_attr(name = "layout", value = lay) %>% 
+    set_graph_attr(name = "margin", 0) %>% 
+    set_graph_attr(name = "asp", .5)
+}
+G <- make_graph(puzzle_data)
+
+plot(G)
+```
+
+We observe the following:
+
+1. Nodes can push their load to either `r col_text("one", "#000004FF", "white")`,
+`r col_text("two", "#781C6DFF", "white")`,
+`r col_text("three", "#ED6925FF")` or `r col_text("four", "#FCFFA4FF")` of their neighbors.
+1. There is a `r col_text("\"wall\"", "#781C6DFF", "white")` of nodes, which have no exit.
+1. There is a `r col_text("empty node", "steelblue", "white")`, which has currently no
+load.
+1. A viable solution is thus to push the empty node first to the left of the 
+`r col_text("start node", "firebrick", "white")` and then to move the empty node in circles
+of length 5 until the `r col_text("goal node", "forestgreen", "white")` is empty. Then,
+a final push will get the data to the goal node.
+
+Overall we have thus
+
+```{r get-solution-2}
+cols <- puzzle_data %>% 
+  pull(col) %>% 
+  max()
+empty_node <- puzzle_data %>% 
+  filter(used == 0L) %>% 
+  as.list()
+
+empty_node$col + ## moves to the left
+  empty_node$row + ## moves to the top
+  cols - 1L + ## moves on the top row to the right
+  5L * (cols - 1L) + ## circle moves to push the data towards the goal node
+  1L ## final push to reach the goal node
+```
+
+### Visualization
+
+The following plot shows the solution:
+
+```{r create-solution, eval = !file.exists(here("2016", "Task-22", "node_walk.gif"))}
+
+move_sink <- function(dir = c("U", "R", "D", "L"), G) {
+  dir <- match.arg(dir)
+  cur_idx <- V(G)$is_sink
+  cur_col <- V(G)$col[cur_idx]
+  cur_row <- V(G)$row[cur_idx]
+  orig_color <- V(G)$orig_color[cur_idx]
+  if (dir == "U") {
+    new_row <- cur_row - 1L
+    new_col <- cur_col
+  } else if (dir == "R") {
+    new_row <- cur_row
+    new_col <- cur_col + 1L
+  } else if (dir == "D") {
+    new_row <- cur_row + 1L
+    new_col <- cur_col
+  } else if (dir == "L") {
+    new_row <- cur_row
+    new_col <- cur_col - 1L
+  }
+  
+  dest_idx <- V(G)$col == new_col & V(G)$row == new_row
+  V(G)$color[cur_idx] <- orig_color
+  V(G)$color[dest_idx] <- "steelblue"
+  V(G)$is_sink[cur_idx] <- FALSE
+  V(G)$is_sink[dest_idx] <- TRUE
+  V(G)$label <- V(G)$name
+  invisible(G)
+}
+
+move_load <- function(G) {
+  sink_idx <- V(G)$is_sink
+  sink_col <- V(G)$col[sink_idx]
+  sink_row <- V(G)$row[sink_idx]
+  load_row <- sink_row
+  load_col <- sink_col + 1L
+  load_idx <- V(G)$col == load_col & V(G)$row == load_row
+  GS <- vector("list", 5L)
+  ## 1. Move load to the left
+  V(G)$color[sink_idx] <- "firebrick"
+  V(G)$color[load_idx] <- "steelblue"
+  V(G)$is_sink[sink_idx] <- FALSE
+  V(G)$is_sink[load_idx] <- TRUE
+  GS[[1L]] <- G
+  ## 2. Move Sink down
+  G <- move_sink("D", G)
+  GS[[2L]] <- G
+  ## 3. Move Sink left
+  G <- move_sink("L", G)
+  GS[[3L]] <- G
+  ## 4. Move sink left
+  G <- move_sink("L", G)
+  GS[[4L]] <- G
+  ## 5. Move sink up
+  G <- move_sink("U", G)
+  GS[[5L]] <- G
+  GS
+}
+
+move_to_dest <- function(G) {
+  sink_idx <- V(G)$is_sink
+  sink_col <- V(G)$col[sink_idx]
+  sink_row <- V(G)$row[sink_idx]
+  free_row <- sink_row
+  free_col <- sink_col + 1L
+  free_idx <- V(G)$col == free_col & V(G)$row == free_row
+  V(G)$color[sink_idx] <- "firebrick"
+  V(G)$color[free_idx] <- "steelblue"
+  G
+}
+
+save_plot <- function(G, j, base_dir, redo) {
+  fn <- sprintf("cluster_%03d.png", j)
+  if (redo || !file.exists(file.path(base_dir, fn))) {
+    cat("Saving Plot <", fn, ">...\n", sep = "")
+    png(file.path(base_dir, fn), 
+        width = 12, height = 8, units = "in", res = 96, bg = "transparent")
+    plot(G, vertex.label = NA)
+    dev.off()
+  }
+}
+
+create_gif <- function(G, redo = FALSE) {
+  j <- 1
+  base_dir <- here("2016", "Task-22", "img")
+  dims <- list(start_row = V(G)$row[V(G)$is_sink],
+               start_col = V(G)$col[V(G)$is_sink],
+               nrow = max(V(G)$row),
+               ncol = max(V(G)$col))
+  save_plot(G, j, base_dir, redo)
+  j <- j +1
+  for (i in 1:dims$start_col) {
+    G <- move_sink("L", G)
+    save_plot(G, j, base_dir, redo)
+    j <- j + 1
+  }
+  
+  for(i in 1:dims$start_row) {
+    G <- move_sink("U", G)
+    save_plot(G, j, base_dir, redo)
+    j <- j + 1
+  }
+  
+  for (i in 1:(dims$ncol - 1L)) {
+    G <- move_sink("R", G)
+    save_plot(G, j, base_dir, redo)
+    j <- j + 1
+  }
+  
+  for (i in 1:(dims$ncol - 1L)) {
+    GS <- move_load(G)
+    for (k in seq_along(GS)) {
+      G <- GS[[k]]
+      save_plot(G, j, base_dir, redo)
+      j <- j + 1
+    }
+  }
+  
+  G <- move_to_dest(G)
+  save_plot(G, j, base_dir, redo)
+  
+  gif <- list.files(base_dir, pattern = "\\.png$", full.names = TRUE) %>% 
+    lapply(image_read) %>% 
+    image_join() %>% 
+    image_animate(fps = 2L)
+  image_write(image = gif, path = here("2016", "Task-22", "node_walk.gif"))
+  gif
+}
+
+gif <- create_gif(G)
+```
+
+```{r show-walk, echo = FALSE}
+knitr::include_graphics(here("2016", "Task-22", "node_walk.gif"))
+```
+
+
