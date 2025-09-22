@@ -31,18 +31,18 @@ editor_options:
 
 ```{css custom-css, echo = FALSE}
 .page-content  .figure {
-width: 100%;
+  width: 100%;
 }
 
 .back {
-font-size: 2rem;
+  font-size: 2rem;
 }
 
 .day-desc {
-border: 2px dotted;
-border-radius: 6px;
-border-color: var(--blockquote-border-color);
-padding: 0 20px;
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
 }
 ```
 
@@ -151,7 +151,7 @@ cat(puzzle[[1]])
 
 ### Solution
 
-The solution is rather straght forward implement the instructions and apply them one by 
+The solution is rather straight forward: implement the instructions and apply them one by 
 one.
 
 
@@ -171,10 +171,72 @@ swap <- function(key, type, arg1, arg2) {
 }
 
 rotate <- function(key, type, arg1, arg2) {
-  if (type == "letter") {
-    pos <- str_locate(key, arg1)[, "start"]
+  do_rotate <- function(key, dir, arg1) {
+    dir <- if_else(dir == "right", -1L, 1L)
+    letters <- str_split(key, "")[[1L]]
+    idx <- (seq_along(letters) + dir * arg1  - 1L) %% n + 1L
+    str_c(letters[idx], collapse = "")
   }
+  find_shift <- function(key, arg1) {
+    arg1 <- str_locate(key, arg1)[, "start"]
+    arg1 + if_else(arg1 >= 5, 1L, 0L)
+  }
+  n <- str_length(key)
+  if (type == "letter") {
+    arg1 <- find_shift(key, arg1)
+    type <- "right"
+  } else if (type == "inverse") {
+    for (i in 1:n) {
+      ## find shift index such that letter shift would lead to this word
+      ## since letter shift position is not injective we cannot do 
+      ## w/o try and error loop
+      cand <- do_rotate(key, "left", i)
+      if (do_rotate(cand, "right", find_shift(cand, arg1)) == key) {
+        arg1 <- i
+        break
+      }
+    }
+    type <- "left"
+  }
+  arg1 <- as.integer(arg1)
+  do_rotate(key, type, arg1)
 }
+
+reverse <- function(key, type, arg1, arg2) {
+  arg1 <- as.integer(arg1)
+  arg2 <- as.integer(arg2)
+  str_sub(key, arg1 + 1L, arg2 + 1L) <- str_sub(key, arg1 + 1L, arg2 + 1L) %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    rev() %>% 
+    str_c(collapse = "")
+  key
+}
+
+move <- function(key, type, arg1, arg2) {
+  arg1 <- as.integer(arg1)
+  arg2 <- as.integer(arg2)
+  letter <- str_sub(key, arg1 + 1L, arg1 + 1L)
+  str_sub(key, arg1 + 1L, arg1 + 1L) <- ""
+  str_sub(key, arg2 + 1L) <- str_c(letter, str_sub(key, arg2 + 1L), 
+                                              collaspe = "")
+  key
+}
+
+process_word <- function(key, ops = puzzle_data) {
+  for (i in 1:nrow(ops)) {
+    fn <- ops %>% 
+      slice(i) %>% 
+      select(call:arg2) %>% 
+      as.list
+    args <- fn[-1]
+    args$key <- key
+    key <- do.call(fn[[1]], args)
+  }
+  key
+}
+
+process_word("abcdefgh", puzzle_data)
 ```
 
 ## Part 2
@@ -187,17 +249,38 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the second part, we simply have to sum up the gaps between the merged intervals.
+For the second part, we first revert the instructions and then apply them to the key word.
 
 ```{r get-solution-2}
-count_gaps <- function(intervals) {
-  gaps <- 0L
-  for (i in 2:length(intervals)) {
-    gaps <- gaps + intervals[[i]]["from"] - intervals[[i - 1L]]["to"] - 1L
+revert_instructions <- function(ops = puzzle_data) {
+  rev_ops <- ops %>% 
+    slice(0L)
+  for (i in 1:nrow(ops)) {
+    op <- ops %>% 
+      slice(i) %>% 
+      as.list()
+    ## swap and rev are self inverse
+    if (op$call == "move") {
+      ## move: to undo a move just revert positions
+      arg1 <- op$arg1
+      op$arg1 <- op$arg2
+      op$arg2 <- arg1
+    } else if (op$call == "rotate") {
+      if (op$type == "letter") {
+        ## create an inverse rotation to delegate rotation to the function
+        op$type <- "inverse"
+      } else {
+        ## for left / right rotate simply switch direction
+        op$type <- if_else(op$type == "right", "left", "right")
+      }
+    }
+    rev_ops <- rev_ops %>% 
+        bind_rows(op)
   }
-  gaps <- gaps + intervals[[1L]]["from"]
-  gaps <- gaps + as.integer64(2L ^ 32L) - tail(intervals, 1L)[[1L]]["to"] - 1L
-  gaps
-} 
-count_gaps(merged_intervals)
+  rev_ops %>% 
+    slice(n():1) %>% 
+    select(id:arg2)
+}
+inv_ops <- revert_instructions(puzzle_data)
+process_word("fbgdceah", inv_ops)
 ```
