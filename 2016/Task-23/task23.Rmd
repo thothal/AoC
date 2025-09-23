@@ -1,0 +1,380 @@
+---
+params:
+   task_nr: 23
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(DT)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  str_split(text_block, " ") %>% 
+    map(~ c(., NA_character_)[1:3] %>% 
+          set_names(c("op", "arg1", "arg2"))) %>% 
+    bind_rows()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+This time we have to fall back to the parser, as the `tgl` command makes the workflow not
+predictable. However, we have to pre-process the instructions to simplify the multiplication block.
+
+Look at the instructions 5 to 10:
+
+```{r show-instructions}
+codes <- puzzle_data  %>% 
+  slice(5:10) %>% 
+  set_colnames(c("Operation", "Argument 1", "Argument 2"))
+
+datatable(
+  codes, 
+  class = c("compact", "nowrap", "hover", "row-border"),
+  options = list(
+    pageLength = nrow(codes),
+    dom = "t",
+    ordering = FALSE,
+    columnDefs = list(
+      list(
+        className = "dt-center", targets = "_all"
+      )
+    ))
+)
+```
+
+This translates into the following code:
+
+```{r show-multiplication, eval = FALSE}
+while (d > 0) {
+  c <- b
+  while (c > 0) {
+    a <- a + 1L
+    c <- c - 1L
+  }
+  d <- d - 1L
+}
+```
+
+This can be rewritten as
+```{r show-simplification, eval = FALSE}
+a <- a + d * c
+```
+
+which tremendously reduces the number of necessary iterations. Thus, we introduce 2 new
+operations `mul` and `add` responsible for the multiplication and the addition 
+respectively.
+
+* `mul a b`: Multiply the value of register `b` by the value of register `a` (or a
+  constant) and store the result in register `b`.
+* `add a b`: Add the value of register `a` (or a constant) to the value of register `b` 
+  and store the result in register `b`.
+
+This leads to the following optimizes assembly code as a replacement of the loop based
+instructions:
+
+```
+cpy b c
+mul c d
+add d a
+jnz 1 3
+``` 
+
+The last `jnz` is added to skip the next lines from the old loop. We also mark this lines
+as altered, to raise an error in case a later `tgl` wants to change any of these lines.
+
+*N.B.* There would be also some improvement potential for the other `add` ops, but fixing
+this expensive loops is already sufficient.
+
+
+```{r get-solution-1, cache = TRUE}
+optimize_ops <- function(ops = puzzle_data) {
+  ops <- ops %>% 
+    mutate(is_altered = FALSE)
+  n <- nrow(ops)
+  for (i in n:6) {
+    ## idea transform this:
+    ## cpy b c	
+    ##	 inc a
+    ##	 dec c
+    ##	 jnz c -2
+    ## dec d	
+    ## jnz d -5	
+    ## 
+    ## into this
+    ## 
+    ## cpy b c
+    ## mul d c => c <- c * d
+    ## add c a => a <- a + c 
+    ## jnz 1 3 (skip the rest of the old loop)
+    idx <- (i - 5L):i
+    op_seq <- ops %>% 
+      slice(idx) %>% 
+      summarize(op_seq = paste(op, collapse = "|")) %>% 
+      pull(op_seq)
+    if (op_seq == "cpy|inc|dec|jnz|dec|jnz") {
+      ## set flag that ops are altered as a safeguard
+      ## if a toggle tries to change any of the altered code raise an error
+      ## (remove first op from flagging as we will keep this)
+      ops[tail(idx, -1L), "is_altered"] <- TRUE
+      args <- ops %>% 
+        slice(i - c(4:3, 1)) %>% 
+        summarize(args = list(c(arg1))) %>% 
+        pull(args) %>% 
+        unlist()
+      ops[i - 4L, "op"] <- "mul"
+      ops[i - 4L, "arg1"] <- args[3L]
+      ops[i - 4L, "arg2"] <- args[2L]
+      ops[i - 3L, "op"] <- "add"
+      ops[i - 3L, "arg1"] <- args[2L]
+      ops[i - 3L, "arg2"] <- args[1L]
+      ops[i - 2L, "op"] <- "jnz"
+      ops[i - 2L, "arg1"] <- "1"
+      ops[i - 2L, "arg2"] <- "3"
+    }
+  }
+  ops
+}
+
+automata <- function(eggs, ops = puzzle_data) {
+  reg = c(a = eggs, b = 0L, c = 0L, d = 0L)
+  line <- 1
+  i <- 1
+  
+  get <- function(arg, ref = FALSE) {
+    if (is.na(suppressWarnings(as.integer(arg)))) {
+      if (ref) {
+        type <- "ref"
+      } else {
+        arg <- reg[arg]
+        type <- "reg"
+      }
+    } else {
+      arg <- as.integer(arg)
+      type <- "val"
+    }
+    attr(arg, "type") <- type
+    arg
+  }
+  
+  cpy <- function(arg1, arg2, ...) {
+    i <<- i + 1
+    new <- get(arg1)
+    arg2 <- get(arg2, TRUE)
+    if (attr(arg2, "type") == "ref") {
+      ## need to check that we have a valid op 
+      ## cpy 1 2 would be invalid and should be skipped
+      reg[arg2] <<- new
+    }
+    line <<- line + 1L
+  }
+  
+  inc <- function(arg1, ...) {
+    i <<- i + 1
+    reg[arg1] <<- reg[arg1] + 1L
+    line <<- line + 1L
+  }
+  
+  dec <- function(arg1, ...) {
+    i <<- i + 1
+    reg[arg1] <<- reg[arg1] - 1L
+    line <<- line + 1L
+  }
+  
+  jnz <- function(arg1, arg2, ...) {
+    i <<- i + 1
+    arg1 <- get(arg1)
+    arg2 <- get(arg2)
+    if (arg1 != 0L) {
+      line <<- line + arg2
+    } else {
+      line <<- line + 1
+    }
+  }
+  
+  mul <- function(arg1, arg2, ...) {
+    i <<- i + 1
+    arg1 <- get(arg1)
+    arg2 <- get(arg2, TRUE)
+    stopifnot(attr(arg2, "type") == "ref")
+    reg[arg2] <<- arg1 * reg[arg2] 
+    line <<- line + 1
+  }
+  
+  add <- function(arg1, arg2, ...) {
+    i <<- i + 1
+    arg1 <- get(arg1)
+    arg2 <- get(arg2, TRUE)
+    stopifnot(attr(arg2, "type") == "ref")
+    reg[arg2] <<- arg1 + reg[arg2] 
+    line <<- line + 1
+  }
+  
+  tgl <- function(arg1, arg2, ...) {
+    offset <- get(arg1)
+    if (between(line + offset, 1L, n)) {
+      op <- ops %>% 
+        slice(line + offset) %>% 
+        as.list()
+      if (op$is_altered) {
+        stop("Trying to change an instruction form a pre-processed op")
+      }
+      if (op$op == "inc") {
+        ops[offset + line, "op"] <<- "dec"
+      } else if (op$op %in% c("dec", "tgl")) {
+        ops[offset + line, "op"] <<- "inc"
+      } else if (op$op == "jnz") {
+        ops[offset + line, "op"] <<- "cpy"
+      } else if (op$op == "cpy") {
+        ops[offset + line, "op"] <<- "jnz"
+      } else {
+        stop("tgl hit an unknown op")
+      }
+    }
+    i <<- i + 1
+    line <<- line + 1
+  }
+  n <- nrow(ops)
+  while (line <= n) {
+    ops %>% 
+      slice(line) %>% 
+      rename(name = op) %>% 
+      as.list() %>% 
+      do.call(call, .) %>% 
+      eval()
+  }
+  list(i = i, reg = reg)
+}
+
+optimized_ops <- optimize_ops(puzzle_data)
+
+automata(7L, optimized_ops)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+With the optimization we can also call the function with a different starting value and 
+get a result in a reasonable time.
+
+```{r get-solution-2, cache = TRUE}
+automata(12L, optimized_ops)
+```
+
+
+
