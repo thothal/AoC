@@ -1,0 +1,273 @@
+---
+params:
+   task_nr: 24
+   year: 2016
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   force_year <- "2016"
+   
+   year <- dplyr::coalesce(force_year, format(Sys.Date(), "%Y"))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(collections)
+library(gtools)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+This is another instance of a path finding algorithm. We will use an A* search. Since the
+order of the targets is not determined, we will first solve this small 
+Travelling Salesman Problem by brute force to determine the optimal order of targets.
+
+```{r get-solution-1, cache = TRUE}
+get_route <- function(maze, roundtrip = FALSE, start = "0") {
+  targets <- targets <- maze %>% 
+    str_extract_all("[^.#]") %>% 
+    unlist()
+  n <- length(targets)
+  targets_pos <- maze %in% targets
+  dim(targets_pos) <- dim(maze)
+  targets_pos <- which(targets_pos, arr.ind = TRUE) %>% 
+    set_rownames(., maze[.])
+  dist <- outer(1:n, 1:n, \(i, j) {
+    abs(targets_pos[i, "row"] - targets_pos[j ,"row"]) +
+      abs(targets_pos[i, "col"] - targets_pos[j , "col"])
+  })
+  rownames(dist) <- colnames(dist) <- targets
+  path <- setdiff(targets, start)
+  all_routes <- cbind(start, 
+                      permutations(length(path), length(path), path))
+  if (roundtrip) {
+    all_routes <- cbind(all_routes, start)
+  }
+  min_dist <- Inf
+  for (route_idx in 1:nrow(all_routes)) {
+    route <- all_routes[route_idx, ]
+    cur_dist <- 0L
+    for (i in seq(1, length(route) - 1L)) {
+      cur_dist <- cur_dist + dist[route[i], route[i + 1L]]
+    }
+    if (cur_dist < min_dist) {
+      best_route <- route
+      min_dist <- cur_dist
+    }
+  }
+  targets_pos[tail(best_route, -1L), , drop = FALSE]
+}
+
+get_neighbors <- function(maze, cur_pos, target) {
+  cur_pos <- cur_pos[, c("row", "col"), drop = FALSE]
+  dims <- dim(maze)
+  dir <- rbind(">" = c(0L, 1L),
+               "v" = c(1L, 0L),
+               "<" = c(0L, -1L),
+               "^" = c(-1L, 0L)) %>% 
+    set_colnames(c("row", "col"))
+  target_pos <- target[, c("row", "col"), drop = FALSE]
+  cand <- t(t(dir) + c(cur_pos))
+  cand <- cand[between(cand[, 1L], 1L, dims[1L]) & 
+                 between(cand[, 2L], 1L, dims[2L]), , drop = FALSE]
+  walkable <- maze[cand] != "#"
+  nbs <- cand[walkable, , drop = FALSE]
+  heuristic <- t(abs(t(nbs) - c(target_pos))) %>% 
+    rowSums()
+  cbind(nbs, h = heuristic)
+}
+
+add_to_queue <- function(queue, cost, nbs, next_target, visited, target_index) {
+  if (nrow(nbs) > 0) {
+    for (i in 1:nrow(nbs)) {
+      new_pos <- nbs[i, , drop = FALSE]
+      f <- cost + new_pos[, "h"]
+      new_pos <- cbind(new_pos, "cost" = cost + 1L)
+      load <- list(visited = visited,
+                   next_target = next_target[, c("row", "col"), drop = FALSE],
+                   cur_pos = new_pos[, c("row", "col", "cost"), drop = FALSE],
+                   target_index = target_index)
+      queue$push(load, -f)
+    }
+  }
+}
+
+find_shortest_path <- function(maze, roundtrip = FALSE, start = "0") {
+  shortest_path <- Inf
+  
+  pq <- priority_queue()
+  hash <- list()
+  start_pos <- which(maze == start, arr.ind = TRUE) %>% 
+    set_colnames(c("row", "col")) %>% 
+    set_rownames(start) %>% 
+    cbind(cost = 0L)
+  route <- get_route(maze, roundtrip, start) 
+  visited <- rep(FALSE, nrow(route)) %>% 
+    set_names(rownames(route))
+  target_index <- 1L
+  next_target <- route[target_index, , drop = FALSE]
+  nbs <- get_neighbors(maze, start_pos, next_target)
+  add_to_queue(pq, start_pos[, "cost"], nbs, next_target, visited, target_index)
+  
+  target_ids <- paste(as.numeric(visited), collapse = "")
+  hash[[target_ids]] <- rbind(hash[[target_ids]],
+                              start_pos[, c("row", "col"), drop = FALSE])
+  while (pq$size() > 0L) {
+    next_node <- pq$pop()
+    cur_pos <- next_node$cur_pos
+    next_target <- next_node$next_target
+    if (all(cur_pos[, c("row", "col")] == next_target[, c("row", "col")])) {
+      ## we hit a target
+      target <- rownames(next_target)
+      if (!next_node$visited[target]) {
+        next_node$visited[target] <- TRUE
+        next_node$target_index <- next_node$target_index + 1
+      }
+      if (all(next_node$visited)) {
+        shortest_path <- cur_pos[, "cost"]
+        break
+      } else {
+        next_target <- route[next_node$target_index, , drop = FALSE]
+      }
+    }
+    target_ids <- paste(as.numeric(next_node$visited), collapse = "")
+
+    hash[[target_ids]] <- rbind(hash[[target_ids]],
+                                cur_pos[, c("row", "col"), drop = FALSE])
+    nbs <- get_neighbors(maze, cur_pos, next_target)
+    dupes <- !duplicated(rbind(hash[[target_ids]], 
+                               nbs[, c("row", "col"), drop = FALSE]))
+    idx <- dupes[-(1:nrow(hash[[target_ids]]))]
+    add_to_queue(pq, cur_pos[, "cost"], nbs[idx, , drop = FALSE], 
+                 next_target, next_node$visited, next_node$target_index)
+  }
+  shortest_path
+}
+find_shortest_path(puzzle_data)
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we rquire the TSP to end in the start city (which leads to another
+route).
+
+```{r get-solution-2, cache = TRUE}
+find_shortest_path(puzzle_data, TRUE)
+```
