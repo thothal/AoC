@@ -1,0 +1,216 @@
+---
+params:
+   task_nr: 3
+   year: 2017
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    as.integer()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We observe the following things:
+
+1. We label the first square (just the file with 1) as square $s_0$ and each surrounding
+square with $s_i$. Fields 2 - 9 are for example on square $s_1$, fields 10 - 25 on square
+$s_2$ and so on.
+1. The right lower corner of each square $s_i$ ends with the number $(2i + 1)^2$.
+1. Either the horizontal or the vertical distance to each field on square $s_i$ is $i$.
+1. The other direction is the distance to the middle point of this square to the field. 
+
+
+Thus, to get the distance for field $j$ the algorithm finds first $i$ by solving 
+$j \leq (2i + 1)^2$ and then gets the distance to the nearest middle point.
+
+
+```{r get-solution-1}
+get_distance <- function(j) {
+  if (j == 1L) {
+    0L
+  } else {
+    i <- ceiling((sqrt(j) - 1L) / 2L)
+    if (sqrt(j) == floor(sqrt(j)) && (sqrt(j) %% 2L == 1L)) { 
+      i <- i - 1
+    }
+    rc <- (2L * i + 1L) ^ 2 ## right corner
+    mp <- rc - (2L * 0:3 + 1L) * i ## middle points
+    min(abs(mp - j)) + i
+  }
+}
+
+get_distance(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We solve the second part by constructing the matrix iteratively.
+
+```{r get-solution-2}
+embed_matrix <- function(m, n = 2) {
+  for (i in 1:n) {
+    m <- cbind(NA, rbind(NA, m , NA), NA)
+  }
+  m
+}
+
+fill_ulam_spiral <- function(max_val) {
+  dir <- rbind(
+    ">"  = c(0L, 1L),
+    "^"  = c(-1L, 0L),
+    "<"  = c(0L, -1L),
+    "v"  = c(1L, 0L),
+    "^>" = c(-1L, 1L),
+    "^<" = c(-1L, -1L),
+    "v>" = c(1L, 1L),
+    "v<" = c(1L, -1L)
+  )
+  n <- 9L
+  m <- matrix(NA, n, n)
+  val <- 1L
+  pos <- cbind((n + 1L) / 2L, (n + 1L) / 2L)
+  m[pos] <- val
+  j <- 2L
+  while (val < max_val) {
+    i <- ceiling((sqrt(j) - 1L) / 2L)
+    l <- 2L * i + 1L
+    if (pos[1L] >  n - 2L) {
+      k <- 2L
+      m <- embed_matrix(m, k)
+      pos <- t(t(pos) + c(k, k))
+      n <- n + 2L * k
+    }
+    movements <- rep(c(">", "^", "<", "v", ">"),
+                     c(1L, l - 2L, l - 1L, l - 1L, l - 1L))
+    for (next_dir in movements) {
+      pos <- pos + dir[next_dir, ]
+      val <- sum(m[t(t(dir) + c(pos))], na.rm = TRUE)
+      m[pos] <- val
+      j <- j + 1L
+      if (val >= max_val) {
+        break
+      }
+    }
+  }
+  val
+}
+fill_ulam_spiral(puzzle_data)
+```
