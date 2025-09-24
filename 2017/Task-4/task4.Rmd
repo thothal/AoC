@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 3
+   task_nr: 4
    year: 2017
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -20,7 +20,7 @@ output:
   rmdformats::downcute:
     highlight: tango
     use_bookdown: TRUE
-    mathjax: TRUE
+    mathjax: NULL
     lightbox: TRUE
     gallery: TRUE
 editor_options: 
@@ -94,7 +94,7 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       keep(nzchar)
   }
   text_block %>% 
-    as.integer()
+    str_split(" ")
 }
 
 puzzle_data <- local({
@@ -120,37 +120,15 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We observe the following things:
-
-1. We label the first square (just the file with 1) as square $s_0$ and each surrounding
-square with $s_i$. Fields 2 - 9 are for example on square $s_1$, fields 10 - 25 on square
-$s_2$ and so on.
-1. The right lower corner of each square $s_i$ ends with the number $(2i + 1)^2$.
-1. Either the horizontal or the vertical distance to each field on square $s_i$ is $i$.
-1. The other direction is the distance to the middle point of this square to the field. 
-
-
-Thus, to get the distance for field $j$ the algorithm finds first $i$ by solving 
-$j \leq (2i + 1)^2 \implies i = \left\lceil(\sqrt{j} - 1) / 2\right\rceil$ and 
-then gets the distance to the nearest middle point.
+We just need to count the passphrases without duplicated passwords.
 
 
 ```{r get-solution-1}
-get_distance <- function(j) {
-  if (j == 1L) {
-    0L
-  } else {
-    i <- ceiling((sqrt(j) - 1L) / 2L)
-    if (sqrt(j) == floor(sqrt(j)) && (sqrt(j) %% 2L == 1L)) { 
-      i <- i - 1
-    }
-    rc <- (2L * i + 1L) ^ 2 ## right corner
-    mp <- rc - (2L * 0:3 + 1L) * i ## middle points
-    min(abs(mp - j)) + i
-  }
+count_valid <- function(passphrases) {
+  vapply(passphrases, \(p) !any(duplicated(p)), logical(1L)) %>% 
+    sum()
 }
-
-get_distance(puzzle_data)
+count_valid(puzzle_data)
 ```
 
 ## Part 2
@@ -163,55 +141,19 @@ cat(puzzle[[2]])
 
 ### Solution
 
-We solve the second part by constructing the matrix iteratively.
+We preprocess the passphrases, such that we bring each password in its canonical form 
+first, that is, we split it into letters, sort them and paste them together. Then, we use 
+the algorithm from part 1.
 
 ```{r get-solution-2}
-embed_matrix <- function(m, n = 2) {
-  for (i in 1:n) {
-    m <- cbind(NA, rbind(NA, m , NA), NA)
-  }
-  m
+
+preprocess_passphrases <- function(passphrases) {
+  lapply(passphrases, \(p) str_split(p, "") %>% vapply(\(x) paste(sort(x), collapse = ""),
+                                                       character(1L)))
 }
 
-fill_ulam_spiral <- function(max_val) {
-  dir <- rbind(
-    ">"  = c(0L, 1L),
-    "^"  = c(-1L, 0L),
-    "<"  = c(0L, -1L),
-    "v"  = c(1L, 0L),
-    "^>" = c(-1L, 1L),
-    "^<" = c(-1L, -1L),
-    "v>" = c(1L, 1L),
-    "v<" = c(1L, -1L)
-  )
-  n <- 9L
-  m <- matrix(NA, n, n)
-  val <- 1L
-  pos <- cbind((n + 1L) / 2L, (n + 1L) / 2L)
-  m[pos] <- val
-  j <- 2L
-  while (val < max_val) {
-    i <- ceiling((sqrt(j) - 1L) / 2L)
-    l <- 2L * i + 1L
-    if (pos[1L] >  n - 2L) {
-      k <- 2L
-      m <- embed_matrix(m, k)
-      pos <- t(t(pos) + c(k, k))
-      n <- n + 2L * k
-    }
-    movements <- rep(c(">", "^", "<", "v", ">"),
-                     c(1L, l - 2L, l - 1L, l - 1L, l - 1L))
-    for (next_dir in movements) {
-      pos <- pos + dir[next_dir, ]
-      val <- sum(m[t(t(dir) + c(pos))], na.rm = TRUE)
-      m[pos] <- val
-      j <- j + 1L
-      if (val >= max_val) {
-        break
-      }
-    }
-  }
-  val
-}
-fill_ulam_spiral(puzzle_data)
+canoncial_passwords <- preprocess_passphrases(puzzle_data)
+
+count_valid(canoncial_passwords)
+
 ```
