@@ -1934,15 +1934,16 @@ Data from square <code>1024</code> must be carried <code>31</code> steps.
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
 <p>We observe the following things:</p>
 <ol style="list-style-type: decimal">
-<li>We label the first square (just the file with 1) as square <span class="math inline"><em>s</em><sub>0</sub></span> and each surrounding
-square with <span class="math inline"><em>s</em><sub><em>i</em></sub></span>. Fields 2 - 9 are for example on square <span class="math inline"><em>s</em><sub>1</sub></span>, fields 10 - 25 on square
-<span class="math inline"><em>s</em><sub>2</sub></span> and so on.</li>
-<li>The right lower corner of each square <span class="math inline"><em>s</em><sub><em>i</em></sub></span> ends with the number <span class="math inline">(2<em>i</em> + 1)<sup>2</sup></span>.</li>
-<li>Either the horizontal or the vertical distance to each field on square <span class="math inline"><em>s</em><sub><em>i</em></sub></span> is <span class="math inline"><em>i</em></span>.</li>
+<li>We label the first square (just the file with 1) as square <span class="math inline">\(s_0\)</span> and each surrounding
+square with <span class="math inline">\(s_i\)</span>. Fields 2 - 9 are for example on square <span class="math inline">\(s_1\)</span>, fields 10 - 25 on square
+<span class="math inline">\(s_2\)</span> and so on.</li>
+<li>The right lower corner of each square <span class="math inline">\(s_i\)</span> ends with the number <span class="math inline">\((2i + 1)^2\)</span>.</li>
+<li>Either the horizontal or the vertical distance to each field on square <span class="math inline">\(s_i\)</span> is <span class="math inline">\(i\)</span>.</li>
 <li>The other direction is the distance to the middle point of this square to the field.</li>
 </ol>
-<p>Thus, to get the distance for field <span class="math inline"><em>j</em></span> the algorithm finds first <span class="math inline"><em>i</em></span> by solving
-<span class="math inline"><em>j</em> ≤ (2<em>i</em> + 1)<sup>2</sup></span> and then gets the distance to the nearest middle point.</p>
+<p>Thus, to get the distance for field <span class="math inline">\(j\)</span> the algorithm finds first <span class="math inline">\(i\)</span> by solving
+<span class="math inline">\(j \leq (2i + 1)^2 \implies i = \left\lceil(\sqrt{j} - 1) / 2\right\rceil\)</span> and
+then gets the distance to the nearest middle point.</p>
 <pre class="r"><code>get_distance &lt;- function(j) {
   if (j == 1L) {
     0L
@@ -2096,6 +2097,15 @@ fill_ulam_spiral(puzzle_data)</code></pre>
 
 
 
+    <!-- dynamically load mathjax for compatibility with self-contained -->
+  <script>
+    (function () {
+	var script = document.createElement("script");
+	script.type = "text/javascript";
+	script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+	document.getElementsByTagName("head")[0].appendChild(script);
+    })();
+  </script>
   
 </body>
 </html>
