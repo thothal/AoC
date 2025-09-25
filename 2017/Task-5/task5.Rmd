@@ -148,7 +148,7 @@ cat(puzzle[[2]])
 We simply adapt the logic for updating the offsets to solve part 2.
 
 ```{r get-solution-2}
-count_jumps(puzzle_data, FALSE)
+count_jumps(puzzle_data, TRUE)
 ```
 
 ## R - Version
