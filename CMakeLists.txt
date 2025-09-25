@@ -35,6 +35,7 @@ endfunction()
 set(YEAR_FOLDER
     2015
     2016
+    2017
     2021
     2024
 )
