@@ -78,7 +78,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 4](https://thothal.github.io/AoC/2017_task4.html)
 - [x] [Day 5](https://thothal.github.io/AoC/2017_task5.html)
 - [x] [Day 6](https://thothal.github.io/AoC/2017_task6.html)
-- [ ] Day 7
+- [x] [Day 7](https://thothal.github.io/AoC/2017_task7.html)
 - [ ] Day 8
 - [ ] Day 9
 - [ ] Day 10
