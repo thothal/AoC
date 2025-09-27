@@ -86,7 +86,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 12](https://thothal.github.io/AoC/2017_task12.html)
 - [x] [Day 13](https://thothal.github.io/AoC/2017_task13.html)
 - [x] [Day 14](https://thothal.github.io/AoC/2017_task14.html)
-- [ ] Day 15
+- [x] [Day 15](https://thothal.github.io/AoC/2017_task15.html)
 - [ ] Day 16
 - [ ] Day 17
 - [ ] Day 18
