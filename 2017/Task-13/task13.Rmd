@@ -1,0 +1,185 @@
+---
+params:
+   task_nr: 13
+   year: 2017
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split(": ") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("depth", "range")) %>% 
+    as_tibble() %>% 
+    mutate(across(everything(), as.integer))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We define first a function `get_pos` which, for a given range and time point, determines
+the position of the scanner. If we know the position of the scanner, all we need to do,
+is to check whether the scanner position is at `0` the moment we want to enter (which 
+equals the depth).
+
+```{r get-solution-1}
+get_pos <- function(t, n) {
+  m <- t %% (2L * (n - 1L))
+  if_else(m <= n - 1L, m, 2L * (n - 1L) - m)
+}
+
+walk_layers <- function(layout = puzzle_data, offset = 0L) {
+  layout %>% 
+    mutate(scanner_pos = get_pos(depth + offset, range)) %>% 
+    summarize(severity = sum(depth * range * (scanner_pos == 0))) %>% 
+    pull(severity)
+}
+walk_layers(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We fall back to `C++` to speed up the iterative search for the safe offset. 
+An `R` implementation can be found in the appendix.
+
+```{Rcpp cpp-algorithm, file = "firewall.cpp", cache = TRUE}
+```
+
+```{r get-solution-2}
+find_offset(puzzle_data)
+```
+
+## R - Version
+
+```{r offset-r-version, eval = FALSE}
+find_offset <- function(layout = puzzle_data) {
+  range0 <- layout %>% 
+    filter(depth == 0L) %>% 
+    pull(range)
+  severity <- walk_layers(layout, n)
+  hit_on_first_layer <- get_pos(n, range0) == 0L
+  while (severity != 0 || hit_on_first_layer) {
+    n <- n + 1L
+    severity <- walk_layers(layout, n)
+    hit_on_first_layer <- get_pos(n, range0) == 0L
+  }
+  n
+}
+```
