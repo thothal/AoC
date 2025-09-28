@@ -1,0 +1,208 @@
+---
+params:
+   task_nr: 16
+   year: 2017
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_split(",") %>% 
+    extract2(1L)
+  str_sub(res, 2L) %>% 
+    str_split("/") %>% 
+    map(~ c(.x, NA)[1:2]) %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(paste0("arg", 1:2)) %>% 
+    as_tibble() %>% 
+    mutate(op = str_sub(res, 1L, 1L), .before = 1L) %>% 
+    mutate(orig_op = res)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We implement a simple iterative approach, executing one line after the other.
+
+```{r get-solution-1, cache = TRUE}
+dance <- function(ops, n_dancers = 16L, dancers = letters[1:n_dancers]) {
+  p <- function(arg1, arg2) {
+    pos <- which(dancers %in% c(arg1, arg2))
+    dancers[pos] <<- dancers[rev(pos)]
+  }
+  x <- function(arg1, arg2) {
+    arg1 <- as.integer(arg1) + 1L
+    arg2 <- as.integer(arg2) + 1L
+    dancers[c(arg1, arg2)] <<- dancers[c(arg2, arg1)]
+  }
+  s <- function(arg1, arg2) {
+    dancers <<- dancers[(seq_along(dancers) - 1L + 
+                           n_dancers - as.integer(arg1)) %% n_dancers + 1L]
+  }
+  for (i in 1:nrow(ops)) {
+    call <- ops %>% 
+      slice(i) %>% 
+      select(op:arg2) %>% 
+      as.list()
+    do.call(call[[1L]], call[-1L])
+  }
+  dancers
+}
+dance(puzzle_data) %>% 
+  paste(collapse = "")
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we want to detect cycles. If we find a cycle and the remaining 
+iterations are a multiple of the cycle length we can skip right away. 
+
+Again `R` is too slow for this, so we fall - once more - back to `C++`. The R algorithm 
+can be found in the appendix.
+
+```{Rcpp cpp-algorithm, file = "dance.cpp", cache = TRUE}
+```
+
+```{r get-solution-2, cache = TRUE}
+dance(puzzle_data %>% 
+        pull(orig_op), 1000000000)
+```
+
+## R - Version
+
+```{r dance-r-version, eval = FALSE}
+repeat_dance <- function(ops, nr_dances) {
+  seen <- list()
+  state <- letters[1:16]
+  for (i in 1:nr_dances) {
+    state <- dance(ops, dancers = state)
+    state_id <- paste(state, collapse = "")
+    if (!is.null(seen[[state_id]])) {
+      if ((nr_dances - i) %% (i - seen[[state_id]]) == 0L) {
+        break
+      }
+    }
+    seen[[state_id]]
+  }
+  state_id
+}
+```
+
