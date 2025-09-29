@@ -1,0 +1,297 @@
+---
+params:
+   task_nr: 20
+   year: 2017
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_extract_all("-?\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c(paste0(letters[24:26], "0"),
+                   paste0("v", letters[24:26]),
+                   paste0("a", letters[24:26]))) %>% 
+    as_tibble() %>% 
+    mutate(across(everything(), as.integer))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The first part can be solved with some bsic geometry. The position of each particle after
+$i$ ticks is
+
+$$
+\begin{pmatrix}
+x^i_j \\ y^i_j \\ z^i_j
+\end{pmatrix} =
+\begin{pmatrix}
+x^i_0 \\ y^i_0 \\ z^i_0
+\end{pmatrix} +
+\begin{pmatrix}
+v^i_x \\ v^i_y \\ v^i_z
+\end{pmatrix} +
+j\cdot\begin{pmatrix}
+a^i_x \\ a^i_y \\ a^i_z
+\end{pmatrix}
+$$
+
+where $\vec x^i_j$ describes the position of the $i$-th particle after $j$ clicks, 
+$\vec x^i_0$ the initial position of this particle and $\vec v^i$ and $\vec a^i$ the 
+velocity and acceleration respectively.
+
+For each $i$ we want to find the index $\hat j_i$, where the Euclidian distance to the 
+origin is minimal, that is 
+
+$$
+\hat j_i =\min_j \sqrt{(x_j^i) ^2 + (y_j^i) ^2 + (z_j^i) ^2} 
+$$
+Then, we want to get the maximum of the rounded up $\hat j_i$ values:
+
+$$
+\hat j = \max_i\left\lceil \hat j_i \right\rceil
+$$
+$\hat j$ describes the maximum time that has to pass until the last particle comes closest
+to the origin. After $\hat j$ ticks **all** particles move further away from the origin.
+
+The particle which is the closest to the origin at this time point is eventually the 
+particle which stays the closest to the origin.
+
+To get $\hat j_i$ we simply take the derivative and set it to zero and solve for `j`. 
+
+
+*N.B.* For the sake of simplicity, we solve the derivative without the square root:
+
+
+\begin{align}
+f_i(j) &= (x_j^i) ^2 + (y_j^i) ^2 + (z_j^i) ^2 \\
+&= (\underbrace{x_0^i + v_x^i}_{=:\tilde x^i} + j\cdot a_x^i)^2 + 
+(\underbrace{y_0^i + v_y^i}_{=:\tilde y^i} + j\cdot a_y^i)^2 + 
+(\underbrace{z_0^i + v_z^i}_{=:\tilde z^i} + j\cdot a_z^i)^2\\
+f_i'(j) &= 2a_x^i\left(\tilde x^i + j\cdot a_x^i\right) +
+         2a_y^i\left(\tilde y^i + j\cdot a_y^i\right) +
+         2a_z^i\left(\tilde z^i + j\cdot a_z^i\right) \\
+&= 2a_x^i\tilde x^i + 2a_y^i\tilde y^i + 2a_z^i\tilde z^i +
+2j\left(\left(a_x^i\right)^2 + \left(a_y^i\right)^2 + \left(a_z^i\right)^2 \right)
+\stackrel{!}{=} 0 \\
+\hat j_i &= - \frac{a_x^i\tilde x^i + a_y^i\tilde y^i + 
+a_z^i\tilde z^i}{\left(a_x^i\right)^2 + \left(a_y^i\right)^2 + \left(a_z^i\right)^2}
+
+\end{align}
+
+```{r get-solution-1}
+find_closest <- function(speeds = puzzle_data) {
+  speeds <- speeds %>% 
+    mutate(
+      id = 1:n() - 1L,
+      x0t = x0 + vx,
+      y0t = y0 + vy,
+      z0t = z0 + vz,
+      j_min = ceiling(-(ax * x0t - ay * y0t - az * z0t) / (ax ^ 2 + ay ^ 2 + az ^ 2)))
+  
+  j <- speeds %>% 
+    filter(j_min == max(j_min)) %>% 
+    pull(j_min)
+  
+  speeds %>% 
+    mutate(dist = abs(x0t + j * ax) + abs(y0t + j * ay) + abs(z0t + j * az)) %>%
+    filter(dist == min(dist)) %>% 
+    pull(id)
+}
+find_closest(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To detect a collision we need to see if this equation has a solution:
+
+$$
+\begin{pmatrix}
+x^i_j \\ y^i_j \\ z^i_j
+\end{pmatrix} = 
+\begin{pmatrix}
+x^k_j \\ y^k_j \\ z^k_j
+\end{pmatrix}
+$$
+for all pairs $1\leq i < k \leq n$, which can be written as:
+\begin{align}
+x_0^i + v_x^i + j\cdot a_x ^i &= x_0^k + v_x^k + j\cdot a_x ^k\\
+y_0^i + v_y^i + j\cdot a_y ^i &= y_0^k + v_y^k + j\cdot a_y ^k\\
+z_0^i + v_z^i + j\cdot a_z ^i &= z_0^k + v_z^k + j\cdot a_z ^k\\
+\tilde x^i + j\cdot a_x ^i &= \tilde x^k + j\cdot a_x ^k\\
+\tilde y^i + j\cdot a_y ^i &= \tilde y^k + j\cdot a_y ^k\\
+\tilde z^i + j\cdot a_z ^i &= \tilde z^k + j\cdot a_z ^k\\
+j &= \frac{\tilde x^k - \tilde x^i}{a_x^i - a_x^k}\\
+j &= \frac{\tilde y^k - \tilde y^i}{a_y^i - a_y^k}\\
+j &= \frac{\tilde z^k - \tilde z^i}{a_z^i - a_z^k}
+\end{align}
+
+
+
+```{r get-solution-2}
+does_collide <- function(p1, p2) {
+  i_coord <- c(p1 %>% pull(x0t),
+               p1 %>% pull(y0t),
+               p1 %>% pull(z0t))
+  k_coord <- c(p2 %>% pull(x0t),
+              p2 %>% pull(y0t),
+              p2 %>% pull(z0t))
+  i_a <- c(p1 %>% pull(ax),
+           p1 %>% pull(ay),
+           p1 %>% pull(az))
+  k_a <- c(p2 %>% pull(ax),
+           p2 %>% pull(ay),
+           p2 %>% pull(az))
+  res <- TRUE
+  diff_coord <- k_coord - i_coord
+  diff_a <- i_a - k_a
+  if (all(diff_a) == 0) {
+    return (all(diff_coord) == 0)
+  } else if (any(diff_a) == 0) {
+    return (FALSE)
+  } else {
+    unique(diff_coord / diff_a) %>% 
+      length() %>% 
+      equals(1L)
+  }
+}
+count_collisions <- function(speeds) {
+  speeds <- speeds %>% 
+    mutate(
+      x0t = x0 + vx,
+      y0t = y0 + vy,
+      z0t = z0 + vz) %>% 
+    split(1:nrow(speeds)) 
+  n <- length(speeds)
+  discard <- rep(FALSE, n)
+  i <- 1L
+  while (i != n) {
+    cat("\nTesting colliding with particle", i, "\n")
+    nbs <- setdiff(which(!discard & seq_along(discard) > i), i)
+    for (j in nbs) {
+      cat("vs", j, "\r")
+      if (does_collide(speeds[[i]], speeds[[j]])) {
+        discard[j] <- TRUE
+      }
+    }
+    i <- max(c(i + 1L, which(!discard)[1L]))
+  }
+  discard
+}
+l <- count_collisions(puzzle_data) 
+```
