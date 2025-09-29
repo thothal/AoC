@@ -52,6 +52,9 @@ editor_options:
 }
 ```
 
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
                       dev.args = list(bg = "transparent"))
@@ -80,6 +83,8 @@ library(dplyr)
 library(purrr)
 library(stringr)
 library(kableExtra)
+library(collections)
+library(bit64)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -153,13 +158,11 @@ We see that lines 1 to 20 form a setup block, where registers are set. We also n
 register `a` equals `2 ^ 31 - 1`. The sound is set in the loop with the frequency derived 
 from the given instructions.
 
-After the loop end in line 20, we jump **conditionally** on `a`. Since `a` is **not** zero
-at this atge, we will **always** continue with line 24 and we eventually hit line 26 which
-will return the frequency set in the loop.
+After the loop ends in line 20, we jump **conditionally** on `a`. Since `a` is **not** 
+zero at this stage, we will **always** continue with line 24 and we eventually hit line 26 
+which will return the frequency set in the loop.
 
 Thus, all we need to do is to implement the first loop to get the deisred frequency.
-
-
 
 ```{r get-solution-1}
 get_frequency <- function() {
@@ -185,6 +188,154 @@ cat(puzzle[[2]])
 
 ### Solution
 
-```{r get-solution-2, cache = TRUE}
+For part 2, we develop a proper parser, which uses a message queue for the messages to be
+exchanged. Then, we run program `0` until it blocks, followed by program `1` until it 
+blocks. If program `0` still blocks we are done, otherwise continue until a state is 
+reached where both programs block.
 
+The `R` version is slow, hence, as usual, we switched to `C++`. The `R` code can be found 
+in the appendix.
+
+```{Rcpp cpp-algorithm, file = "duet.cpp", cache = TRUE}
+```
+
+```{r get-solution-2}
+get_send_count(puzzle_data %>% 
+                 pull(op_original))
+```
+
+## R - Version
+
+```{r duet-r-version, eval = FALSE}
+program <- function(ops, rcv_queue, snd_queue, p) {
+  me <- paste0("[P", p, "]")
+  reg <- c(0, 0, 0, 0, as.integer(p)) %>% 
+    as.integer64() %>% 
+    set_names(c("a", "b", "f", "i", "p"))
+  line_counter <- 1L
+  snd_counter <- 0L
+  empty_queue <- structure(list(
+    message = paste("Queue for program", p, "is empty"),
+    call = NULL),
+    class = c("empty_queue", "error", "condition"))
+  
+  val <- function(arg, set = FALSE) {
+    val <- as.integer(arg) %>% 
+      suppressWarnings()
+    if (set) {
+      stopifnot("Cannot use a number to save results" = is.na(val),
+                "Unknown register name" = arg %in% names(reg))
+      arg
+    } else {
+      if (is.na(val)) {
+        reg[arg]
+      } else {
+        val        
+      }
+    }
+  }
+  set <- function(arg1, arg2, ...) {
+    reg[val(arg1, TRUE)] <<- val(arg2)
+    line_counter <<- line_counter + 1L
+  }
+  
+  add <- function(arg1, arg2, ...) {
+    reg[val(arg1, TRUE)] <<- reg[val(arg1, TRUE)] + val(arg2)
+    line_counter <<- line_counter + 1L
+  }
+  
+  mul <- function(arg1, arg2, ...) {
+    reg[val(arg1, TRUE)] <<- reg[val(arg1, TRUE)] * val(arg2)
+    line_counter <<- line_counter + 1L
+  }
+  
+  mod <- function(arg1, arg2, ...) {
+    reg[val(arg1, TRUE)] <<- reg[val(arg1, TRUE)] %% val(arg2)
+    line_counter <<- line_counter + 1L
+  }
+  
+  jgz <- function(arg1, arg2, ...) {
+    if (val(arg1) > 0L) {
+      line_counter <<- line_counter + as.integer(val(arg2))
+    } else {
+      line_counter <<- line_counter + 1L
+    }
+  }
+  
+  snd <- function(arg1, ...) {
+    cat(me, ": Send msg #", snd_counter, "\r", sep = "")
+    snd_queue$push(val(arg1))
+    snd_counter <<- snd_counter + 1L
+    line_counter <<- line_counter + 1L
+  }
+  
+  rcv <- function(arg1, ...) {
+    if (rcv_queue$size() == 0L) {
+      signalCondition(empty_queue)
+    } else {
+      reg[val(arg1, TRUE)] <<- rcv_queue$pop()
+      line_counter <<- line_counter + 1L
+    }
+  }
+  
+  get_snd_cnt <- function() {
+    snd_counter
+  }
+  
+  run <- function() {
+    done <- !between(line_counter, 1L, nrow(ops))
+    blocked <- FALSE
+    has_run <- FALSE
+    while (!done && !blocked) {
+      line <- ops %>% 
+        slice(line_counter) %>% 
+        select(op:arg2) %>% 
+        as.list()
+      op_orig <- ops %>% 
+        slice(line_counter) %>% 
+        pull(op_original)
+      
+      run <- tryCatch({
+        do.call(line[[1L]], line[-1L])
+        TRUE
+      },
+      empty_queue = function(err) {
+        FALSE
+      })
+      if (run) {
+        has_run <- TRUE
+      } else {
+        blocked <- TRUE
+      }
+      done <- !between(line_counter, 1L, nrow(ops))
+    }
+    cat("\n")
+    has_run
+  }
+  
+  list(run = run,
+       get_snd_cnt = get_snd_cnt,
+       get_state = function() {
+         list(
+           reg = reg,
+           line_counter = line_counter
+         )
+       })
+}
+
+duet <- function(ops = puzzle_data) {
+  is_deadlock <- FALSE
+  q0 <- queue()
+  q1 <- queue()
+  p0 <- program(ops, q0, q1, 0L)
+  p1 <- program(ops, q1, q0, 1L)
+  while(!is_deadlock) {
+    p0_ran <- p0$run()
+    browser()
+    p1_ran <- p1$run()
+    is_deadlock <- !p0_ran && !p1_ran
+  }
+  p1$get_snd_cnt()
+  
+}
 ```

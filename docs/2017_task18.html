@@ -2028,6 +2028,7 @@ margin-left: 0 !important;
             <ul>
             <li><a href="#part-1" id="toc-part-1"><span class="toc-section-number">2.1</span> Part 1</a></li>
             <li><a href="#part-2" id="toc-part-2"><span class="toc-section-number">2.2</span> Part 2</a></li>
+            <li><a href="#r---version" id="toc-r---version"><span class="toc-section-number">2.3</span> R - Version</a></li>
             </ul></li>
             </ul>
           </div>
@@ -2074,6 +2075,188 @@ padding: revert;
 border: revert;
 }
 </style>
+<script>
+Prism.languages.c = Prism.languages.extend('clike', {
+    'comment': {
+        pattern: /\/\/(?:[^\r\n\\]|\\(?:\r\n?|\n|(?![\r\n])))*|\/\*[\s\S]*?(?:\*\/|$)/,
+        greedy: true
+    },
+    'string': {
+        // https://en.cppreference.com/w/c/language/string_literal
+        pattern: /"(?:\\(?:\r\n|[\s\S])|[^"\\\r\n])*"/,
+        greedy: true
+    },
+    'class-name': {
+        pattern: /(\b(?:enum|struct)\s+(?:__attribute__\s*\(\([\s\S]*?\)\)\s*)?)\w+|\b[a-z]\w*_t\b/,
+        lookbehind: true
+    },
+    'keyword': /\b(?:_Alignas|_Alignof|_Atomic|_Bool|_Complex|_Generic|_Imaginary|_Noreturn|_Static_assert|_Thread_local|__attribute__|asm|auto|break|case|char|const|continue|default|do|double|else|enum|extern|float|for|goto|if|inline|int|long|register|return|short|signed|sizeof|static|struct|switch|typedef|typeof|union|unsigned|void|volatile|while)\b/,
+    'function': /\b[a-z_]\w*(?=\s*\()/i,
+    'number': /(?:\b0x(?:[\da-f]+(?:\.[\da-f]*)?|\.[\da-f]+)(?:p[+-]?\d+)?|(?:\b\d+(?:\.\d*)?|\B\.\d+)(?:e[+-]?\d+)?)[ful]{0,4}/i,
+    'operator': />>=?|<<=?|->|([-+&|:])\1|[?:~]|[-+*/%&|^!=<>]=?/
+});
+
+Prism.languages.insertBefore('c', 'string', {
+    'char': {
+        // https://en.cppreference.com/w/c/language/character_constant
+        pattern: /'(?:\\(?:\r\n|[\s\S])|[^'\\\r\n]){0,32}'/,
+        greedy: true
+    }
+});
+
+Prism.languages.insertBefore('c', 'string', {
+    'macro': {
+        // allow for multiline macro definitions
+        // spaces after the # character compile fine with gcc
+        pattern: /(^[\t ]*)#\s*[a-z](?:[^\r\n\\/]|\/(?!\*)|\/\*(?:[^*]|\*(?!\/))*\*\/|\\(?:\r\n|[\s\S]))*/im,
+        lookbehind: true,
+        greedy: true,
+        alias: 'property',
+        inside: {
+            'string': [
+                {
+                    // highlight the path of the include statement as a string
+                    pattern: /^(#\s*include\s*)<[^>]+>/,
+                    lookbehind: true
+                },
+                Prism.languages.c['string']
+            ],
+            'char': Prism.languages.c['char'],
+            'comment': Prism.languages.c['comment'],
+            'macro-name': [
+                {
+                    pattern: /(^#\s*define\s+)\w+\b(?!\()/i,
+                    lookbehind: true
+                },
+                {
+                    pattern: /(^#\s*define\s+)\w+\b(?=\()/i,
+                    lookbehind: true,
+                    alias: 'function'
+                }
+            ],
+            // highlight macro directives as keywords
+            'directive': {
+                pattern: /^(#\s*)[a-z]+/,
+                lookbehind: true,
+                alias: 'keyword'
+            },
+            'directive-hash': /^#/,
+            'punctuation': /##|\\(?=[\r\n])/,
+            'expression': {
+                pattern: /\S[\s\S]*/,
+                inside: Prism.languages.c
+            }
+        }
+    }
+});
+
+Prism.languages.insertBefore('c', 'function', {
+    // highlight predefined macros as constants
+    'constant': /\b(?:EOF|NULL|SEEK_CUR|SEEK_END|SEEK_SET|__DATE__|__FILE__|__LINE__|__TIMESTAMP__|__TIME__|__func__|stderr|stdin|stdout)\b/
+});
+
+delete Prism.languages.c['boolean'];
+
+(function (Prism) {
+
+    var keyword = /\b(?:alignas|alignof|asm|auto|bool|break|case|catch|char|char16_t|char32_t|char8_t|class|co_await|co_return|co_yield|compl|concept|const|const_cast|consteval|constexpr|constinit|continue|decltype|default|delete|do|double|dynamic_cast|else|enum|explicit|export|extern|final|float|for|friend|goto|if|import|inline|int|int16_t|int32_t|int64_t|int8_t|long|module|mutable|namespace|new|noexcept|nullptr|operator|override|private|protected|public|register|reinterpret_cast|requires|return|short|signed|sizeof|static|static_assert|static_cast|struct|switch|template|this|thread_local|throw|try|typedef|typeid|typename|uint16_t|uint32_t|uint64_t|uint8_t|union|unsigned|using|virtual|void|volatile|wchar_t|while)\b/;
+    var modName = /\b(?!<keyword>)\w+(?:\s*\.\s*\w+)*\b/.source.replace(/<keyword>/g, function () { return keyword.source; });
+
+    Prism.languages.cpp = Prism.languages.extend('c', {
+        'class-name': [
+            {
+                pattern: RegExp(/(\b(?:class|concept|enum|struct|typename)\s+)(?!<keyword>)\w+/.source
+                    .replace(/<keyword>/g, function () { return keyword.source; })),
+                lookbehind: true
+            },
+            // This is intended to capture the class name of method implementations like:
+            //   void foo::bar() const {}
+            // However! The `foo` in the above example could also be a namespace, so we only capture the class name if
+            // it starts with an uppercase letter. This approximation should give decent results.
+            /\b[A-Z]\w*(?=\s*::\s*\w+\s*\()/,
+            // This will capture the class name before destructors like:
+            //   Foo::~Foo() {}
+            /\b[A-Z_]\w*(?=\s*::\s*~\w+\s*\()/i,
+            // This also intends to capture the class name of method implementations but here the class has template
+            // parameters, so it can't be a namespace (until C++ adds generic namespaces).
+            /\b\w+(?=\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\s*::\s*\w+\s*\()/
+        ],
+        'keyword': keyword,
+        'number': {
+            pattern: /(?:\b0b[01']+|\b0x(?:[\da-f']+(?:\.[\da-f']*)?|\.[\da-f']+)(?:p[+-]?[\d']+)?|(?:\b[\d']+(?:\.[\d']*)?|\B\.[\d']+)(?:e[+-]?[\d']+)?)[ful]{0,4}/i,
+            greedy: true
+        },
+        'operator': />>=?|<<=?|->|--|\+\+|&&|\|\||[?:~]|<=>|[-+*/%&|^!=<>]=?|\b(?:and|and_eq|bitand|bitor|not|not_eq|or|or_eq|xor|xor_eq)\b/,
+        'boolean': /\b(?:false|true)\b/
+    });
+
+    Prism.languages.insertBefore('cpp', 'string', {
+        'module': {
+            // https://en.cppreference.com/w/cpp/language/modules
+            pattern: RegExp(
+                /(\b(?:import|module)\s+)/.source +
+                '(?:' +
+                // header-name
+                /"(?:\\(?:\r\n|[\s\S])|[^"\\\r\n])*"|<[^<>\r\n]*>/.source +
+                '|' +
+                // module name or partition or both
+                /<mod-name>(?:\s*:\s*<mod-name>)?|:\s*<mod-name>/.source.replace(/<mod-name>/g, function () { return modName; }) +
+                ')'
+            ),
+            lookbehind: true,
+            greedy: true,
+            inside: {
+                'string': /^[<"][\s\S]+/,
+                'operator': /:/,
+                'punctuation': /\./
+            }
+        },
+        'raw-string': {
+            pattern: /R"([^()\\ ]{0,16})\([\s\S]*?\)\1"/,
+            alias: 'string',
+            greedy: true
+        }
+    });
+
+    Prism.languages.insertBefore('cpp', 'keyword', {
+        'generic-function': {
+            pattern: /\b(?!operator\b)[a-z_]\w*\s*<(?:[^<>]|<[^<>]*>)*>(?=\s*\()/i,
+            inside: {
+                'function': /^\w+/,
+                'generic': {
+                    pattern: /<[\s\S]+/,
+                    alias: 'class-name',
+                    inside: Prism.languages.cpp
+                }
+            }
+        }
+    });
+
+    Prism.languages.insertBefore('cpp', 'operator', {
+        'double-colon': {
+            pattern: /::/,
+            alias: 'punctuation'
+        }
+    });
+
+    Prism.languages.insertBefore('cpp', 'class-name', {
+        // the base clause is an optional list of parent classes
+        // https://en.cppreference.com/w/cpp/language/class
+        'base-clause': {
+            pattern: /(\b(?:class|struct)\s+\w+\s*:\s*)[^;{}"'\s]+(?:\s+[^;{}"'\s]+)*(?=\s*[;{])/,
+            lookbehind: true,
+            greedy: true,
+            inside: Prism.languages.extend('cpp', {})
+        }
+    });
+
+    Prism.languages.insertBefore('inside', 'double-colon', {
+        // All untokenized words that are not namespaces should be class names
+        'class-name': /\b[a-z_]\w*\b(?!\s*::)/i
+    }, Prism.languages.cpp['base-clause']);
+
+}(Prism));
+</script>
 <div id="setup" class="section level1" number="1">
 <h1><span class="header-section-number">1</span> Setup</h1>
 <div id="libraries" class="section level2" number="1.1">
@@ -2084,7 +2267,9 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
-library(kableExtra)</code></pre>
+library(kableExtra)
+library(collections)
+library(bit64)</code></pre>
 </div>
 <div id="retrieve-data-from-aoc" class="section level2" number="1.2">
 <h2><span class="header-section-number">1.2</span> Retrieve Data from <tt>AoC</tt></h2>
@@ -2523,9 +2708,9 @@ rcv a
 <p>We see that lines 1 to 20 form a setup block, where registers are set. We also note, that
 register <code>a</code> equals <code>2 ^ 31 - 1</code>. The sound is set in the loop with the frequency derived
 from the given instructions.</p>
-<p>After the loop end in line 20, we jump <strong>conditionally</strong> on <code>a</code>. Since <code>a</code> is <strong>not</strong> zero
-at this atge, we will <strong>always</strong> continue with line 24 and we eventually hit line 26 which
-will return the frequency set in the loop.</p>
+<p>After the loop ends in line 20, we jump <strong>conditionally</strong> on <code>a</code>. Since <code>a</code> is <strong>not</strong>
+zero at this stage, we will <strong>always</strong> continue with line 24 and we eventually hit line 26
+which will return the frequency set in the loop.</p>
 <p>Thus, all we need to do is to implement the first loop to get the deisred frequency.</p>
 <pre class="r"><code>get_frequency &lt;- function() {
   p &lt;- 464L
@@ -2593,7 +2778,470 @@ Once both of your programs have terminated (regardless of what caused them to do
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
+<p>For part 2, we develop a proper parser, which uses a message queue for the messages to be
+exchanged. Then, we run program <code>0</code> until it blocks, followed by program <code>1</code> until it
+blocks. If program <code>0</code> still blocks we are done, otherwise continue until a state is
+reached where both programs block.</p>
+<p>The <code>R</code> version is slow, hence, as usual, we switched to <code>C++</code>. The <code>R</code> code can be found
+in the appendix.</p>
+<pre class="cpp"><code>#ifndef STANDALONE
+#include &lt;Rcpp.h&gt;
+using namespace Rcpp;
+#else
+#include &lt;iostream&gt;
+#endif
+#include &lt;fstream&gt;
+#include &lt;optional&gt;
+#include &lt;queue&gt;
+#include &lt;sstream&gt;
+#include &lt;string&gt;
+#include &lt;unordered_map&gt;
+#include &lt;vector&gt;
+
+enum class OpCode { SND, RCV, SET, ADD, MUL, MOD, JGZ };
+enum class ParamType { REG, VAL };
+
+class Program;
+
+class Parameter {
+  public:
+    Parameter();
+    Parameter(const std::string&amp;);
+
+    long long operator()(const Program*) const;
+    char operator()() const;
+
+    friend std::ostream&amp; operator&lt;&lt;(std::ostream&amp;, const Parameter&amp;);
+
+  private:
+    ParamType type;
+    long long value;
+    char register_name;
+};
+
+class Instruction {
+  public:
+    Instruction(const std::string&amp;);
+    bool operator()(Program*) const;
+
+    friend std::ostream&amp; operator&lt;&lt;(std::ostream&amp;, const Instruction&amp;);
+
+  private:
+    OpCode opcode;
+    Parameter param1;
+    std::optional&lt;Parameter&gt; param2;
+    static const std::unordered_map&lt;std::string, OpCode&gt; opcode_map;
+
+    static OpCode parse_opcode(const std::string&amp; token);
+};
+
+class Program {
+  public:
+    Program(int, std::vector&lt;Instruction&gt;&amp;, std::queue&lt;long long&gt;&amp;, std::queue&lt;long long&gt;&amp;);
+
+    Program&amp; operator++();
+
+    void set_register(char reg, long long);
+    long long get_register(char) const;
+
+    void send(long long);
+    std::optional&lt;long long&gt; receive();
+
+    void jump(long long);
+
+    bool run();
+
+    long long get_send_count() const;
+
+  private:
+    long long line_count;
+    long long snd_count;
+    std::queue&lt;long long&gt;&amp; rcv_queue;
+    std::queue&lt;long long&gt;&amp; snd_queue;
+    std::vector&lt;Instruction&gt;&amp; instructions;
+    std::unordered_map&lt;char, long long&gt; registers;
+};
+
+Parameter::Parameter()
+    : type(ParamType::VAL)
+    , value(0)
+    , register_name(&#39;\0&#39;) { }
+
+Parameter::Parameter(const std::string&amp; token)
+    : type(ParamType::VAL)
+    , value(0)
+    , register_name(&#39;\0&#39;) {
+  if (std::isdigit(token[0]) || token[0] == &#39;-&#39;) {
+    value = std::stoll(token);
+    type = ParamType::VAL;
+  } else {
+    register_name = token[0];
+    type = ParamType::REG;
+  }
+}
+
+long long Parameter::operator()(const Program* program) const {
+  if (type == ParamType::VAL) {
+    return value;
+  } else {
+    return program-&gt;get_register(register_name);
+  }
+}
+
+char Parameter::operator()() const {
+  return register_name;
+}
+
+std::ostream&amp; operator&lt;&lt;(std::ostream&amp; os, const Parameter&amp; param) {
+  if (param.type == ParamType::VAL) {
+    os &lt;&lt; param.value;
+  } else {
+    os &lt;&lt; param.register_name;
+  }
+  return os;
+}
+
+const std::unordered_map&lt;std::string, OpCode&gt; Instruction::opcode_map = {{&quot;snd&quot;, OpCode::SND},
+                                                                         {&quot;rcv&quot;, OpCode::RCV},
+                                                                         {&quot;set&quot;, OpCode::SET},
+                                                                         {&quot;add&quot;, OpCode::ADD},
+                                                                         {&quot;mul&quot;, OpCode::MUL},
+                                                                         {&quot;mod&quot;, OpCode::MOD},
+                                                                         {&quot;jgz&quot;, OpCode::JGZ}};
+
+Instruction::Instruction(const std::string&amp; line) {
+  std::istringstream iss(line);
+  std::string op_str, p1_str, p2_str;
+  iss &gt;&gt; op_str &gt;&gt; p1_str;
+
+  opcode = parse_opcode(op_str);
+  param1 = Parameter(p1_str);
+
+  if (iss &gt;&gt; p2_str) {
+    param2 = Parameter(p2_str);
+  } else {
+    param2 = std::nullopt;
+  }
+}
+
+bool Instruction::operator()(Program* program) const {
+  bool blocked = false;
+  switch (opcode) {
+  case OpCode::SND:
+    program-&gt;send(param1(program));
+    ++(*program);
+    break;
+  case OpCode::RCV: {
+    auto val = program-&gt;receive();
+    if (val.has_value()) {
+      program-&gt;set_register(param1(), val.value());
+      ++(*program);
+    } else {
+      blocked = true;
+    }
+    break;
+  }
+  case OpCode::SET:
+    program-&gt;set_register(param1(), (*param2)(program));
+    ++(*program);
+    break;
+  case OpCode::ADD:
+    program-&gt;set_register(param1(), param1(program) + (*param2)(program));
+    ++(*program);
+    break;
+  case OpCode::MUL: {
+    program-&gt;set_register(param1(), param1(program) * (*param2)(program));
+    ++(*program);
+    break;
+  }
+  case OpCode::MOD:
+    program-&gt;set_register(param1(), param1(program) % (*param2)(program));
+    ++(*program);
+    break;
+  case OpCode::JGZ:
+    if (param1(program) &gt; 0) {
+      program-&gt;jump((*param2)(program));
+    } else {
+      ++(*program);
+    }
+    break;
+  }
+  return !blocked;
+}
+
+OpCode Instruction::parse_opcode(const std::string&amp; token) {
+  auto it = opcode_map.find(token);
+  return it-&gt;second;
+}
+
+std::ostream&amp; operator&lt;&lt;(std::ostream&amp; os, const Instruction&amp; instr) {
+  std::string key = &quot;NOP&quot;;
+  for (const auto&amp; [k, v] : Instruction::opcode_map) {
+    if (v == instr.opcode) {
+      key = k;
+      break;
+    }
+  }
+  os &lt;&lt; key &lt;&lt; &quot; &quot; &lt;&lt; instr.param1;
+  if (instr.param2.has_value()) {
+    os &lt;&lt; &quot; &quot; &lt;&lt; *instr.param2;
+  }
+  return os;
+}
+
+Program::Program(int id,
+                 std::vector&lt;Instruction&gt;&amp; instrs,
+                 std::queue&lt;long long&gt;&amp; rcv_q,
+                 std::queue&lt;long long&gt;&amp; snd_q)
+    : line_count(0)
+    , snd_count(0)
+    , rcv_queue(rcv_q)
+    , snd_queue(snd_q)
+    , instructions(instrs) {
+  registers = {{&#39;a&#39;, 0}, {&#39;b&#39;, 0}, {&#39;f&#39;, 0}, {&#39;i&#39;, 0}, {&#39;p&#39;, id}};
+}
+
+Program&amp; Program::operator++() {
+  ++line_count;
+  return *this;
+}
+
+void Program::set_register(char reg, long long value) {
+  registers[reg] = value;
+}
+
+long long Program::get_register(char reg) const {
+  auto it = registers.find(reg);
+  if (it != registers.end()) {
+    return it-&gt;second;
+  } else {
+    return 0;
+  }
+}
+
+void Program::send(long long value) {
+  snd_queue.push(value);
+  snd_count++;
+}
+
+std::optional&lt;long long&gt; Program::receive() {
+  if (rcv_queue.empty()) {
+    return std::nullopt;
+  } else {
+    long long value = rcv_queue.front();
+    rcv_queue.pop();
+    return value;
+  }
+}
+
+void Program::jump(long long offset) {
+  line_count += offset;
+}
+
+long long Program::get_send_count() const {
+  return snd_count;
+}
+
+bool Program::run() {
+  bool done = line_count &lt; 0 || line_count &gt;= instructions.size();
+  bool blocked = false;
+  bool has_run = false;
+  while (!done &amp;&amp; !blocked) {
+    Instruction&amp; instr = instructions[line_count];
+    bool success = instr(this);
+    blocked = !success;
+    has_run = has_run || success;
+    done = line_count &lt; 0 || line_count &gt;= instructions.size();
+  }
+  return has_run;
+}
+
+long long get_send_count(const std::vector&lt;std::string&gt;&amp; instruction_lines) {
+  std::vector&lt;Instruction&gt; instructions;
+  for (const auto&amp; line : instruction_lines) {
+    instructions.emplace_back(line);
+  }
+
+  std::queue&lt;long long&gt; queue_0_to_1;
+  std::queue&lt;long long&gt; queue_1_to_0;
+
+  Program p0(0, instructions, queue_1_to_0, queue_0_to_1);
+  Program p1(1, instructions, queue_0_to_1, queue_1_to_0);
+
+  bool prog0_ran = true;
+  bool prog1_ran = true;
+
+  while (prog0_ran || prog1_ran) {
+    prog0_ran = p0.run();
+    prog1_ran = p1.run();
+  }
+
+  return p1.get_send_count();
+}
+
+#ifndef STANDALONE
+// [[Rcpp::export]]
+long long get_send_count(const CharacterVector&amp; instruction_lines) {
+  return get_send_count(as&lt;std::vector&lt;std::string&gt;&gt;(instruction_lines));
+}
+
+#else
+int main() {
+  // program 1 sends 6 messages
+  std::vector&lt;std::string&gt; instructions = {&quot;add p 1&quot;,
+                                           &quot;mod p 2&quot;,
+                                           &quot;mul p 5&quot;,
+                                           &quot;snd p&quot;,
+                                           &quot;rcv a&quot;,
+                                           &quot;jgz a 3&quot;,
+                                           &quot;rcv b&quot;,
+                                           &quot;jgz 1 -1&quot;,
+                                           &quot;snd a&quot;,
+                                           &quot;add a -1&quot;,
+                                           &quot;jgz a -2&quot;,
+                                           &quot;rcv b&quot;,
+                                           &quot;jgz 1 -2&quot;};
+  std::cout &lt;&lt; get_send_count(instructions) &lt;&lt; std::endl;
+}
+#endif</code></pre>
+<pre class="r"><code>get_send_count(puzzle_data %&gt;% 
+                 pull(op_original))</code></pre>
+<pre><code>## [1] 5969</code></pre>
 </div>
+</div>
+<div id="r---version" class="section level2" number="2.3">
+<h2><span class="header-section-number">2.3</span> R - Version</h2>
+<pre class="r"><code>program &lt;- function(ops, rcv_queue, snd_queue, p) {
+  me &lt;- paste0(&quot;[P&quot;, p, &quot;]&quot;)
+  reg &lt;- c(0, 0, 0, 0, as.integer(p)) %&gt;% 
+    as.integer64() %&gt;% 
+    set_names(c(&quot;a&quot;, &quot;b&quot;, &quot;f&quot;, &quot;i&quot;, &quot;p&quot;))
+  line_counter &lt;- 1L
+  snd_counter &lt;- 0L
+  empty_queue &lt;- structure(list(
+    message = paste(&quot;Queue for program&quot;, p, &quot;is empty&quot;),
+    call = NULL),
+    class = c(&quot;empty_queue&quot;, &quot;error&quot;, &quot;condition&quot;))
+  
+  val &lt;- function(arg, set = FALSE) {
+    val &lt;- as.integer(arg) %&gt;% 
+      suppressWarnings()
+    if (set) {
+      stopifnot(&quot;Cannot use a number to save results&quot; = is.na(val),
+                &quot;Unknown register name&quot; = arg %in% names(reg))
+      arg
+    } else {
+      if (is.na(val)) {
+        reg[arg]
+      } else {
+        val        
+      }
+    }
+  }
+  set &lt;- function(arg1, arg2, ...) {
+    reg[val(arg1, TRUE)] &lt;&lt;- val(arg2)
+    line_counter &lt;&lt;- line_counter + 1L
+  }
+  
+  add &lt;- function(arg1, arg2, ...) {
+    reg[val(arg1, TRUE)] &lt;&lt;- reg[val(arg1, TRUE)] + val(arg2)
+    line_counter &lt;&lt;- line_counter + 1L
+  }
+  
+  mul &lt;- function(arg1, arg2, ...) {
+    reg[val(arg1, TRUE)] &lt;&lt;- reg[val(arg1, TRUE)] * val(arg2)
+    line_counter &lt;&lt;- line_counter + 1L
+  }
+  
+  mod &lt;- function(arg1, arg2, ...) {
+    reg[val(arg1, TRUE)] &lt;&lt;- reg[val(arg1, TRUE)] %% val(arg2)
+    line_counter &lt;&lt;- line_counter + 1L
+  }
+  
+  jgz &lt;- function(arg1, arg2, ...) {
+    if (val(arg1) &gt; 0L) {
+      line_counter &lt;&lt;- line_counter + as.integer(val(arg2))
+    } else {
+      line_counter &lt;&lt;- line_counter + 1L
+    }
+  }
+  
+  snd &lt;- function(arg1, ...) {
+    cat(me, &quot;: Send msg #&quot;, snd_counter, &quot;\r&quot;, sep = &quot;&quot;)
+    snd_queue$push(val(arg1))
+    snd_counter &lt;&lt;- snd_counter + 1L
+    line_counter &lt;&lt;- line_counter + 1L
+  }
+  
+  rcv &lt;- function(arg1, ...) {
+    if (rcv_queue$size() == 0L) {
+      signalCondition(empty_queue)
+    } else {
+      reg[val(arg1, TRUE)] &lt;&lt;- rcv_queue$pop()
+      line_counter &lt;&lt;- line_counter + 1L
+    }
+  }
+  
+  get_snd_cnt &lt;- function() {
+    snd_counter
+  }
+  
+  run &lt;- function() {
+    done &lt;- !between(line_counter, 1L, nrow(ops))
+    blocked &lt;- FALSE
+    has_run &lt;- FALSE
+    while (!done &amp;&amp; !blocked) {
+      line &lt;- ops %&gt;% 
+        slice(line_counter) %&gt;% 
+        select(op:arg2) %&gt;% 
+        as.list()
+      op_orig &lt;- ops %&gt;% 
+        slice(line_counter) %&gt;% 
+        pull(op_original)
+      
+      run &lt;- tryCatch({
+        do.call(line[[1L]], line[-1L])
+        TRUE
+      },
+      empty_queue = function(err) {
+        FALSE
+      })
+      if (run) {
+        has_run &lt;- TRUE
+      } else {
+        blocked &lt;- TRUE
+      }
+      done &lt;- !between(line_counter, 1L, nrow(ops))
+    }
+    cat(&quot;\n&quot;)
+    has_run
+  }
+  
+  list(run = run,
+       get_snd_cnt = get_snd_cnt,
+       get_state = function() {
+         list(
+           reg = reg,
+           line_counter = line_counter
+         )
+       })
+}
+
+duet &lt;- function(ops = puzzle_data) {
+  is_deadlock &lt;- FALSE
+  q0 &lt;- queue()
+  q1 &lt;- queue()
+  p0 &lt;- program(ops, q0, q1, 0L)
+  p1 &lt;- program(ops, q1, q0, 1L)
+  while(!is_deadlock) {
+    p0_ran &lt;- p0$run()
+    browser()
+    p1_ran &lt;- p1$run()
+    is_deadlock &lt;- !p0_ran &amp;&amp; !p1_ran
+  }
+  p1$get_snd_cnt()
+  
+}</code></pre>
 </div>
 </div>
 </div>
