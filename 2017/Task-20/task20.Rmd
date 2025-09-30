@@ -125,84 +125,41 @@ cat(puzzle[[1]])
 
 ### Solution
 
-The first part can be solved with some bsic geometry. The position of each particle after
-$i$ ticks is
+We solve the first puzzle with some basic geometry. Let the position of a particle $i$ at 
+tick $k$ be denoted by $\vec p_i ^{(k)} \in \mathbb{Z}^3$, its velocity and acceleration 
+by $\vec{v}_i^{(k)}$ and $\vec{a}_i$ respectively. The velocity increases each tick and 
+its value can be determined by the following formula:
 
 $$
-\begin{pmatrix}
-x^i_j \\ y^i_j \\ z^i_j
-\end{pmatrix} =
-\begin{pmatrix}
-x^i_0 \\ y^i_0 \\ z^i_0
-\end{pmatrix} +
-\begin{pmatrix}
-v^i_x \\ v^i_y \\ v^i_z
-\end{pmatrix} +
-j\cdot\begin{pmatrix}
-a^i_x \\ a^i_y \\ a^i_z
-\end{pmatrix}
+\vec{v}_i^{(k)} = \vec{v}_i^{(k-1)} + \vec a_i = \left(\vec{v}_i^{(k - 2)} + 
+\vec a_i\right) + \vec{a}_i = \ldots = \vec v_i ^{(0)} + k\cdot\vec a_i
 $$
-
-where $\vec x^i_j$ describes the position of the $i$-th particle after $j$ clicks, 
-$\vec x^i_0$ the initial position of this particle and $\vec v^i$ and $\vec a^i$ the 
-velocity and acceleration respectively.
-
-For each $i$ we want to find the index $\hat j_i$, where the Euclidian distance to the 
-origin is minimal, that is 
-
-$$
-\hat j_i =\min_j \sqrt{(x_j^i) ^2 + (y_j^i) ^2 + (z_j^i) ^2} 
-$$
-Then, we want to get the maximum of the rounded up $\hat j_i$ values:
-
-$$
-\hat j = \max_i\left\lceil \hat j_i \right\rceil
-$$
-$\hat j$ describes the maximum time that has to pass until the last particle comes closest
-to the origin. After $\hat j$ ticks **all** particles move further away from the origin.
-
-The particle which is the closest to the origin at this time point is eventually the 
-particle which stays the closest to the origin.
-
-To get $\hat j_i$ we simply take the derivative and set it to zero and solve for `j`. 
-
-
-*N.B.* For the sake of simplicity, we solve the derivative without the square root:
-
-
+The position on the other hand can be written as:
 \begin{align}
-f_i(j) &= (x_j^i) ^2 + (y_j^i) ^2 + (z_j^i) ^2 \\
-&= (\underbrace{x_0^i + v_x^i}_{=:\tilde x^i} + j\cdot a_x^i)^2 + 
-(\underbrace{y_0^i + v_y^i}_{=:\tilde y^i} + j\cdot a_y^i)^2 + 
-(\underbrace{z_0^i + v_z^i}_{=:\tilde z^i} + j\cdot a_z^i)^2\\
-f_i'(j) &= 2a_x^i\left(\tilde x^i + j\cdot a_x^i\right) +
-         2a_y^i\left(\tilde y^i + j\cdot a_y^i\right) +
-         2a_z^i\left(\tilde z^i + j\cdot a_z^i\right) \\
-&= 2a_x^i\tilde x^i + 2a_y^i\tilde y^i + 2a_z^i\tilde z^i +
-2j\left(\left(a_x^i\right)^2 + \left(a_y^i\right)^2 + \left(a_z^i\right)^2 \right)
-\stackrel{!}{=} 0 \\
-\hat j_i &= - \frac{a_x^i\tilde x^i + a_y^i\tilde y^i + 
-a_z^i\tilde z^i}{\left(a_x^i\right)^2 + \left(a_y^i\right)^2 + \left(a_z^i\right)^2}
-
+\vec p_i ^{(k)} & = \vec p_i ^{(k - 1)} + \vec{v}_i^{(k-1)}\\ 
+& = \left(\vec p_i ^{(k - 2)} + \vec{v}_i^{(k-2)}\right) + \vec{v}_i^{(k-1)} \\
+& = \cdots \\
+& = \vec p_i ^{(0)} + \sum_{j = 1}^{k}\vec{v}_i^{(j)} \\
+& = \vec p_i ^{(0)} + \sum_{j = 1}^{k}\left( \vec v_i ^{(0)} + j\cdot\vec a_i \right) \\
+& = \vec p_i ^{(0)} + k \cdot \vec v_i ^{(0)} + \left(k + 1\right) 
+\frac{k}{2} \cdot \vec a_i
 \end{align}
+
+The particle which is evntually the closest to the origin, is the one with the lowest
+acceleration (i.e. $\min_i \|\vec a_i\|_\infty$), in case of a tie, the one with the 
+lowest initial speed (i.e. $\min_i \|\vec v_i^{(0)}\|_\infty$) and in case of another tie 
+the one which was originally the furtherst away from the origin 
+(i.e. $\max_i \|\vec p_i^{(0)}\|_\infty$).
 
 ```{r get-solution-1}
 find_closest <- function(speeds = puzzle_data) {
-  speeds <- speeds %>% 
-    mutate(
-      id = 1:n() - 1L,
-      x0t = x0 + vx,
-      y0t = y0 + vy,
-      z0t = z0 + vz,
-      j_min = ceiling(-(ax * x0t - ay * y0t - az * z0t) / (ax ^ 2 + ay ^ 2 + az ^ 2)))
-  
-  j <- speeds %>% 
-    filter(j_min == max(j_min)) %>% 
-    pull(j_min)
-  
   speeds %>% 
-    mutate(dist = abs(x0t + j * ax) + abs(y0t + j * ay) + abs(z0t + j * az)) %>%
-    filter(dist == min(dist)) %>% 
+    mutate(initial_acc = abs(ax) + abs(ay) + abs(az),
+           initial_spe = abs(vx) + abs(vy) + abs(vz),
+           initial_dis = abs(x0) + abs(y0) + abs(z0)) %>% 
+    mutate(id = 1:n() - 1L) %>% 
+    arrange(initial_acc, initial_spe, desc(initial_dis)) %>% 
+    slice(1L) %>% 
     pull(id)
 }
 find_closest(puzzle_data)
@@ -218,80 +175,107 @@ cat(puzzle[[2]])
 
 ### Solution
 
-To detect a collision we need to see if this equation has a solution:
+A collision between particles $m$ and $n$ happens if
 
 $$
-\begin{pmatrix}
-x^i_j \\ y^i_j \\ z^i_j
-\end{pmatrix} = 
-\begin{pmatrix}
-x^k_j \\ y^k_j \\ z^k_j
-\end{pmatrix}
+\exists \hat k \in \mathbb{N}: \vec p_m ^{(0)} + \hat k \cdot \vec v_m ^{(0)} + 
+\left(\hat k + 1\right) 
+\frac{\hat k}{2} \cdot \vec a_m = 
+\vec p_n ^{(0)} + \hat k \cdot \vec v_n ^{(0)} + 
+\left(\hat k + 1\right) 
+\frac{\hat k}{2} \cdot \vec a_n
 $$
-for all pairs $1\leq i < k \leq n$, which can be written as:
-\begin{align}
-x_0^i + v_x^i + j\cdot a_x ^i &= x_0^k + v_x^k + j\cdot a_x ^k\\
-y_0^i + v_y^i + j\cdot a_y ^i &= y_0^k + v_y^k + j\cdot a_y ^k\\
-z_0^i + v_z^i + j\cdot a_z ^i &= z_0^k + v_z^k + j\cdot a_z ^k\\
-\tilde x^i + j\cdot a_x ^i &= \tilde x^k + j\cdot a_x ^k\\
-\tilde y^i + j\cdot a_y ^i &= \tilde y^k + j\cdot a_y ^k\\
-\tilde z^i + j\cdot a_z ^i &= \tilde z^k + j\cdot a_z ^k\\
-j &= \frac{\tilde x^k - \tilde x^i}{a_x^i - a_x^k}\\
-j &= \frac{\tilde y^k - \tilde y^i}{a_y^i - a_y^k}\\
-j &= \frac{\tilde z^k - \tilde z^i}{a_z^i - a_z^k}
-\end{align}
+Rearranging this equality yields:
 
+\begin{equation}
+\underbrace{\left(\frac{1}{2}\vec a_m - \frac{1}{2}\vec a_n\right)}_{=:a} \cdot \hat 
+k ^2 + 
+\underbrace{\left(\vec v_m ^{(0)} + \frac{1}{2}\vec a_m - 
+\vec v_n ^{(0)} - \frac{1}{2}\vec a_n\right)}_{=:b} \cdot \hat k + 
+\underbrace{\left(\vec p_m ^{(0)} - \vec p_n ^{(0)}\right)}_{=:c} = 0\\
+a\hat k^2 + b\hat k + c = 0
+\end{equation}
+which is a quadratic equation with the following solutions in 
+$\hat k_{1,2} \in \mathbb{R}$:
 
+$$
+\hat k_{1,2} = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+$$
+If such a $\hat k$ exists (it does if $b^2 - 4ac \geq 0$) and it is a natural number, i.e.
+$\hat k \in \mathbb{N}$ and it is the same for all 3 dimensions we have a collision.
 
-```{r get-solution-2}
-does_collide <- function(p1, p2) {
-  i_coord <- c(p1 %>% pull(x0t),
-               p1 %>% pull(y0t),
-               p1 %>% pull(z0t))
-  k_coord <- c(p2 %>% pull(x0t),
-              p2 %>% pull(y0t),
-              p2 %>% pull(z0t))
-  i_a <- c(p1 %>% pull(ax),
-           p1 %>% pull(ay),
-           p1 %>% pull(az))
-  k_a <- c(p2 %>% pull(ax),
-           p2 %>% pull(ay),
-           p2 %>% pull(az))
-  res <- TRUE
-  diff_coord <- k_coord - i_coord
-  diff_a <- i_a - k_a
-  if (all(diff_a) == 0) {
-    return (all(diff_coord) == 0)
-  } else if (any(diff_a) == 0) {
-    return (FALSE)
+Thus, the algorithm needs to check all pairs $1\leq n < m \leq I$ where $I$ describes the 
+number of particles in the puzzle input and count all distinct $n$ where there is at least 
+one collision.
+
+```{r get nr-particles, echo = FALSE}
+I <- nrow(puzzle_data)
+```
+
+There are at most $(I ^ 2 - I) / 2$ such comparisons, for our input that equals to 
+`r format((I ^ 2 - I) / 2, scientific = FALSE, big.mark = ".", decimal.mark = ",")`.
+To gain some speed, we remove colliding particles upon first collision detection. 
+
+```{r get-solution-2, cache = TRUE}
+is_integer <- function(x, tol = .Machine$double.eps) {
+  abs(x - round(x)) <= tol
+}
+
+does_collide <- function(p0_1, v0_1, a_1, p0_2, v0_2, a_2, tol = .Machine$double.eps) {
+  a <- 1 / 2 * (a_1 - a_2)
+  b <- v0_1 + a_1 / 2 - v0_2 - a_2 / 2
+  c <- p0_1 - p0_2
+  D <- b ^ 2 - 4 * a * c
+  no_sol <- D < 0
+  if (any(no_sol)) {
+    FALSE
   } else {
-    unique(diff_coord / diff_a) %>% 
-      length() %>% 
-      equals(1L)
+    k1 <- (-b + sqrt(D)) / (2 * a)
+    k2 <- (-b - sqrt(D)) / (2 * a)
+    no_quadratic <- abs(a) <= tol
+    k1[no_quadratic] <- k2[no_quadratic] <- (- c / b)[no_quadratic]
+    no_const <- abs(b) <= tol
+    k1[no_quadratic & no_const] <- k2[no_quadratic & no_const] <- 0  
+    all_zero <- no_quadratic & no_const & (abs(c) <= tol)
+    k1[all_zero] <- k2[all_zero] <- 0
+    sol1 <- c(k1[1L], k2[1L])
+    sol2 <- c(k1[2L], k2[2L])
+    sol3 <- c(k1[3L], k2[3L])
+    cand_sol <- intersect(sol1, sol2) %>% 
+      intersect(sol3) %>% 
+      keep(is_integer)
+    length(cand_sol) > 0L
   }
 }
-count_collisions <- function(speeds) {
+
+count_collisions <- function(speeds, tol = .Machine$double.eps) {
   speeds <- speeds %>% 
-    mutate(
-      x0t = x0 + vx,
-      y0t = y0 + vy,
-      z0t = z0 + vz) %>% 
-    split(1:nrow(speeds)) 
+    split(1:nrow(speeds)) %>% 
+    map(function(.x) {
+      l <- as.list(.x)
+      list(c(l$x0, l$y0, l$z0),
+           c(l$vx, l$vy, l$vz),
+           c(l$ax, l$ay, l$az))
+    })
   n <- length(speeds)
-  discard <- rep(FALSE, n)
+  collided <- rep(FALSE, n)
   i <- 1L
   while (i != n) {
-    cat("\nTesting colliding with particle", i, "\n")
-    nbs <- setdiff(which(!discard & seq_along(discard) > i), i)
+    nbs <- which(!collided & seq_along(collided) > i)
     for (j in nbs) {
-      cat("vs", j, "\r")
-      if (does_collide(speeds[[i]], speeds[[j]])) {
-        discard[j] <- TRUE
+      args <- c(speeds[[i]], speeds[[j]]) %>% 
+        set_names(c("p0_1", "v0_1", "a_1", "p0_2", "v0_2", "a_2")) %>% 
+        as.list()
+      args$tol <- tol
+      if (do.call(does_collide, args)) {
+        collided[c(i, j)] <- TRUE
       }
     }
-    i <- max(c(i + 1L, which(!discard)[1L]))
+    i <- max(c(i + 1L, which(!collided)[1L]))
   }
-  discard
+  sum(collided)
 }
-l <- count_collisions(puzzle_data) 
+
+nrow(puzzle_data) - 
+  count_collisions(puzzle_data)
 ```

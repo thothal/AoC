@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-09-29" />
+        <meta name="date" content="2025-10-01" />
     
     <title>Task 20   </title>
 
@@ -1821,7 +1821,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-09-29</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-10-01</p>
            
 
    
@@ -1956,71 +1956,37 @@ At this point, particle <code>1</code> will never be closer to <code>&lt;0,0,0&g
 </div>
 <div id="solution" class="section level3" number="2.1.2">
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
-<p>The first part can be solved with some bsic geometry. The position of each particle after
-<span class="math inline">\(i\)</span> ticks is</p>
+<p>We solve the first puzzle with some basic geometry. Let the position of a particle <span class="math inline">\(i\)</span> at
+tick <span class="math inline">\(k\)</span> be denoted by <span class="math inline">\(\vec p_i ^{(k)} \in \mathbb{Z}^3\)</span>, its velocity and acceleration
+by <span class="math inline">\(\vec{v}_i^{(k)}\)</span> and <span class="math inline">\(\vec{a}_i\)</span> respectively. The velocity increases each tick and
+its value can be determined by the following formula:</p>
 <p><span class="math display">\[
-\begin{pmatrix}
-x^i_j \\ y^i_j \\ z^i_j
-\end{pmatrix} =
-\begin{pmatrix}
-x^i_0 \\ y^i_0 \\ z^i_0
-\end{pmatrix} +
-\begin{pmatrix}
-v^i_x \\ v^i_y \\ v^i_z
-\end{pmatrix} +
-j\cdot\begin{pmatrix}
-a^i_x \\ a^i_y \\ a^i_z
-\end{pmatrix}
-\]</span></p>
-<p>where <span class="math inline">\(\vec x^i_j\)</span> describes the position of the <span class="math inline">\(i\)</span>-th particle after <span class="math inline">\(j\)</span> clicks,
-<span class="math inline">\(\vec x^i_0\)</span> the initial position of this particle and <span class="math inline">\(\vec v^i\)</span> and <span class="math inline">\(\vec a^i\)</span> the
-velocity and acceleration respectively.</p>
-<p>For each <span class="math inline">\(i\)</span> we want to find the index <span class="math inline">\(\hat j_i\)</span>, where the Euclidian distance to the
-origin is minimal, that is</p>
-<p><span class="math display">\[
-\hat j_i =\min_j \sqrt{(x_j^i) ^2 + (y_j^i) ^2 + (z_j^i) ^2}
+\vec{v}_i^{(k)} = \vec{v}_i^{(k-1)} + \vec a_i = \left(\vec{v}_i^{(k - 2)} +
+\vec a_i\right) + \vec{a}_i = \ldots = \vec v_i ^{(0)} + k\cdot\vec a_i
 \]</span>
-Then, we want to get the maximum of the rounded up <span class="math inline">\(\hat j_i\)</span> values:</p>
-<p><span class="math display">\[
-\hat j = \max_i\left\lceil \hat j_i \right\rceil
-\]</span>
-<span class="math inline">\(\hat j\)</span> describes the maximum time that has to pass until the last particle comes closest
-to the origin. After <span class="math inline">\(\hat j\)</span> ticks <strong>all</strong> particles move further away from the origin.</p>
-<p>The particle which is the closest to the origin at this time point is eventually the
-particle which stays the closest to the origin.</p>
-<p>To get <span class="math inline">\(\hat j_i\)</span> we simply take the derivative and set it to zero and solve for <code>j</code>.</p>
-<p><em>N.B.</em> For the sake of simplicity, we solve the derivative without the square root:</p>
-<p><span class="math display">\[\begin{align}
-f_i(j) &amp;= (x_j^i) ^2 + (y_j^i) ^2 + (z_j^i) ^2 \\
-&amp;= (\underbrace{x_0^i + v_x^i}_{=:\tilde x^i} + j\cdot a_x^i)^2 +
-(\underbrace{y_0^i + v_y^i}_{=:\tilde y^i} + j\cdot a_y^i)^2 +
-(\underbrace{z_0^i + v_z^i}_{=:\tilde z^i} + j\cdot a_z^i)^2\\
-f_i&#39;(j) &amp;= 2a_x^i\left(\tilde x^i + j\cdot a_x^i\right) +
-         2a_y^i\left(\tilde y^i + j\cdot a_y^i\right) +
-         2a_z^i\left(\tilde z^i + j\cdot a_z^i\right) \\
-&amp;= 2a_x^i\tilde x^i + 2a_y^i\tilde y^i + 2a_z^i\tilde z^i +
-2j\left(\left(a_x^i\right)^2 + \left(a_y^i\right)^2 + \left(a_z^i\right)^2 \right)
-\stackrel{!}{=} 0 \\
-\hat j_i &amp;= - \frac{a_x^i\tilde x^i + a_y^i\tilde y^i +
-a_z^i\tilde z^i}{\left(a_x^i\right)^2 + \left(a_y^i\right)^2 + \left(a_z^i\right)^2}
-
+The position on the other hand can be written as:
+<span class="math display">\[\begin{align}
+\vec p_i ^{(k)} &amp; = \vec p_i ^{(k - 1)} + \vec{v}_i^{(k-1)}\\
+&amp; = \left(\vec p_i ^{(k - 2)} + \vec{v}_i^{(k-2)}\right) + \vec{v}_i^{(k-1)} \\
+&amp; = \cdots \\
+&amp; = \vec p_i ^{(0)} + \sum_{j = 1}^{k}\vec{v}_i^{(j)} \\
+&amp; = \vec p_i ^{(0)} + \sum_{j = 1}^{k}\left( \vec v_i ^{(0)} + j\cdot\vec a_i \right) \\
+&amp; = \vec p_i ^{(0)} + k \cdot \vec v_i ^{(0)} + \left(k + 1\right)
+\frac{k}{2} \cdot \vec a_i
 \end{align}\]</span></p>
+<p>The particle which is evntually the closest to the origin, is the one with the lowest
+acceleration (i.e. <span class="math inline">\(\min_i \|\vec a_i\|_\infty\)</span>), in case of a tie, the one with the
+lowest initial speed (i.e. <span class="math inline">\(\min_i \|\vec v_i^{(0)}\|_\infty\)</span>) and in case of another tie
+the one which was originally the furtherst away from the origin
+(i.e. <span class="math inline">\(\max_i \|\vec p_i^{(0)}\|_\infty\)</span>).</p>
 <pre class="r"><code>find_closest &lt;- function(speeds = puzzle_data) {
-  speeds &lt;- speeds %&gt;% 
-    mutate(
-      id = 1:n() - 1L,
-      x0t = x0 + vx,
-      y0t = y0 + vy,
-      z0t = z0 + vz,
-      j_min = ceiling(-(ax * x0t - ay * y0t - az * z0t) / (ax ^ 2 + ay ^ 2 + az ^ 2)))
-  
-  j &lt;- speeds %&gt;% 
-    filter(j_min == max(j_min)) %&gt;% 
-    pull(j_min)
-  
   speeds %&gt;% 
-    mutate(dist = abs(x0t + j * ax) + abs(y0t + j * ay) + abs(z0t + j * az)) %&gt;%
-    filter(dist == min(dist)) %&gt;% 
+    mutate(initial_acc = abs(ax) + abs(ay) + abs(az),
+           initial_spe = abs(vx) + abs(vy) + abs(vz),
+           initial_dis = abs(x0) + abs(y0) + abs(z0)) %&gt;% 
+    mutate(id = 1:n() - 1L) %&gt;% 
+    arrange(initial_acc, initial_spe, desc(initial_dis)) %&gt;% 
+    slice(1L) %&gt;% 
     pull(id)
 }
 find_closest(puzzle_data)</code></pre>
@@ -2071,27 +2037,99 @@ In this example, particles <code>0</code>, <code>1</code>, and <code>2</code> ar
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
-<p>To detect a collision we need to see if this equation has a solution:</p>
+<p>A collision between particles <span class="math inline">\(m\)</span> and <span class="math inline">\(n\)</span> happens if</p>
 <p><span class="math display">\[
-\begin{pmatrix}
-x^i_j \\ y^i_j \\ z^i_j
-\end{pmatrix} =
-\begin{pmatrix}
-x^k_j \\ y^k_j \\ z^k_j
-\end{pmatrix}
+\exists \hat k \in \mathbb{N}: \vec p_m ^{(0)} + \hat k \cdot \vec v_m ^{(0)} +
+\left(\hat k + 1\right)
+\frac{\hat k}{2} \cdot \vec a_m =
+\vec p_n ^{(0)} + \hat k \cdot \vec v_n ^{(0)} +
+\left(\hat k + 1\right)
+\frac{\hat k}{2} \cdot \vec a_n
 \]</span>
-for all pairs <span class="math inline">\(1\leq i &lt; k \leq n\)</span>, which can be written as:
-<span class="math display">\[\begin{align}
-x_0^i + v_x^i + j\cdot a_x ^i &amp;= x_0^k + v_x^k + j\cdot a_x ^k\\
-y_0^i + v_y^i + j\cdot a_y ^i &amp;= y_0^k + v_y^k + j\cdot a_y ^k\\
-z_0^i + v_z^i + j\cdot a_z ^i &amp;= z_0^k + v_z^k + j\cdot a_z ^k\\
-\tilde x^i + j\cdot a_x ^i &amp;= \tilde x^k + j\cdot a_x ^k\\
-\tilde y^i + j\cdot a_y ^i &amp;= \tilde y^k + j\cdot a_y ^k\\
-\tilde z^i + j\cdot a_z ^i &amp;= \tilde z^k + j\cdot a_z ^k\\
-j &amp;= \frac{\tilde x^k - \tilde x^i}{a_x^i - a_x^k}\\
-j &amp;= \frac{\tilde y^k - \tilde y^i}{a_y^i - a_y^k}\\
-j &amp;= \frac{\tilde z^k - \tilde z^i}{a_z^i - a_z^k}
-\end{align}\]</span></p>
+Rearranging this equality yields:</p>
+<p><span class="math display">\[\begin{equation}
+\underbrace{\left(\frac{1}{2}\vec a_m - \frac{1}{2}\vec a_n\right)}_{=:a} \cdot \hat
+k ^2 +
+\underbrace{\left(\vec v_m ^{(0)} + \frac{1}{2}\vec a_m -
+\vec v_n ^{(0)} - \frac{1}{2}\vec a_n\right)}_{=:b} \cdot \hat k +
+\underbrace{\left(\vec p_m ^{(0)} - \vec p_n ^{(0)}\right)}_{=:c} = 0\\
+a\hat k^2 + b\hat k + c = 0
+\end{equation}\]</span>
+which is a quadratic equation with the following solutions in
+<span class="math inline">\(\hat k_{1,2} \in \mathbb{R}\)</span>:</p>
+<p><span class="math display">\[
+\hat k_{1,2} = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+\]</span>
+If such a <span class="math inline">\(\hat k\)</span> exists (it does if <span class="math inline">\(b^2 - 4ac \geq 0\)</span>) and it is a natural number, i.e.
+<span class="math inline">\(\hat k \in \mathbb{N}\)</span> and it is the same for all 3 dimensions we have a collision.</p>
+<p>Thus, the algorithm needs to check all pairs <span class="math inline">\(1\leq n &lt; m \leq I\)</span> where <span class="math inline">\(I\)</span> describes the
+number of particles in the puzzle input and count all distinct <span class="math inline">\(n\)</span> where there is at least
+one collision.</p>
+<p>There are at most <span class="math inline">\((I ^ 2 - I) / 2\)</span> such comparisons, for our input that equals to
+499.500.
+To gain some speed, we remove colliding particles upon first collision detection.</p>
+<pre class="r"><code>is_integer &lt;- function(x, tol = .Machine$double.eps) {
+  abs(x - round(x)) &lt;= tol
+}
+
+does_collide &lt;- function(p0_1, v0_1, a_1, p0_2, v0_2, a_2, tol = .Machine$double.eps) {
+  a &lt;- 1 / 2 * (a_1 - a_2)
+  b &lt;- v0_1 + a_1 / 2 - v0_2 - a_2 / 2
+  c &lt;- p0_1 - p0_2
+  D &lt;- b ^ 2 - 4 * a * c
+  no_sol &lt;- D &lt; 0
+  if (any(no_sol)) {
+    FALSE
+  } else {
+    k1 &lt;- (-b + sqrt(D)) / (2 * a)
+    k2 &lt;- (-b - sqrt(D)) / (2 * a)
+    no_quadratic &lt;- abs(a) &lt;= tol
+    k1[no_quadratic] &lt;- k2[no_quadratic] &lt;- (- c / b)[no_quadratic]
+    no_const &lt;- abs(b) &lt;= tol
+    k1[no_quadratic &amp; no_const] &lt;- k2[no_quadratic &amp; no_const] &lt;- 0  
+    all_zero &lt;- no_quadratic &amp; no_const &amp; (abs(c) &lt;= tol)
+    k1[all_zero] &lt;- k2[all_zero] &lt;- 0
+    sol1 &lt;- c(k1[1L], k2[1L])
+    sol2 &lt;- c(k1[2L], k2[2L])
+    sol3 &lt;- c(k1[3L], k2[3L])
+    cand_sol &lt;- intersect(sol1, sol2) %&gt;% 
+      intersect(sol3) %&gt;% 
+      keep(is_integer)
+    length(cand_sol) &gt; 0L
+  }
+}
+
+count_collisions &lt;- function(speeds, tol = .Machine$double.eps) {
+  speeds &lt;- speeds %&gt;% 
+    split(1:nrow(speeds)) %&gt;% 
+    map(function(.x) {
+      l &lt;- as.list(.x)
+      list(c(l$x0, l$y0, l$z0),
+           c(l$vx, l$vy, l$vz),
+           c(l$ax, l$ay, l$az))
+    })
+  n &lt;- length(speeds)
+  collided &lt;- rep(FALSE, n)
+  i &lt;- 1L
+  while (i != n) {
+    nbs &lt;- which(!collided &amp; seq_along(collided) &gt; i)
+    for (j in nbs) {
+      args &lt;- c(speeds[[i]], speeds[[j]]) %&gt;% 
+        set_names(c(&quot;p0_1&quot;, &quot;v0_1&quot;, &quot;a_1&quot;, &quot;p0_2&quot;, &quot;v0_2&quot;, &quot;a_2&quot;)) %&gt;% 
+        as.list()
+      args$tol &lt;- tol
+      if (do.call(does_collide, args)) {
+        collided[c(i, j)] &lt;- TRUE
+      }
+    }
+    i &lt;- max(c(i + 1L, which(!collided)[1L]))
+  }
+  sum(collided)
+}
+
+nrow(puzzle_data) - 
+  count_collisions(puzzle_data)</code></pre>
+<pre><code>## [1] 648</code></pre>
 </div>
 </div>
 </div>
