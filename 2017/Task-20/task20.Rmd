@@ -1,0 +1,281 @@
+---
+params:
+   task_nr: 20
+   year: 2017
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_extract_all("-?\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c(paste0(letters[24:26], "0"),
+                   paste0("v", letters[24:26]),
+                   paste0("a", letters[24:26]))) %>% 
+    as_tibble() %>% 
+    mutate(across(everything(), as.integer))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We solve the first puzzle with some basic geometry. Let the position of a particle $i$ at 
+tick $k$ be denoted by $\vec p_i ^{(k)} \in \mathbb{Z}^3$, its velocity and acceleration 
+by $\vec{v}_i^{(k)}$ and $\vec{a}_i$ respectively. The velocity increases each tick and 
+its value can be determined by the following formula:
+
+$$
+\vec{v}_i^{(k)} = \vec{v}_i^{(k-1)} + \vec a_i = \left(\vec{v}_i^{(k - 2)} + 
+\vec a_i\right) + \vec{a}_i = \ldots = \vec v_i ^{(0)} + k\cdot\vec a_i
+$$
+The position on the other hand can be written as:
+\begin{align}
+\vec p_i ^{(k)} & = \vec p_i ^{(k - 1)} + \vec{v}_i^{(k-1)}\\ 
+& = \left(\vec p_i ^{(k - 2)} + \vec{v}_i^{(k-2)}\right) + \vec{v}_i^{(k-1)} \\
+& = \cdots \\
+& = \vec p_i ^{(0)} + \sum_{j = 1}^{k}\vec{v}_i^{(j)} \\
+& = \vec p_i ^{(0)} + \sum_{j = 1}^{k}\left( \vec v_i ^{(0)} + j\cdot\vec a_i \right) \\
+& = \vec p_i ^{(0)} + k \cdot \vec v_i ^{(0)} + \left(k + 1\right) 
+\frac{k}{2} \cdot \vec a_i
+\end{align}
+
+The particle which is evntually the closest to the origin, is the one with the lowest
+acceleration (i.e. $\min_i \|\vec a_i\|_\infty$), in case of a tie, the one with the 
+lowest initial speed (i.e. $\min_i \|\vec v_i^{(0)}\|_\infty$) and in case of another tie 
+the one which was originally the furtherst away from the origin 
+(i.e. $\max_i \|\vec p_i^{(0)}\|_\infty$).
+
+```{r get-solution-1}
+find_closest <- function(speeds = puzzle_data) {
+  speeds %>% 
+    mutate(initial_acc = abs(ax) + abs(ay) + abs(az),
+           initial_spe = abs(vx) + abs(vy) + abs(vz),
+           initial_dis = abs(x0) + abs(y0) + abs(z0)) %>% 
+    mutate(id = 1:n() - 1L) %>% 
+    arrange(initial_acc, initial_spe, desc(initial_dis)) %>% 
+    slice(1L) %>% 
+    pull(id)
+}
+find_closest(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+A collision between particles $m$ and $n$ happens if
+
+$$
+\exists \hat k \in \mathbb{N}: \vec p_m ^{(0)} + \hat k \cdot \vec v_m ^{(0)} + 
+\left(\hat k + 1\right) 
+\frac{\hat k}{2} \cdot \vec a_m = 
+\vec p_n ^{(0)} + \hat k \cdot \vec v_n ^{(0)} + 
+\left(\hat k + 1\right) 
+\frac{\hat k}{2} \cdot \vec a_n
+$$
+Rearranging this equality yields:
+
+\begin{equation}
+\underbrace{\left(\frac{1}{2}\vec a_m - \frac{1}{2}\vec a_n\right)}_{=:a} \cdot \hat 
+k ^2 + 
+\underbrace{\left(\vec v_m ^{(0)} + \frac{1}{2}\vec a_m - 
+\vec v_n ^{(0)} - \frac{1}{2}\vec a_n\right)}_{=:b} \cdot \hat k + 
+\underbrace{\left(\vec p_m ^{(0)} - \vec p_n ^{(0)}\right)}_{=:c} = 0\\
+a\hat k^2 + b\hat k + c = 0
+\end{equation}
+which is a quadratic equation with the following solutions in 
+$\hat k_{1,2} \in \mathbb{R}$:
+
+$$
+\hat k_{1,2} = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+$$
+If such a $\hat k$ exists (it does if $b^2 - 4ac \geq 0$) and it is a natural number, i.e.
+$\hat k \in \mathbb{N}$ and it is the same for all 3 dimensions we have a collision.
+
+Thus, the algorithm needs to check all pairs $1\leq n < m \leq I$ where $I$ describes the 
+number of particles in the puzzle input and count all distinct $n$ where there is at least 
+one collision.
+
+```{r get nr-particles, echo = FALSE}
+I <- nrow(puzzle_data)
+```
+
+There are at most $(I ^ 2 - I) / 2$ such comparisons, for our input that equals to 
+`r format((I ^ 2 - I) / 2, scientific = FALSE, big.mark = ".", decimal.mark = ",")`.
+To gain some speed, we remove colliding particles upon first collision detection. 
+
+```{r get-solution-2, cache = TRUE}
+is_integer <- function(x, tol = .Machine$double.eps) {
+  abs(x - round(x)) <= tol
+}
+
+does_collide <- function(p0_1, v0_1, a_1, p0_2, v0_2, a_2, tol = .Machine$double.eps) {
+  a <- 1 / 2 * (a_1 - a_2)
+  b <- v0_1 + a_1 / 2 - v0_2 - a_2 / 2
+  c <- p0_1 - p0_2
+  D <- b ^ 2 - 4 * a * c
+  no_sol <- D < 0
+  if (any(no_sol)) {
+    FALSE
+  } else {
+    k1 <- (-b + sqrt(D)) / (2 * a)
+    k2 <- (-b - sqrt(D)) / (2 * a)
+    no_quadratic <- abs(a) <= tol
+    k1[no_quadratic] <- k2[no_quadratic] <- (- c / b)[no_quadratic]
+    no_const <- abs(b) <= tol
+    k1[no_quadratic & no_const] <- k2[no_quadratic & no_const] <- 0  
+    all_zero <- no_quadratic & no_const & (abs(c) <= tol)
+    k1[all_zero] <- k2[all_zero] <- 0
+    sol1 <- c(k1[1L], k2[1L])
+    sol2 <- c(k1[2L], k2[2L])
+    sol3 <- c(k1[3L], k2[3L])
+    cand_sol <- intersect(sol1, sol2) %>% 
+      intersect(sol3) %>% 
+      keep(is_integer)
+    length(cand_sol) > 0L
+  }
+}
+
+count_collisions <- function(speeds, tol = .Machine$double.eps) {
+  speeds <- speeds %>% 
+    split(1:nrow(speeds)) %>% 
+    map(function(.x) {
+      l <- as.list(.x)
+      list(c(l$x0, l$y0, l$z0),
+           c(l$vx, l$vy, l$vz),
+           c(l$ax, l$ay, l$az))
+    })
+  n <- length(speeds)
+  collided <- rep(FALSE, n)
+  i <- 1L
+  while (i != n) {
+    nbs <- which(!collided & seq_along(collided) > i)
+    for (j in nbs) {
+      args <- c(speeds[[i]], speeds[[j]]) %>% 
+        set_names(c("p0_1", "v0_1", "a_1", "p0_2", "v0_2", "a_2")) %>% 
+        as.list()
+      args$tol <- tol
+      if (do.call(does_collide, args)) {
+        collided[c(i, j)] <- TRUE
+      }
+    }
+    i <- max(c(i + 1L, which(!collided)[1L]))
+  }
+  sum(collided)
+}
+
+nrow(puzzle_data) - 
+  count_collisions(puzzle_data)
+```
