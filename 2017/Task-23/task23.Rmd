@@ -1,0 +1,241 @@
+---
+params:
+   task_nr: 23
+   year: 2017
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+
+.page-content table tr pre {
+  border-radius: revert;
+  background-color: revert;
+  color: revert;
+  padding: revert;
+  border: revert;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(numbers)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split(" ") %>% 
+    map(~ c(.x, NA_character_)[1:3]) %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("op", "arg1", "arg2")) %>% 
+    as_tibble() %>% 
+    mutate(op_original = text_block, .before = 1L)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+Let's first translate the assembly code line by line into a real (unoptimized) R program:
+
+```{r show-code}
+cp <- function() {
+  # Initialize all variables to 0
+  a <- b <- c <- d <- e <- f <- g <- h <- 0
+  
+  # Set b and c to 99
+  b <- 99
+  c <- b
+  
+  # This block is skipped because a == 0
+  if (a != 0) {
+    # if a == 1 we use different starting values: b = 109900 and c = 126900
+    b <- 100 * b        
+    n <- 1
+    b <- b + 100000     
+    c <- b
+    c <- c + 17000      
+  }
+  
+  # Initialize counter for operations (not in the assembly code but needed for the answer)
+  n <- 0 
+  
+  # Infinite loop until return
+  while(TRUE) {
+    f <- 1  # flag to indicate if current b is prime (1 = prime, 0 = composite)
+    d <- 2  # first factor to test
+    
+    # Outer loop over possible factors d = 2...b - 1
+    repeat {
+      e <- 2  # inner factor to test
+      # Inner loop over possible factors e = 2...b - 1
+      repeat {
+        g <- d
+        g <- g * e         # compute product of d and e
+        n <- n + 1         # count this operation
+        g <- g - b         # check if product equals b
+        if (g == 0) {
+          f <- 0           # set flag to 0 if b is not prime
+        }
+        e <- e + 1         # increment inner factor
+        g <- e
+        g <- g - b
+        if(g == 0) break   # break inner loop if e == b
+      }
+      d <- d + 1           # increment outer factor
+      g <- d
+      g <- g - b
+      if(g == 0) break     # break outer loop if d == b
+    }
+    
+    if (f == 0) {          # if b is not prime
+      h <- h + 1           # increment not prime counter
+    }
+    
+    g <- b
+    g <- g - c
+    if (g == 0)            # if b equals c
+      return(n)            # return number of operations
+    b <- b + 17            # increment b by 17 for next iteration
+  }
+}
+```
+
+That is for the chosen input of $b=99$ the algorithm multiplies each $d\in\{2,\ldots,98\}$ 
+with each $e\in\{2,\ldots,98\}$ and checks if this multiplication yields $b$. If so, we 
+set a flag. The code could test more than one value (in fact it would test all values 
+between $b$ and $c$ with a step size of 17) and eventually register $h$ contains the 
+number of non prime numbers within this range.
+
+For the first part, however, we need to determine how many multiplications there are. As
+we are testing all possible combinations from $2$ to $b-1$ we get 
+$(b - 1 -1) \cdot (b - 1 -1)$ multiplications.
+
+```{r get-solution-1}
+get_nr_of_mult <- function(b) {
+  (b - 2) ^ 2
+}
+get_nr_of_mult(99)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+With the code demystified, we can conclude that setting $a = 1$ yields different starting
+values. This time we loop through $b = 109900$ until $c = 126900$ by steps of $17$.
+Furthermore, this time we are not interested in the number of multiplications, but in 
+register $h$, which counts the number of non primes within this range.
+
+```{r get-solution-2}
+get_non_primes <- function(b, c, step) {
+  nrs <- seq(b, c, step)
+  sum(!isPrime(nrs))
+}
+get_non_primes(109900L, 126900L, 17L)
+```
+
