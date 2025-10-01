@@ -45,6 +45,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 20](2017_task20.html)
 * [Day 21](2017_task21.html)
 * [Day 22](2017_task22.html)
+* [Day 23](2017_task23.html)
 
 # 2024
 
