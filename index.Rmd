@@ -21,34 +21,6 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# 2017
-
-* [Day 1](2017_task1.html)
-* [Day 2](2017_task2.html)
-* [Day 3](2017_task3.html)
-* [Day 4](2017_task4.html)
-* [Day 5](2017_task5.html)
-* [Day 6](2017_task6.html)
-* [Day 7](2017_task7.html)
-* [Day 8](2017_task8.html)
-* [Day 9](2017_task9.html)
-* [Day 10](2017_task10.html)
-* [Day 11](2017_task11.html)
-* [Day 12](2017_task12.html)
-* [Day 13](2017_task13.html)
-* [Day 14](2017_task14.html)
-* [Day 15](2017_task15.html)
-* [Day 16](2017_task16.html)
-* [Day 17](2017_task17.html)
-* [Day 18](2017_task18.html)
-* [Day 19](2017_task19.html)
-* [Day 20](2017_task20.html)
-* [Day 21](2017_task21.html)
-* [Day 22](2017_task22.html)
-* [Day 23](2017_task23.html)
-* [Day 24](2017_task24.html)
-* [Day 25](2017_task25.html)
-
 # 2024
 
 * [Day 1](2024_task1.html)
@@ -77,6 +49,10 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 24](2024_task24.html)
 * [Day 25](2024_task25.html)
 
+# 2023
+
+# 2022
+
 # 2021
 
 * [Day 1](2021_task1.html)
@@ -104,6 +80,41 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 23](2021_task23.html)
 * [Day 24](2021_task24.html)
 * [Day 25](2021_task25.html)
+
+# 2020
+
+# 2019
+
+# 2018
+
+
+# 2017
+
+* [Day 1](2017_task1.html)
+* [Day 2](2017_task2.html)
+* [Day 3](2017_task3.html)
+* [Day 4](2017_task4.html)
+* [Day 5](2017_task5.html)
+* [Day 6](2017_task6.html)
+* [Day 7](2017_task7.html)
+* [Day 8](2017_task8.html)
+* [Day 9](2017_task9.html)
+* [Day 10](2017_task10.html)
+* [Day 11](2017_task11.html)
+* [Day 12](2017_task12.html)
+* [Day 13](2017_task13.html)
+* [Day 14](2017_task14.html)
+* [Day 15](2017_task15.html)
+* [Day 16](2017_task16.html)
+* [Day 17](2017_task17.html)
+* [Day 18](2017_task18.html)
+* [Day 19](2017_task19.html)
+* [Day 20](2017_task20.html)
+* [Day 21](2017_task21.html)
+* [Day 22](2017_task22.html)
+* [Day 23](2017_task23.html)
+* [Day 24](2017_task24.html)
+* [Day 25](2017_task25.html)
 
 # 2016
 
