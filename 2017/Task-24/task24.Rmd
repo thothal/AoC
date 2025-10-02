@@ -1,0 +1,281 @@
+---
+params:
+   task_nr: 24
+   year: 2017
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+
+.page-content table tr pre {
+  border-radius: revert;
+  background-color: revert;
+  color: revert;
+  padding: revert;
+  border: revert;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(digest)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("/") %>% 
+    map(as.integer)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We solve this puzzle by backtracking with memoization to avoid recalculating knwon paths. 
+
+```{r get-solution-1, cache = TRUE}
+get_strongest_bridge <- function(pieces) {
+  start <- keep(seq_along(pieces), \(i) any(pieces[[i]] == 0))
+  memo <- new.env()
+  n <- length(pieces)
+  best_weight <- 0
+  best_path <- NULL
+  dfs <- function(current_val, used, path) {
+    key <- paste(current_val, digest(used), sep = "_")
+    if (exists(key, memo)) {
+      return(memo[[key]])
+    }
+    
+    max_weight <- sum(unlist(pieces[path]))
+    max_path <- path
+    
+    for (idx in which(!used)) {
+      piece <- pieces[[idx]]
+      if (any(piece == current_val)) {
+        next_val <- setdiff(piece, current_val)
+        if (length(next_val) == 0) {
+          ## double piece
+          next_val <- current_val
+        }
+        next_used <- used
+        next_used[idx] <- TRUE
+        next_path <- c(path, idx)
+        res_weight <- dfs(next_val, next_used, next_path)
+        if (res_weight > max_weight) {
+          max_weight <- res_weight
+          max_path <- next_path
+        }
+      }
+    }
+    
+    if (max_weight > best_weight) {
+      best_weight <<- max_weight
+      best_path <<- max_path
+    }
+    memo[[key]] <- max_weight
+    max_weight
+  }
+  
+  used <- rep(FALSE, n)
+  
+  for(si in start) {
+    piece <- pieces[[si]]
+    current_val <- setdiff(piece, 0L)
+    if (length(current_val) == 0L) {
+      current_val <- 0L
+    }
+    start_used <- used
+    start_used[si] <- TRUE
+    dfs(current_val, start_used, si)
+  }
+  best_weight
+}
+get_strongest_bridge(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We use the same approach as before replacing weight by length as the optimization 
+criterion. In case there is a tie for the length, we use the weight as a tie-breaker.
+
+```{r get-solution-2, cache = TRUE}
+get_weight_of_longest_bridge <- function(pieces) {
+  start <- keep(seq_along(pieces), \(i) any(pieces[[i]] == 0))
+  memo <- new.env()
+  n <- length(pieces)
+  best_length <- 0
+  best_path <- NULL
+  dfs <- function(current_val, used, path) {
+    key <- paste(current_val, digest(used), sep = "_")
+    if (exists(key, memo)) {
+      return(memo[[key]])
+    }
+    
+    max_length <- length(path)
+    max_path <- path
+    
+    for (idx in which(!used)) {
+      piece <- pieces[[idx]]
+      if (any(piece == current_val)) {
+        next_val <- setdiff(piece, current_val)
+        if (length(next_val) == 0) {
+          ## double piece
+          next_val <- current_val
+        }
+        next_used <- used
+        next_used[idx] <- TRUE
+        next_path <- c(path, idx)
+        res_length <- dfs(next_val, next_used, next_path)
+        if (res_length > max_length) {
+          max_length <- res_length
+          max_path <- next_path
+        } else if (res_length == max_length) {
+          old_weight <- sum(unlist(pieces[max_path]))
+          new_weight <- sum(unlist(pieces[next_path]))
+          if (new_weight > old_weight) {
+            max_length <- res_length
+            max_path <- next_path
+          }
+        }
+      }
+    }
+    if (max_length > best_length) {
+      best_length <<- max_length
+      best_path <<- max_path
+    } else if (max_length == best_length) {
+      old_weight <- sum(unlist(pieces[best_path]))
+      new_weight <- sum(unlist(pieces[max_path]))
+      if (new_weight > old_weight) {
+        best_length <<- max_length
+        best_path <<- max_path
+      }
+    }
+    memo[[key]] <- max_length
+    max_length
+  }
+  
+  used <- rep(FALSE, n)
+  
+  for(si in start) {
+    piece <- pieces[[si]]
+    current_val <- setdiff(piece, 0L)
+    if (length(current_val) == 0L) {
+      current_val <- 0L
+    }
+    start_used <- used
+    start_used[si] <- TRUE
+    dfs(current_val, start_used, si)
+  }
+  sum(unlist(pieces[best_path]))
+}
+get_weight_of_longest_bridge(puzzle_data)
+
+```
+
