@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 1
+   task_nr: 2
    year: 2018
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -93,8 +93,7 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       extract2(1L) %>% 
       keep(nzchar)
   }
-  text_block %>% 
-    as.integer()
+  text_block
 }
 
 puzzle_data <- local({
@@ -106,6 +105,7 @@ puzzle_data <- local({
 ```
 
 ```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
 ```
 
 # Puzzle Day `r params$task_nr`
@@ -120,16 +120,22 @@ cat(puzzle[[1]])
 
 ### Solution
 
-Hohoho! Welcome to this year's AoC. Let the games begin. 
-
-For this puzzle we simply need to sum up the input.
+We split each key into letters, count the occurences and check if any frequency equals 2 
+or 3.
 
 
 ```{r get-solution-1}
-sum_frequencies <- function(x = puzzle_data) {
-  sum(x)
+get_checksum <- function(x = puzzle_data) {
+  letters_dist <- x %>% 
+    str_split("") %>% 
+    map(table)
+  is_3 <- letters_dist %>% 
+    map_lgl(~ any(.x == 3L))
+  is_2 <- letters_dist %>% 
+    map_lgl(~ any(.x == 2L))
+  sum(is_2) * sum(is_3)
 }
-sum_frequencies(puzzle_data)
+get_checksum(puzzle_data)
 ```
 
 ## Part 2
@@ -142,25 +148,16 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the second part, we calculate the cumulative sum and check whether we found a 
-duplicate value. If not we recycle the input as needed. That is, we remove teh last 
-cumulative sum calculated and add it to the input values. The we re-cacluate the 
-cumulative values until we find any dupe.
+For the second part, we need to calculate the pairwise Levenshtein distance between the 
+keys and find the one which differs by exactly 1.
 
 ```{r get-solution-2}
-get_duplicated_frequency <- function(x = puzzle_data) {
-  vals <- x
-  res <- 0L
-  dupes <- duplicated(res)
-  found <- any(dupes)
-  while(!found) {
-    res <- c(res, cumsum(x))
-    dupes <- duplicated(res)
-    found <- any(dupes)
-    x <- c(tail(res, 1L), vals)
-    res <- head(res, -1L)
-  }
-  res[which(dupes)[1L]]
+get_matching_ids <- function(x = puzzle_data) {
+  dis <- adist(x, x)
+  pair <- which(dis == 1L & lower.tri(dis), arr.ind = TRUE)
+  pair <- x[c(pair)]
+  letters <- str_split(pair, "")
+  paste(letters[[1L]][letters[[1L]] == letters[[2L]]], collapse = "")
 }
-get_duplicated_frequency(puzzle_data)
+get_matching_ids(puzzle_data)
 ```
