@@ -72,7 +72,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 
 ### 2018
 
-- [ ] Day 1
+- [x] [Day 1](https://thothal.github.io/AoC/2018_task1.html)
 - [ ] Day 2
 - [ ] Day 3
 - [ ] Day 4
