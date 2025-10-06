@@ -206,7 +206,7 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For teh second part, we generate the sleeping distribution per minute for all the guards
+For the second part, we generate the sleeping distribution per minute for all the guards
 and find for each guard the minute where the respective guard was asleep most often.
 Then we get the single minute over all guards which had the highest count.
 
