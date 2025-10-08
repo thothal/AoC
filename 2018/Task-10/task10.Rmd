@@ -1,0 +1,196 @@
+---
+params:
+   task_nr: 10
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+   str_extract_all("-?\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("x0", "y0", "dx", "dy"))
+  storage.mode(res) <- "integer"
+  class(res) <- "elve_msg"
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The idea is to calculate the index where the variability of the positions is minimal 
+(pixels arranged in letters scatter around the same place are thus closer together).
+
+Once we found the index, we can plot it
+
+```{r min-entropy, cache = TRUE}
+move_stars <- function(stars, n) {
+  stars[, 1:2] + n * stars[, 3:4]
+}
+
+find_min_entropy <- function(stars = puzzle_data, n = 1e6L) {
+  entropy <- function(n) {
+    pos <- move_stars(stars, n)
+    vars <- apply(pos, 2, var) 
+    sum(vars)
+  }
+  vapply(seq_len(n), entropy, numeric(1L)) %>% 
+    which.min()
+}
+
+min_entropy <- find_min_entropy(puzzle_data)
+```
+
+```{r get-solution-1, comment=""}
+as.matrix.elve_msg <- function(x, n = 0L, border = 6L, fill = c(0L, 1L)) {
+  coords <- move_stars(x, n)
+  ## need to flip because x coordinates correspond to columns
+  coords <- coords[, 2:1]
+  min_x <- apply(coords, 2, min)
+  cnt <- sweep(coords, 2, min_x, "-") + 1
+  maxs <- apply(cnt, 2, max)
+  mat <- matrix(fill[1L], maxs[1L] + border, maxs[2L] + border)
+  mat[cnt + border / 2] <- fill[2L]
+  mat
+}
+
+plot.elve_msg <- function(x, n = 0L) {
+  mat <- as.matrix(x, n) %>% 
+    t()
+  par(mar = rep(0, 4L))
+  image(mat[, ncol(mat):1], col = c("transparent", "black"), axes = FALSE, asp = 1)
+}
+
+print.elve_msg <- function(x, n = 0L) {
+  mat <- as.matrix(x, n, border = 4L, fill = c(".", "#"))
+  apply(mat, 1, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat()
+}
+print(puzzle_data, min_entropy)
+plot(puzzle_data, min_entropy)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+The seconds are exactly the minimum entropy we calculated earlier.
+
+```{r get-solution-2}
+min_entropy
+```
