@@ -111,7 +111,6 @@ puzzle_data <- local({
 ```
 
 ```{r example-data, eval = interactive(), echo = FALSE}
-example_data <- parse_puzzle_data()
 ```
 
 # Puzzle Day `r params$task_nr`
@@ -169,6 +168,18 @@ cat(puzzle[[2]])
 
 ### Solution
 
+For this part, we create a list of workers, which store the piece they are currently
+assembling and the time they still need. Then, we iterate through the time, setting the
+time jumps to the minimum time any worker still needs (nothing of interest happens in
+between). Once a worker is done, we check whether the construction of the piece unlock a 
+new piece. If this is the case, we add it to the list of pieces available for assembly.
+
+To check whether a new piece can be added to the assembly list we use the graph 
+constructed before. A new piece can be added, whenever all of its parents are already 
+assembled.
+
+Whenever a worker is idle we assign a new piece from the list of pieces ready for 
+assembly. We add the time jumps and eventually return it.
 
 ```{r get-solution-2}
 get_min_time <- function(instructions = puzzle_data, nr_workers = 5L) {
@@ -183,13 +194,14 @@ get_min_time <- function(instructions = puzzle_data, nr_workers = 5L) {
     set_names(V(G)$name)
   done["start"] <- TRUE
   time <- 0L
+  time_shift <- 1L
   parents <- adjacent_vertices(G, V(G), "in")
   parents$start <- NULL
   cand <- neighbors(G, "start")$name
   while (!all(done)) {
     for (wid in seq_along(workers)) {
       ## worker have worked another sec on this pirce
-      workers[[wid]]$remaining <- max(workers[[wid]]$remaining - 1L, 0L)
+      workers[[wid]]$remaining <- max(workers[[wid]]$remaining - time_shift, 0L)
       if (workers[[wid]]$remaining == 0L) {
         piece <- workers[[wid]]$piece
         if (!is.na(piece)) {
@@ -201,23 +213,26 @@ get_min_time <- function(instructions = puzzle_data, nr_workers = 5L) {
         }
       }
     }
+    time_min <- Inf
     for (wid in seq_along(workers)) {
-      if (length(cand) == 0L) {
-        ## no pieces left stop piece assignment
-        break
+      if (length(cand) > 0L) {
+        piece <- workers[[wid]]$piece
+        if (is.na(piece)) {
+          ## worker wid is idle
+          new_piece <- head(cand, 1L)
+          cand <- tail(cand, -1L)
+          workers[[wid]]$remaining <- V(G)[new_piece]$time
+          workers[[wid]]$piece <- new_piece
+        }
       }
-       piece <- workers[[wid]]$piece
-       if (is.na(piece)) {
-         ## worker wid is idle
-         new_piece <- head(cand, 1L)
-         cand <- tail(cand, -1L)
-         workers[[wid]]$remaining <- V(G)[new_piece]$time
-         workers[[wid]]$piece <- new_piece
-       }
+      time_min <- min(time_min, 
+                      if_else(workers[[wid]]$remaining == 0L, Inf, 
+                              workers[[wid]]$remaining))
     }
-    time <- time + 1L
+    time <- time + time_shift
+    time_shift <- time_min
   }
   time - 1L
 }
-get_min_time(puzzle_data)
+get_min_time(puzzle_data, 5L)
 ```
