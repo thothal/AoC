@@ -72,6 +72,8 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
+library(bit64)
+library(digest)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -131,19 +133,21 @@ cat(puzzle[[1]])
 
 ### Solution
 
+The first part is rather straight forward. We just have to keep track of the position and
+decide to remove leading and trailing dots as rule number 2 states that an empty quintuple
+produces an empty pot `` `r imap_chr(puzzle_data$rules[2L], ~ paste(.y, " => ", .x))` ``
+(otherwise the puzzle would not be solvable). In each iteration we potentially add 2 new
+plants to the generation at the beginning, hence we need to decrease the offset by 2.
+However, for each `.` we remove from the beginning, we increase the offset again by 1 as 
+we are deliberately ignoring this empty pot.
 
-```{r min-entropy, cache = TRUE}
-p <- c(".", "#")
 
-ar <- rep(".", 32) %>% 
-  set_names(expand.grid(p,p,p,p,p) %>%
-  apply(1, paste, collapse = ""))
-r <- c(example_data$rules, ar[!names(ar) %in% names(example_data$rules)])
-
+```{r get-solution-1}
 grow_plants <- function(n, start = puzzle_data$start, rules = puzzle_data$rules) {
-  first_pot <- 0
+  offset <- 0
   for (i in seq_len(n)) {
-    start <- paste0("...", start, "...")
+    offset <- offset - 2
+    start <- paste0("....", start, "....")
     new_gen <- ""
     for (j in 3:(nchar(start) - 2L)) {
       token <- str_sub(start, j - 2, j + 2L)
@@ -153,58 +157,25 @@ grow_plants <- function(n, start = puzzle_data$start, rules = puzzle_data$rules)
         new_gen <- paste0(new_gen, rules[token])
       }
     }
-    head <- str_sub(new_gen, 1L, 1L + abs(first_pot)) %>% 
-      str_remove("^\\.*") %>% 
+    ## remove dots at the end
+    start <- str_remove(new_gen, "\\.*$") %>% 
       extract2(1L)
-    rex <- paste0("^\\.{1,", 1L + abs(first_pot), "}|\\.*$")
-    start <- str_remove_all(new_gen, rex) %>% 
+    ## get number of dots in the beginning
+    head <- str_extract(start, "^\\.*") %>% 
       extract2(1L)
-    first_pot <- -nchar(head)
+    start <- str_remove(start, "^\\.*") %>% 
+      extract2(1L)
+    offset <- offset + str_length(head)
   }
-  cat(start, "\tOffset:", first_pot, "\n")
   start %>% 
     str_split("") %>% 
     extract2(1L) %>% 
     equals("#") %>% 
-    which() %>% 
-    add(first_pot - 1L) %>% 
+    which() %>%
+    add(offset - 1L) %>%
     sum()
 }
-grow_plants(20)
-grow_plants(50000000000)
-
-grow_plants(2, example_data$start, example_data$rules)
-
-```
-
-```{r get-solution-1, comment=""}
-as.matrix.elve_msg <- function(x, n = 0L, border = 6L, fill = c(0L, 1L)) {
-  coords <- move_stars(x, n)
-  ## need to flip because x coordinates correspond to columns
-  coords <- coords[, 2:1]
-  min_x <- apply(coords, 2, min)
-  cnt <- sweep(coords, 2, min_x, "-") + 1
-  maxs <- apply(cnt, 2, max)
-  mat <- matrix(fill[1L], maxs[1L] + border, maxs[2L] + border)
-  mat[cnt + border / 2] <- fill[2L]
-  mat
-}
-
-plot.elve_msg <- function(x, n = 0L) {
-  mat <- as.matrix(x, n) %>% 
-    t()
-  par(mar = rep(0, 4L))
-  image(mat[, ncol(mat):1], col = c("transparent", "black"), axes = FALSE, asp = 1)
-}
-
-print.elve_msg <- function(x, n = 0L) {
-  mat <- as.matrix(x, n, border = 4L, fill = c(".", "#"))
-  apply(mat, 1, paste, collapse = "") %>% 
-    paste(collapse = "\n") %>% 
-    cat()
-}
-print(puzzle_data, min_entropy)
-plot(puzzle_data, min_entropy)
+grow_plants(20, puzzle_data$start, puzzle_data$rules)
 ```
 
 ## Part 2
@@ -217,8 +188,67 @@ cat(puzzle[[2]])
 
 ### Solution
 
-The seconds are exactly the minimum entropy we calculated earlier.
+For the second part we must be way smarter, as it is not feasible to run 50 billion runs.
+We can keep track about seen plant configurations and as soon as we see the first repeated
+configuration we can fast forward. We just have to recall the offset change and multiply 
+that by the remaining cycles to get the proper offset. As the numbers are potentially
+rather big, we have to use `integer64` logic and re-write the previous code to deal with
+these large numbers.
+
 
 ```{r get-solution-2}
-min_entropy
+grow_plants_large <- function(n, start = puzzle_data$start, rules = puzzle_data$rules) {
+  ## make sure to pass n as integer64 too
+  offset <- as.integer64(0L)
+  i <- as.integer64(0L)
+  make_key <- function(x) {
+    paste0("K_", digest(x))
+  }
+  hash <- new.env()
+
+  hash[[make_key(start)]] <- c(offset = offset, idx = i)
+  while (i < n) {
+    offset <- offset - as.integer64(2)
+    start <- paste0("....", start, "....")
+    new_gen <- ""
+    for (j in 3:(nchar(start) - 2L)) {
+      token <- str_sub(start, j - 2, j + 2L)
+      if (!token %in% names(rules)) {
+        new_gen <- paste0(new_gen, ".")
+      } else {
+        new_gen <- paste0(new_gen, rules[token])
+      }
+    }
+    ## remove dots at the end
+    start <- str_remove(new_gen, "\\.*$") %>% 
+      extract2(1L)
+    ## get number of dots in the beginning
+    head <- str_extract(start, "^\\.*") %>% 
+      extract2(1L)
+    start <- str_remove(start, "^\\.*") %>% 
+      extract2(1L)
+    offset <- offset + as.integer64(str_length(head))
+    if (exists(make_key(start), hash)) {
+      vals <- hash[[make_key(start)]]
+      cycle_length <- i - vals["idx"]
+      offset_delta <- offset - vals["offset"]
+      remaining_cycles <- (n - i - as.integer64(1L)) %/% cycle_length
+      i <- i + remaining_cycles * cycle_length
+      offset <- offset + remaining_cycles * offset_delta
+    } else {
+      hash[[make_key(start)]] <- c(offset = offset, idx = i)
+    }
+    i <- i + as.integer64(1L)
+  }
+  start %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    equals("#") %>% 
+    which() %>%
+    as.integer64() %>% 
+    add(offset - as.integer64(1L)) %>%
+    sum()
+}
+
+grow_plants_large(as.integer64(50000000000), puzzle_data$start, puzzle_data$rules)
 ```
