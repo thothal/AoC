@@ -1,0 +1,237 @@
+---
+params:
+   task_nr: 11
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+   as.integer()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We solve this puzzle by explicitely generating the grid first making use of `R's` 
+vectorization possibilities. Then, we caluclate the crll which yields the highest power 
+level.
+
+```{r get-solution-1}
+get_power_level <- function(coords, serial_nr) {
+  rack_id <- coords[, 1L] + 10L
+  ((rack_id * coords[, 2L] + serial_nr) * rack_id) %/% 100L %% 10L - 5L 
+}
+
+make_grid <- function(serial_nr = puzzle_data, nr = 300L, nc = 300L) {
+  grid <- matrix(NA_integer_, nr, nc)
+  coords <- cbind(c(col(grid)), c(row(grid)))
+  grid[coords[, 2:1]] <- get_power_level(coords, serial_nr)
+  grid
+}
+
+find_cell <- function(grid, nr = 3L, nc = 3L) {
+  grid <- t(grid)
+  n <- nrow(grid)
+  m <- ncol(grid)
+  starts <- expand.grid(row = 1:(n - nr + 1L), 
+                        col = 1:(m - nc + 1L))
+  sums <- apply(starts, 1L, function(pos) {
+    r <- pos[1]
+    c <- pos[2]
+    sum(grid[r:(r + nr - 1L), c:(c + nc - 1L)])
+  })
+  idx <- which.max(sums)
+  cbind(starts[idx, ], power_level = max(sums))
+}
+
+grid <- make_grid(puzzle_data)
+find_cell(grid)[, 1:2] %>% 
+  paste(collapse = ",")
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+Now we just have to iterate over all possible sub grid sizes and return the one with the 
+largest power level. To do so efficiently we pre-calculate a matrix `summed` where an 
+entry at index `i,j` represents the sum of the grid from `(1, 1) - (i, j)`. Them to find
+the sum starting at any field, we get first the sum starting at `(1, 1)` till the right 
+bottom corner of the field of interest, then subtract the rows above the field, then the
+columns left of the field and eventually - as we were subtracting the area to the top left 
+of the field twice - eventually add the field to the top left again.
+
+```{r get-solution-2, cache = TRUE}
+find_cell_any_size <- function(grid) {
+  n <- nrow(grid)
+  m <- ncol(grid)
+  
+  summed <- matrix(0L, n, m)
+  summed[1L, 1L] <- grid[1L, 1L]
+  
+  for (i in 2:n) {
+    summed[i, 1L] <- summed[i - 1L, 1L] + grid[i, 1L]
+  }
+  for (j in 2:m) {
+    summed[1L, j] <- summed[1L, j - 1L] + grid[1L, j]
+  }
+  
+  for (i in 2:n) {
+    for (j in 2:m) {
+      summed[i, j] <- grid[i, j] + summed[i - 1, j] + 
+        summed[i, j - 1] - summed[i - 1, j - 1]
+    }
+  }
+
+  get_subgrid_sum <- function(x, y, size) {
+    x2 <- x + size - 1L
+    y2 <- y + size - 1L
+    total <- summed[y2, x2]
+    if (x > 1L) {
+      total <- total - summed[y2, x - 1L]
+    }
+    if (y > 1L) {
+      total <- total - summed[y - 1, x2]
+    }
+    if (x > 1 && y > 1) {
+      total <- total + summed[y - 1, x - 1]
+    }
+    total
+  }
+
+  best <- NULL
+  max_power <- -Inf
+
+  for (size in seq_len(n)) {
+    for (y in 1:(n - size + 1L)) {
+      for (x in 1:(m - size + 1L)) {
+        power <- get_subgrid_sum(x, y, size)
+        if (power > max_power) {
+          max_power <- power
+          best <- c(x = x, y = y, size = size, max_power = power)
+        }
+      }
+    }
+  }
+  best
+}
+
+find_cell_any_size(grid)[1:3] %>% 
+  paste(collapse = ",")
+```
