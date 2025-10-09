@@ -1,0 +1,254 @@
+---
+params:
+   task_nr: 12
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(bit64)
+library(digest)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  start <- text_block[[1L]] %>% 
+    str_extract("[.#]+") %>% 
+    unlist()
+  rules <- text_block %>% 
+    str_detect(fixed("=>"))
+  rules <- text_block[rules] %>% 
+    str_split(fixed(" => ")) %>% 
+    map(~ set_names(.x[2L], .x[1L])) %>% 
+    flatten_chr()
+  
+  list(start = start, rules = rules)
+               
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The first part is rather straight forward. We just have to keep track of the position and
+decide to remove leading and trailing dots as rule number 2 states that an empty quintuple
+produces an empty pot `` `r imap_chr(puzzle_data$rules[2L], ~ paste(.y, " => ", .x))` ``
+(otherwise the puzzle would not be solvable). In each iteration we potentially add 2 new
+plants to the generation at the beginning, hence we need to decrease the offset by 2.
+However, for each `.` we remove from the beginning, we increase the offset again by 1 as 
+we are deliberately ignoring this empty pot.
+
+
+```{r get-solution-1}
+grow_plants <- function(n, start = puzzle_data$start, rules = puzzle_data$rules) {
+  offset <- 0
+  for (i in seq_len(n)) {
+    offset <- offset - 2
+    start <- paste0("....", start, "....")
+    new_gen <- ""
+    for (j in 3:(nchar(start) - 2L)) {
+      token <- str_sub(start, j - 2, j + 2L)
+      if (!token %in% names(rules)) {
+        new_gen <- paste0(new_gen, ".")
+      } else {
+        new_gen <- paste0(new_gen, rules[token])
+      }
+    }
+    ## remove dots at the end
+    start <- str_remove(new_gen, "\\.*$") %>% 
+      extract2(1L)
+    ## get number of dots in the beginning
+    head <- str_extract(start, "^\\.*") %>% 
+      extract2(1L)
+    start <- str_remove(start, "^\\.*") %>% 
+      extract2(1L)
+    offset <- offset + str_length(head)
+  }
+  start %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    equals("#") %>% 
+    which() %>%
+    add(offset - 1L) %>%
+    sum()
+}
+grow_plants(20, puzzle_data$start, puzzle_data$rules)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we must be way smarter, as it is not feasible to run 50 billion runs.
+We can keep track about seen plant configurations and as soon as we see the first repeated
+configuration we can fast forward. We just have to recall the offset change and multiply 
+that by the remaining cycles to get the proper offset. As the numbers are potentially
+rather big, we have to use `integer64` logic and re-write the previous code to deal with
+these large numbers.
+
+
+```{r get-solution-2}
+grow_plants_large <- function(n, start = puzzle_data$start, rules = puzzle_data$rules) {
+  ## make sure to pass n as integer64 too
+  offset <- as.integer64(0L)
+  i <- as.integer64(0L)
+  make_key <- function(x) {
+    paste0("K_", digest(x))
+  }
+  hash <- new.env()
+
+  hash[[make_key(start)]] <- c(offset = offset, idx = i)
+  while (i < n) {
+    offset <- offset - as.integer64(2)
+    start <- paste0("....", start, "....")
+    new_gen <- ""
+    for (j in 3:(nchar(start) - 2L)) {
+      token <- str_sub(start, j - 2, j + 2L)
+      if (!token %in% names(rules)) {
+        new_gen <- paste0(new_gen, ".")
+      } else {
+        new_gen <- paste0(new_gen, rules[token])
+      }
+    }
+    ## remove dots at the end
+    start <- str_remove(new_gen, "\\.*$") %>% 
+      extract2(1L)
+    ## get number of dots in the beginning
+    head <- str_extract(start, "^\\.*") %>% 
+      extract2(1L)
+    start <- str_remove(start, "^\\.*") %>% 
+      extract2(1L)
+    offset <- offset + as.integer64(str_length(head))
+    if (exists(make_key(start), hash)) {
+      vals <- hash[[make_key(start)]]
+      cycle_length <- i - vals["idx"]
+      offset_delta <- offset - vals["offset"]
+      remaining_cycles <- (n - i - as.integer64(1L)) %/% cycle_length
+      i <- i + remaining_cycles * cycle_length
+      offset <- offset + remaining_cycles * offset_delta
+    } else {
+      hash[[make_key(start)]] <- c(offset = offset, idx = i)
+    }
+    i <- i + as.integer64(1L)
+  }
+  start %>% 
+    str_split("") %>% 
+    extract2(1L) %>% 
+    equals("#") %>% 
+    which() %>%
+    as.integer64() %>% 
+    add(offset - as.integer64(1L)) %>%
+    sum()
+}
+
+grow_plants_large(as.integer64(50000000000), puzzle_data$start, puzzle_data$rules)
+```
