@@ -1,0 +1,354 @@
+---
+params:
+   task_nr: 15
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(collections)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- matrix(
+  c("#", "#", "#", "#", "#", "#", "#", 
+    "#", ".", "G", ".", ".", ".", "#", 
+    "#", ".", ".", ".", "E", "G", "#", 
+    "#", ".", "#", ".", "#", "G", "#", 
+    "#", ".", ".", "G", "#", "E", "#", 
+    "#", ".", ".", ".", ".", ".", "#", 
+    "#", "#", "#", "#", "#", "#", "#"
+  ), 7L, 7L, byrow = TRUE)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+This puzzle took me way too long. I finally implemented the search for the next free field
+using a breadth-first-search, where I visit the nodes in the "right" order. That is, first
+the top node, then the left node, followed by the right and the bottom node. If we find a 
+target spot in lower distance, we return it. If we find a target spot at the same 
+distance, we return it if it is earlier in reading order. Then, all that si left is to 
+walk the path backwards until the starting node to find the direction in which the unit 
+moves.
+
+We make heavy use of `R's` neat matrix indexing capabilities to save some `for` loops.
+The additional parameters `attack` and `stop_on_elf_death` are not used for the first part
+of this puzzle but are needed for the second part.
+
+
+```{r get-solution-1, cache = TRUE}
+print.battlefield <- function(x) {
+  apply(x, 1L, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat("\n")
+}
+
+fight <- function(arena = puzzle_data, attack = c(G = 3L, E = 3L),
+                  stop_on_elf_death = FALSE, verbose = FALSE) {
+  class(arena) <- "battlefield"
+  
+  dirs <- rbind(
+    "^" = c(-1L, 0L),
+    "<" = c(0L, -1L),
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L)
+  )
+  opponent <- c(G = "E", E = "G")
+  turn <- c("^" = "v", "<" = ">", ">" = "<", "v" = "^")
+  get_nbs <- function(pos) {
+    nbs <- sapply(1:nrow(pos), \(i) {
+      t(dirs) + pos[i, 1:2]
+    }) %>% 
+      matrix(ncol = 2L, byrow = TRUE)
+    rownames(nbs) <- rep(rownames(dirs), nrow(pos))
+
+    nbs[!duplicated(nbs), , drop = FALSE]
+  }
+  does_occupy <- function(pos, fields) {
+    duplicated(
+      rbind(pos[, 1:2, drop = FALSE], fields[, 1:2, drop = FALSE]), 
+      fromLast = TRUE)[1L]
+  }
+  
+  get_next_dir <- function(start) {
+    node <- start[, 1:2, drop = FALSE]
+    enemy <- opponent[arena[node]]
+    targets <- which(arena == enemy, arr.ind = TRUE) %>% 
+      get_nbs()
+    if (does_occupy(node, targets)) {
+      ## unit is already adjacent to an enemy => return NULL
+      return (NULL)
+    }
+    free <- which(arena[targets] == ".", arr.ind = TRUE)
+    if (!length(free)) {
+      ## no free spaces around targets but no enemy adjacent
+      return (NULL)
+    }
+    ## targets is now all the positions where the unit could potentially move to
+    targets <- targets[free, , drop = FALSE]
+    ## find now shortest path to any target using bfs
+    dis_m <- matrix(Inf, nrow(arena), ncol(arena))
+    dir_m <- matrix(NA_character_, nrow(arena), ncol(arena))
+    dis_m[node] <- 0L
+    dir_m[node] <- "x"
+    queue <- node
+    target <- NULL
+    min_distance <- Inf
+    
+    while (nrow(queue) > 0L) {
+      pos <- head(queue, 1L)
+      nbs <- get_nbs(pos)
+      unvisited <- is.infinite(dis_m[nbs])
+      is_free <- arena[nbs] == "."
+      is_target <- does_occupy(pos, targets)
+      nbs <- nbs[unvisited & is_free, , drop = FALSE]
+      dis_m[nbs] <- dis_m[pos] + 1L
+      dir_m[nbs] <- turn[rownames(nbs)]
+      if (is_target) {
+        if (dis_m[pos] < min_distance) {
+          target <- pos
+          dir_m[pos] <- turn[rownames(pos)]
+          min_distance <- dis_m[pos]
+        } else if (dis_m[pos] == min_distance) {
+          if (pos[1L] < target[1L] || 
+              (pos[1L] == target[1L] && pos[2L] < target[2L])) {
+            target <- pos
+            dir_m[pos] <- turn[rownames(pos)]
+            min_distance <- dis_m[pos]
+          }
+        }
+      }
+      nbs <- nbs[dis_m[nbs] <= min_distance, , drop = FALSE]
+      queue <- rbind(tail(queue, -1L),
+                       nbs)
+    }
+    if (is.null(target)) {
+      return (NULL)
+    }
+    cur <- dir_m[target]
+    while (cur != "x") {
+      last_dir <- turn[cur]
+      target <- target + dirs[cur, , drop = FALSE]
+      cur <- dir_m[target]
+    }
+    dirs[last_dir, , drop  = FALSE]
+  }
+  is_row <- function(row, mat) {
+    apply(mat, 1L, \(r) all(row[1:2] == r[1:2]))
+  }
+  
+  get_target <- function(start) {
+    node <- start[, 1:2, drop = FALSE]
+    enemy <- opponent[arena[node]]
+    nbs <- get_nbs(start)
+    enemy_idx <- arena[nbs] %in% enemy
+    if (any(enemy_idx)) {
+      nbs <- nbs[enemy_idx, , drop = FALSE]
+      unit_idx <- apply(units, 1, \(r) any(is_row(r, nbs)))
+      
+      is_alive <- units[, "hp"] > 0
+      min_hp <- min(units[unit_idx & is_alive, "hp"])
+      has_min_hp <- units[, "hp"] == min_hp
+      target_idx <- which(has_min_hp & is_alive & unit_idx)
+      rownames(units)[target_idx[1L]]
+    } else {
+      NULL
+    }
+  }
+  units <- which(arena == "E" | arena == "G", arr.ind = TRUE)
+  units <- cbind(units, hp = 200L)
+  ## type 1 => E, 2 => G
+  units <- cbind(units, type = (arena[units[, 1:2, drop = FALSE]] == "G") + 1L)
+  units <- units[order(units[, 1L], units[, 2L]), , drop = FALSE]
+  rownames(units) <- paste0("U", 1:nrow(units))
+  ongoing <- TRUE
+  round <- 0L
+  while (ongoing) {
+    if (verbose) {
+      cat("Round ", round, " (", sum(units[, "hp"] < 0L), " units dead; elves ",
+      "fight with ", attack["E"], ")\r", sep = "")
+    }
+    round <- round + 1L
+    for (unit_id in seq_len(nrow(units))) {
+      done <- length(unique(units[units[, "hp"] > 0L, "type"])) == 1L
+      if (done) {
+        round <- round - 1L
+        break
+      }
+      unit <- units[unit_id, , drop = FALSE]
+      if (unit[, "hp"] > 0L) {
+        ## still alive
+        nbs <- get_nbs(unit)
+        me <- arena[unit[, 1:2, drop = FALSE]]
+        enemy <- opponent[me]
+        if (!any(arena[nbs] %in% enemy)) {
+          ## we move only if there is no enemy near by
+          next_dir <- get_next_dir(unit)
+          if (!is.null(next_dir)) {
+            ## we got a move direction => move
+            arena[units[unit_id, 1:2, drop = FALSE]] <- "."
+            units[unit_id, 1:2] <- units[unit_id, 1:2] + next_dir
+            ## opponent[1] == E, opponent[2] == G
+            arena[units[unit_id, 1:2, drop = FALSE]] <- opponent[units[unit_id, "type"]]
+          }
+        }
+        
+        next_target <- get_target(units[unit_id, 1:2, drop = FALSE])
+        if (!is.null(next_target)) {
+          units[next_target, "hp"] <- units[next_target, "hp"] - attack[me]
+          if (units[next_target, "hp"] <= 0L) {
+            ## opponent died
+            if (units[next_target, "type"] == 1L && stop_on_elf_death) {
+              if (verbose) {
+                cat("\nElf died in round:", round, "with attack power", attack["E"], "\n")
+              }
+              return (NULL)
+            }
+            arena[units[next_target, 1:2, drop = FALSE]] <- "."
+          }
+        }
+      }
+    }
+    units <- units[order(units[, 1L], units[, 2L]), , drop = FALSE]
+    ongoing <- length(unique(units[units[, "hp"] > 0L, "type"])) > 1L
+  }
+  if (verbose) {
+    cat("\n")
+  }
+  round * sum(units[units[, "hp"] > 0L, "hp"]) 
+}
+fight(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We increase the attack power until we have the first game without elf casualties.
+
+```{r get-solution-2, cache = TRUE}
+find_minimum_attack_power <- function(arena = puzzle_data) {
+  found <- FALSE
+  e_new <- 4L
+  while(!found) {
+    res <- fight(arena, attack = c(G = 3L, E = e_new), TRUE)
+    found <- !is.null(res)
+    e_new <- e_new + 1L
+  }
+  res
+}
+find_minimum_attack_power(puzzle_data)
+```
