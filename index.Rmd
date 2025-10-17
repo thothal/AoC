@@ -101,6 +101,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 12](2018_task12.html)
 * [Day 13](2018_task13.html)
 * [Day 14](2018_task14.html)
+* [Day 15](2018_task15.html)
 
 # 2017
 
