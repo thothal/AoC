@@ -1852,8 +1852,7 @@ library(xml2)
 library(magrittr)
 library(dplyr)
 library(purrr)
-library(stringr)
-library(collections)</code></pre>
+library(stringr)</code></pre>
 </div>
 <div id="retrieve-data-from-aoc" class="section level2" number="1.2">
 <h2><span class="header-section-number">1.2</span> Retrieve Data from <tt>AoC</tt></h2>
@@ -2323,9 +2322,6 @@ fight &lt;- function(arena = puzzle_data, attack = c(G = 3L, E = 3L),
     }
     dirs[last_dir, , drop  = FALSE]
   }
-  is_row &lt;- function(row, mat) {
-    apply(mat, 1L, \(r) all(row[1:2] == r[1:2]))
-  }
   
   get_target &lt;- function(start) {
     node &lt;- start[, 1:2, drop = FALSE]
@@ -2334,7 +2330,9 @@ fight &lt;- function(arena = puzzle_data, attack = c(G = 3L, E = 3L),
     enemy_idx &lt;- arena[nbs] %in% enemy
     if (any(enemy_idx)) {
       nbs &lt;- nbs[enemy_idx, , drop = FALSE]
-      unit_idx &lt;- apply(units, 1, \(r) any(is_row(r, nbs)))
+      unit_idx &lt;- duplicated(
+        rbind(units[, 1:2, drop = FALSE], nbs),
+        fromLast = TRUE)[1:nrow(units)]
       
       is_alive &lt;- units[, &quot;hp&quot;] &gt; 0
       min_hp &lt;- min(units[unit_idx &amp; is_alive, &quot;hp&quot;])
@@ -2395,11 +2393,14 @@ fight &lt;- function(arena = puzzle_data, attack = c(G = 3L, E = 3L),
               return (NULL)
             }
             arena[units[next_target, 1:2, drop = FALSE]] &lt;- &quot;.&quot;
+            units[next_target, 1:2] &lt;- -1L
           }
         }
       }
     }
     units &lt;- units[order(units[, 1L], units[, 2L]), , drop = FALSE]
+    ## move dead unit &quot;outside&quot; of the grid =&gt; makes collision detection much easier
+    ## as a dead unit won&#39;t occupy a valid place
     ongoing &lt;- length(unique(units[units[, &quot;hp&quot;] &gt; 0L, &quot;type&quot;])) &gt; 1L
   }
   if (verbose) {
