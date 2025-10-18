@@ -71,7 +71,6 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
-library(collections)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -240,9 +239,6 @@ fight <- function(arena = puzzle_data, attack = c(G = 3L, E = 3L),
     }
     dirs[last_dir, , drop  = FALSE]
   }
-  is_row <- function(row, mat) {
-    apply(mat, 1L, \(r) all(row[1:2] == r[1:2]))
-  }
   
   get_target <- function(start) {
     node <- start[, 1:2, drop = FALSE]
@@ -251,7 +247,9 @@ fight <- function(arena = puzzle_data, attack = c(G = 3L, E = 3L),
     enemy_idx <- arena[nbs] %in% enemy
     if (any(enemy_idx)) {
       nbs <- nbs[enemy_idx, , drop = FALSE]
-      unit_idx <- apply(units, 1, \(r) any(is_row(r, nbs)))
+      unit_idx <- duplicated(
+        rbind(units[, 1:2, drop = FALSE], nbs),
+        fromLast = TRUE)[1:nrow(units)]
       
       is_alive <- units[, "hp"] > 0
       min_hp <- min(units[unit_idx & is_alive, "hp"])
@@ -312,11 +310,14 @@ fight <- function(arena = puzzle_data, attack = c(G = 3L, E = 3L),
               return (NULL)
             }
             arena[units[next_target, 1:2, drop = FALSE]] <- "."
+            units[next_target, 1:2] <- -1L
           }
         }
       }
     }
     units <- units[order(units[, 1L], units[, 2L]), , drop = FALSE]
+    ## move dead unit "outside" of the grid => makes collision detection much easier
+    ## as a dead unit won't occupy a valid place
     ongoing <- length(unique(units[units[, "hp"] > 0L, "type"])) > 1L
   }
   if (verbose) {
