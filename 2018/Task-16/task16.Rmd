@@ -1,0 +1,282 @@
+---
+params:
+   task_nr: 16
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(tidyr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  before <- str_which(text_block, fixed("Before:"))
+  op <- before + 1L
+  after <- before + 2L
+  prg <- seq(max(after) + 1L, length(text_block))
+  n <- str_extract_all(text_block, "\\d+")
+  before <- do.call(rbind, n[before])
+  op <- do.call(rbind, n[op])
+  after <- do.call(rbind, n[after])
+  colnames(before) <- paste(letters[1:4], 0L, sep = "_")
+  colnames(after) <- paste(letters[1:4], 1L, sep = "_")
+  colnames(op) <- c("op", "A", "B", "C")
+  res <- cbind(before, op, after)
+  prg <- do.call(rbind, n[prg])
+  colnames(prg) <- colnames(op)
+  storage.mode(res) <- storage.mode(prg) <- "integer"
+  list(test = res, prg = prg)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+
+```{r get-solution-1, cache = TRUE}
+add <- function(a, b, c, reg, immediate = FALSE) {
+  if (immediate) {
+    reg[c + 1L] <- reg[a + 1L] + b
+  } else {
+    reg[c + 1L] <- reg[a + 1L] + reg[b + 1L]
+  }
+  reg
+}
+
+mul <- function(a, b, c, reg, immediate = FALSE) {
+  if (immediate) {
+    reg[c + 1L] <- reg[a + 1L] * b
+  } else {
+    reg[c + 1L] <- reg[a + 1L] * reg[b + 1L]
+  }
+  reg
+}
+
+ban <- function(a, b, c, reg, immediate = FALSE) {
+  if (immediate) {
+    reg[c + 1L] <- bitwAnd(reg[a + 1L], b)
+  } else {
+    reg[c + 1L] <- bitwAnd(reg[a + 1L], reg[b + 1L])
+  }
+  reg
+}
+
+bor <- function(a, b, c, reg, immediate = FALSE) {
+  if (immediate) {
+    reg[c + 1L] <- bitwOr(reg[a + 1L], b)
+  } else {
+    reg[c + 1L] <- bitwOr(reg[a + 1L], reg[b + 1L])
+  }
+  reg
+}
+
+set <- function(a, b, c, reg, immediate = FALSE) {
+  if (immediate) {
+    reg[c + 1L] <- a
+  } else {
+    reg[c + 1L] <- reg[a + 1L]
+  }
+  reg
+}
+
+gt <- function(a, b, c, reg, mode = 0L) {
+  if (mode == 0L) { ## immediate / register
+    reg[c + 1L] <- a > reg[b + 1L]
+  } else if (mode == 1L) { ## register / immediate
+    reg[c + 1L] <- reg[a + 1L] > b
+  } else {
+    reg[c + 1L] <- reg[a + 1L] > reg[b + 1L]
+  }
+  reg
+}
+
+eq <- function(a, b, c, reg, mode = 0L) {
+  if (mode == 0L) { ## immediate / register
+    reg[c + 1L] <- a == reg[b + 1L]
+  } else if (mode == 1L) { ## register / immediate
+    reg[c + 1L] <- reg[a + 1L] == b
+  } else {
+    reg[c + 1L] <- reg[a + 1L] == reg[b + 1L]
+  }
+  reg
+}
+
+all_ops <- list(
+  addr = \(...) add(..., immediate = FALSE),
+  addi = \(...) add(..., immediate = TRUE),
+  mulr = \(...) mul(..., immediate = FALSE),
+  muli = \(...) mul(..., immediate = TRUE),
+  banr = \(...) ban(..., immediate = FALSE),
+  bani = \(...) ban(..., immediate = TRUE),
+  borr = \(...) bor(..., immediate = FALSE),
+  bori = \(...) bor(..., immediate = TRUE),
+  setr = \(...) set(..., immediate = FALSE),
+  seti = \(...) set(..., immediate = TRUE),
+  gtir = \(...) gt(..., mode = 0L),
+  gtri = \(...) gt(..., mode = 1L),
+  gtrr = \(...) gt(..., mode = 2L),
+  eqir = \(...) eq(..., mode = 0L),
+  eqri = \(...) eq(..., mode = 1L),
+  eqrr = \(...) eq(..., mode = 2L)
+)
+
+apply_ops <- function(cpu_monitor = puzzle_data$test, ops = all_ops) {
+  apply(cpu_monitor, 1L, function(row) {
+    res <- row[9:12]
+    map_lgl(ops, \(f) all(f(a = row["A"], b = row["B"], c = row["C"], reg = row[1:4]) == res))
+  }) %>% 
+    t()
+}
+
+count_fits <- function(cpu_monitor = puzzle_data$test, ops = all_ops) {
+  res <- apply_ops(cpu_monitor, ops)
+  sum(rowSums(res) >= 3L)
+}
+
+count_fits(puzzle_data$test, all_ops)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+```{r get-solution-2, cache = TRUE}
+deparse_op_codes <- function(cpu_monitor = puzzle_data, ops = all_ops) {
+  res <- apply_ops(cpu_monitor$test, ops) %>% 
+    cbind(op = cpu_monitor$test[, "op"], .) %>% 
+    as_tibble()
+  cand <- res %>% 
+    group_by(op) %>% 
+    group_map(~ .x %>% 
+                summarize(across(everything(), sum)) %>% 
+                pivot_longer(everything()) %>% 
+                filter(value > 0L) %>% 
+                pull(name)
+              )
+  cand_n <- lengths(cand)
+  while(length(unique(cand_n)) > 1L) {
+    unique_hits <- cand_n == 1L
+    for (i in which(unique_hits)) {
+      cand[-i] <- map(cand[-i], ~ setdiff(.x, cand[[i]]))
+    }
+    cand_n <- lengths(cand)
+  }
+  sol <- unlist(cand)
+  reg <- rep(0L, 4L)
+  for (i in seq_len(nrow(cpu_monitor$prg))) {
+    row <- cpu_monitor$prg[i, ]
+    fn <- sol[row["op"] + 1L]
+    reg <- ops[[fn]](row["A"], row["B"], row["C"], reg)
+  }
+  reg[1L]
+}
+deparse_op_codes(puzzle_data, all_ops)
+```
