@@ -1,0 +1,222 @@
+---
+params:
+   task_nr: 20
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_remove("\\^|\\$")
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- c(
+  "WSSEESWWWNW(S|NENNEEEENN(ESSSSW(NWSW|SSEN)|WSWWN(E|WWS(E|SS))))",
+  "ENWWW(NEEE|SSE(EE|N))")[1L]
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]] %>% 
+      str_replace_all("\\$", "\\\\$"))
+```
+
+### Solution
+
+We construct a graph from the regex in the following way:
+
+1. If we hit any direction (`N|E|S|W`) simple add an edge to the edge list. To avoid
+duplicated edges, we keep a hash of added edges (not strictly necessary though).
+1. If we hit a branch `(` we push the current position on the stack, which we can later
+retrieve for the alternatives.
+1. If we hit an alternative marker `|` or the end of an branch `)` we retrieve the top
+of the parent stack (the last point where we started a branch.).
+1. If we hot the end of a branch, we remove the topmost element from the parent stack as 
+it is no longer needed.
+
+Once the graph is constructed, all we need to do is to get the shortest distance from the
+start to all other nodes and find the maximum of those path lengths.
+
+```{r get-solution-1}
+make_key <- function(pos) {
+  sprintf("%s,%s", pos["row"], pos["col"])
+}
+
+add_layout <- function(G) {
+  pos <- V(G)$name %>% 
+    str_split(",") %>% 
+    do.call(rbind, .)
+  storage.mode(pos) <- "integer"
+  mm <- max(pos[, 1])
+  pos[, 1] <- mm - pos[, 1] ## mirror the y - axis
+  G %>% 
+    set_graph_attr(
+      "layout",
+      pos[, 2:1]
+    )
+}
+
+construct_graph <- function(rex = puzzle_data) {
+  rex <- str_split(rex, "") %>% 
+    extract2(1L)
+  dirs <- rbind(
+    N = c(-1L, 0L),
+    E = c(0L, 1L),
+    S = c(1L, 0L),
+    W = c(0L, -1L)
+  ) %>% 
+    set_colnames(c("row", "col"))
+  pos <- c(row = 0L, col = 0L)
+  parent <- list(pos)
+  key <- make_key(pos)
+  edges <- matrix(character(0), 0L, 2L)
+  edge_hash <- new.env()
+  for (dir in rex) {
+    if (dir %in% c("N", "E", "S", "W")) {
+      new_pos <- dirs[dir, ] + pos
+      new_key <- make_key(new_pos)
+      edge_key <- paste(sort(c(key, new_key)), collapse = "_")
+      if (!exists(edge_key, edge_hash)) {
+        edge_hash[[edge_key]] <- TRUE
+        edges <- rbind(edges,
+                       cbind(key, new_key))
+      }
+      pos <- new_pos
+      key <- new_key
+    } else if (dir == "(") {
+      parent[[length(parent) + 1L]] <- pos
+    } else if (dir %in% c("|", ")")) {
+      pos <- parent[[length(parent)]]
+      key <- make_key(pos)
+      if (dir == ")") {
+        parent[[length(parent)]] <- NULL
+      }
+    }
+  }
+  graph_from_edgelist(edges) %>% 
+    add_layout()
+}
+G <- construct_graph(puzzle_data)
+dis <- distances(G, "0,0") 
+
+max(dis)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we simply have to count the nodes for which the shortest paths is at
+least 1000 steps away.
+
+```{r get-solution-2}
+length(dis[dis >= 1000L])
+```
