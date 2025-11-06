@@ -72,6 +72,7 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
+library(collections)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -143,9 +144,16 @@ print.erosion <- function(x, ...) {
 
 create_cave <- function(target = puzzle_data$target, 
                         depth = puzzle_data$depth,
-                        extend = 1L) {
-  n <- extend * target[, "row"]
-  m <- extend * target[, "col"]
+                        extend = 0L, add = TRUE) {
+  n <- target[, "row"]
+  m <- target[, "col"]
+  if (add) {
+    n <- n + extend
+    m <- m + extend
+  } else {
+    n <- n * extend
+    m <- m * extend
+  }
   cave <- matrix(NA_integer_, n, m)
   cave[1, ] <- (c(0L, 16807L * seq_len(m - 1L)) + depth) %% 20183L
   cave[, 1] <- (c(0L, 48271L * seq_len(n - 1L)) + depth) %% 20183L
@@ -164,7 +172,7 @@ create_cave <- function(target = puzzle_data$target,
   cave
 }
 
-cave <- create_cave(puzzle_data$target, puzzle_data$depth, 2L)
+cave <- create_cave(puzzle_data$target, puzzle_data$depth, 15L)
 
 sum(cave[seq(1L, puzzle_data$target[, "row"]),
          seq(1, puzzle_data$target[, "col"])])
@@ -180,14 +188,99 @@ cat(puzzle[[2]])
 
 ### Solution
 
+For the second part we us an A Star algorithm. We extend the cave by 15 pieces which
+corresponds roughly twice the tool changing time.
 
-```{r get-solution-2}
-find_path <- function(cave) {
-  start <- cbind(row = 1L, col = 1L)
-  target <- attr(cave, "target")
-  visited <- cave
-  visited[] <- FALSE
-  visited[start] <- TRUE
-  time <- 0L
+
+```{r get-solution-2, cache = TRUE}
+heuristic <- function(pos, target, tool) {
+  sum(abs(c(target) - c(pos))) + (tool != 1L) * 7L
 }
+
+find_shortest_path <- function(cave) {
+  dirs <- rbind(
+    "^" = c(-1L, 0L),
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L),
+    "<" = c(0L, -1L)
+  )
+  n <- nrow(cave)
+  m <- ncol(cave)
+  n_tools <- 3L
+  n_terrain <- 3L
+
+  ## each matrix represents the change from current (column) to new (row) terrain
+  ## if we hold a certain tool (3rd dimension)
+  tool_changes <- array(c(1L, 2L, 1L, NA_integer_, NA_integer_, NA_integer_, 1L, 3L, 1L,
+                          2L, 2L, 1L, 2L, 2L, 3L, NA_integer_, NA_integer_, NA_integer_,
+                          NA_integer_, NA_integer_, NA_integer_, 2L, 3L, 3L, 1L, 3L, 3L),
+                        c(n_terrain, n_terrain, n_tools), 
+                        dimnames = list(c("rocky", "wet", "narrow"),
+                                        c("rocky", "wet", "narrow"),
+                                        c("torch", "climbing gear", "empty")))
+  make_key <- function(pos, tool) {
+    (pos[1] - 1L) * m + pos[2] + 
+      (tool - 1L) * n * m
+  }  
+
+  get_neighbors <- function(pos, tool) {
+    nbs <- t(t(dirs) + c(pos))
+    ## no neighbors outside the cave
+    nbs <- nbs[
+      between(nbs[, 1L], 1L, nrow(cave)) & 
+        between(nbs[, 2L], 1L, ncol(cave)), , 
+      drop = FALSE
+    ]
+    from <- cave[pos]
+    to <- cave[nbs]
+    idx <- cbind(to + 1L, from + 1L, tool)
+    new_tool <- tool_changes[idx]
+    cbind(
+      nbs, 
+      costs = (tool != new_tool) * 7L + 1L,
+      tool = new_tool
+    )
+  }
+  start <- cbind(1L, 1L)
+  target <- attr(cave, "target")
+  start_tool <- 1L
+  
+  pq <- priority_queue()
+  max_states <- n * m * n_tools
+  f_score <- g_score <- rep(.Machine$integer.max, max_states)
+  
+  start_key <- make_key(start, start_tool)
+  g_score[start_key] <- 0L
+  f_score[start_key] <- heuristic(start, target, start_tool)
+  
+  pq$push(cbind(start,
+                tool = start_tool),
+          -f_score[[start_key]])
+  while (pq$size() > 0) {
+    status <- pq$pop()
+    pos <- status[, 1:2, drop = FALSE] 
+    key <- make_key(pos, status[, 3L])
+    
+    if (all(pos == target)) {
+      ## we reached the goal
+      return(g_score[key] + (status[, 3L] != 1L) * 7L)
+    }
+    
+    nbs <- get_neighbors(pos, status[, 3L])
+    for (nb_idx in seq_len(nrow(nbs))) {
+      nb <- nbs[nb_idx, , drop = FALSE]
+      nb_pos <- nb[, 1:2, drop = FALSE]
+      nb_tool <- nb[, "tool"]
+      nb_key <- make_key(nb_pos, nb_tool)
+      g_new <- g_score[key] + nb[, "costs"]
+      if (g_score[nb_key] > g_new) {
+        g_score[nb_key] <- g_new
+        f_score[nb_key] <- g_new + heuristic(nb_pos, target, nb_tool)
+        pq$push(cbind(nb_pos, tool = nb_tool), -f_score[nb_key])
+      }
+    }
+  }
+  FALSE
+}
+find_shortest_path(cave)
 ```
