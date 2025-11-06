@@ -1,0 +1,193 @@
+---
+params:
+   task_nr: 22
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_extract_all("\\d+") %>% 
+    set_names("depth", "target") %>% 
+    lapply(as.numeric)
+  res$target <- matrix(res$target[2:1], ncol = 2L, 
+                       dimnames = list(NULL, c("row", "col"))) + 1L
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- list(target = matrix(11, ncol = 2, 
+                                     dimnames = list(NULL, c("row", "col"))),
+                     depth = 510L)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]] %>% 
+      str_replace_all("\\$", "\\\\$"))
+```
+
+### Solution
+
+```{r get-solution-1, cache = TRUE}
+print.erosion <- function(x, ...) {
+  cave <- x 
+  cave[] <- c(".", "=", "|")[x + 1L]
+  cave[1, 1] <- "M"
+  cave[attr(x, "target")] <- "T"
+  x <- apply(cave, 1L, paste, collapse = "") %>% 
+    paste(collapse = "\n")
+  cat(x, "\n")
+  invisible(x)
+}
+
+create_cave <- function(target = puzzle_data$target, 
+                        depth = puzzle_data$depth,
+                        extend = 1L) {
+  n <- extend * target[, "row"]
+  m <- extend * target[, "col"]
+  cave <- matrix(NA_integer_, n, m)
+  cave[1, ] <- (c(0L, 16807L * seq_len(m - 1L)) + depth) %% 20183L
+  cave[, 1] <- (c(0L, 48271L * seq_len(n - 1L)) + depth) %% 20183L
+  for (i in 2:n) {
+    for (j in 2:m) {
+      if (i == target[, "row"] && j == target[, "col"]) {
+        cave[i, j] <- depth %% 20183L
+      } else {
+        cave[i, j] <- ((cave[i - 1L, j] * cave[i, j - 1L]) + depth) %% 20183L
+      }
+    }
+  }
+  cave <- cave %% 3L
+  attr(cave, "target") <- target
+  class(cave) <- "erosion"
+  cave
+}
+
+cave <- create_cave(puzzle_data$target, puzzle_data$depth, 2L)
+
+sum(cave[seq(1L, puzzle_data$target[, "row"]),
+         seq(1, puzzle_data$target[, "col"])])
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+
+```{r get-solution-2}
+find_path <- function(cave) {
+  start <- cbind(row = 1L, col = 1L)
+  target <- attr(cave, "target")
+  visited <- cave
+  visited[] <- FALSE
+  visited[start] <- TRUE
+  time <- 0L
+}
+```
