@@ -1,0 +1,254 @@
+---
+params:
+   task_nr: 21
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+
+.page-content table tr pre {
+  border-radius: revert;
+  background-color: revert;
+  color: revert;
+  padding: revert;
+  border: revert;
+}
+```
+
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(kableExtra)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  ip <- str_extract(text_block[[1L]], "\\d+") %>% 
+    as.integer()
+  ops <- text_block[-1L] %>% 
+    str_split(" ") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("op", "A", "B", "C")) %>% 
+    as_tibble() %>% 
+    mutate(across(A:C, as.integer))
+  list(ip = ip, ops = ops)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]] %>% 
+      str_replace_all("\\$", "\\\\$"))
+```
+
+### Solution
+
+First, we deparse the op-codes by identifying jumps and loops:
+
+```{r deparse-ops, echo = FALSE}
+puzzle_data$ops %>% 
+  mutate(Instruction = paste(op, A, B, C),
+         Flow = c(
+           "", "<--+", "   |", "   |", "---+", "", "<--------------+", 
+           "               |", "<----------+   |", "           |   |",
+           "           |   |", "           |   |", "           |   |",
+           "           |   |", "           |   |", "           |   |", 
+           "---+       |   |", "   |       |   |", "<--|-------|---|---+", 
+           "   |       |   |   |", "   |       |   |   |", "   |       |   |   |", 
+           "   |       |   |   |", "---|---+   |   |   |", "   |   |   |   |   |", 
+           "---|---|---|---|---+", "<--|---+   |   |", "---|-------+   |", 
+           "<--+           |", "               |", "---------------+"
+         ),
+         Jumps = c(
+           rep("", 4L),
+           "jump if x5 != 72",
+           rep("", 11L),
+           "jump if x4 < 256",
+           rep("", 6L),
+           "jump if x3 > x4",
+           rep("", 6L),
+           "jump if x5 != x0"
+         ),
+         "Pseudo code" = c(
+           "x5=123", "x5=x5&456", "x5=(x5==72)?1:0", "x1+=x5", "", 
+           "x5=0", "x4=x5|65536", "x5=3935295", "x2=x4&255", "x5+=x2",
+           "x5=x5&16777215", "x5*=65899", "x5=x5&16777215", 
+           "x2=x4<256?1:0", "x1+=x2", "x1++", "", "x2=0", "x3=x2+1",
+           "x3*=256", "x3=(x3>x4)?1:0", "x1+=x3", "x1++", "", "x2++", "",
+           "x4=x2", "", "x2=(x5==x0)?1:0", "x1+=x2", ""
+         ),
+         .keep = "none") %>% 
+  mutate(across(-Instruction, ~ paste0("<pre>", .x, "</pre>"))) %>% 
+  kbl(escape = FALSE, row.names = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>% 
+  column_spec(2:4, monospace = TRUE)
+```
+
+That is the code boils down to the following logic:
+
+1. Lines 1 - 5 do not do anything useful as `x5` is anyways reset in line 6.
+1. Lines 9 - 28: in the first iteration `x2` is zero and we setup `x5` and `x4`. Then
+as long as `x4` is greater or equal than 256 we will find the largest `x2` such that 
+`256 * x2 <= x4` in a loop. 
+1. We use this `x2` to update `x5` in the next iteration. `x4` is also updated and the
+iteration starts again.
+1. Line 29 is the only possibility to stop the infinite loop. If we set `x0` to match 
+(any) generated `x5` the program will terminate.
+
+Hence, to solve the first part we have to generate the first `x5` and set `x0` to this 
+value.
+
+*N.B.* As we need bit 64 bitwise operations, we include a simple C++ code to avoid the 
+need to work on bit vectors in R for speed reasons.
+
+```{Rcpp cpp-algorithm, file = "bit64.cpp", cache = TRUE}
+```
+
+```{r get-solution-1, cache = TRUE}
+debug_chronal <- function() {
+  x4 <- x5 <- as.integer64(0L)
+  first_x5 <- NULL
+  seen <- new.env(parent = emptyenv())
+  while (TRUE) {
+    x4 <- bitwOr64(x5, as.integer64(65536L))
+    x5 <- as.integer64(3935295)
+    while (x4 > 0) {
+      x2 <- bitwAnd64(x4, as.integer64(255L))
+      x5 <- bitwAnd64(x5 + x2,
+                      as.integer64(16777215L)) * 
+        as.integer64(65899L)
+      x5 <- bitwAnd64(x5, as.integer64(16777215L))
+      x4 <- x4 %/% as.integer64(256L)
+    }
+    if (is.null(first_x5)) {
+      first_x5 <- x5
+    }
+    key <- as.character(x5)
+    if (exists(key, seen)) {
+      break
+    }
+    seen[[key]] <- TRUE
+    last_x5 <- x5
+  }
+  list(first_x5 = first_x5,
+       last_x5 = last_x5)
+}
+
+res <- debug_chronal()
+res$first_x5
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To solve the second part, we continue producing `x5` until we end get an `x5` which we 
+have seen already. The `x5` produced just before is our solution.
+
+```{r get-solution-2}
+res$last_x5
+```
