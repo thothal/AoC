@@ -2001,6 +2001,10 @@ In the cave system above, because the mouth is at <code>0,0</code> and the targe
 </div>
 <div id="solution" class="section level3" number="2.1.2">
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
+<p>The first part is rather straight forward. Construct the cave as indicated and sum the
+terrain types.</p>
+<p><em>N.B.</em> We allow for an expanding factor, to calculate a bigger portion of the cave, which
+will be needed for the second part of the puzzle.</p>
 <pre class="r"><code>print.erosion &lt;- function(x, ...) {
   cave &lt;- x 
   cave[] &lt;- c(&quot;.&quot;, &quot;=&quot;, &quot;|&quot;)[x + 1L]
