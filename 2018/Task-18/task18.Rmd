@@ -48,8 +48,10 @@ editor_options:
 ```
 
 ```{r setup, include = FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
-                      dev.args = list(bg = "transparent"))
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, fig.align = "center",
+  dev.args = list(bg = "transparent")
+)
 ## Define a function to write text in typewriter font
 tt <- function(x) {
   if (knitr::is_latex_output()) {
@@ -60,7 +62,6 @@ tt <- function(x) {
     x
   }
 }
-
 ```
 
 # Setup
@@ -83,44 +84,50 @@ library(tidyr)
 ```{r get-data, cache = FALSE, messages = FALSE}
 session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
 base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
-puzzle <- GET(base_url,
-              session_cookie) %>% 
-  content(encoding = "UTF-8") %>% 
-  xml_find_all("///article") %>% 
+puzzle <- GET(
+  base_url,
+  session_cookie
+) %>%
+  content(encoding = "UTF-8") %>%
+  xml_find_all("///article") %>%
   lapply(as.character)
 
 parse_puzzle_data <- function(text_block = readClipboard()) {
   if (length(text_block) == 1L) {
-    text_block <- text_block %>% 
-      str_split("\n") %>% 
-      extract2(1L) %>% 
+    text_block <- text_block %>%
+      str_split("\n") %>%
+      extract2(1L) %>%
       keep(nzchar)
   }
-  text_block %>% 
-    str_split("") %>% 
+  text_block %>%
+    str_split("") %>%
     do.call(rbind, .)
 }
 
 puzzle_data <- local({
-  GET(paste0(base_url, "/input"),
-      session_cookie) %>% 
-    content(encoding = "UTF-8") %>% 
+  GET(
+    paste0(base_url, "/input"),
+    session_cookie
+  ) %>%
+    content(encoding = "UTF-8") %>%
     parse_puzzle_data()
 })
 ```
 
 ```{r example-data, eval = interactive(), echo = FALSE}
 example_data <- matrix(
-  c(".", ".", ".", ".", "#", ".", ".", "|", "|", ".", 
-    "#", ".", "|", ".", ".", ".", "|", "|", ".", ".", 
-    ".", ".", ".", "|", "#", ".", ".", ".", "|", ".", 
-    "#", ".", ".", "#", "|", "#", ".", ".", "|", "#", 
-    ".", ".", "|", ".", "|", ".", ".", ".", "|", ".", 
-    ".", "#", ".", ".", "|", "|", ".", "#", "|", "|", 
-    ".", "|", ".", ".", "#", "|", "|", "|", ".", ".", 
-    "|", "#", ".", ".", "|", ".", ".", ".", ".", ".", 
-    "#", "#", "#", ".", "#", ".", ".", "#", "|", "|", 
-    ".", "|", ".", "#", "|", ".", ".", "|", ".", "."),
+  c(
+    ".", ".", ".", ".", "#", ".", ".", "|", "|", ".",
+    "#", ".", "|", ".", ".", ".", "|", "|", ".", ".",
+    ".", ".", ".", "|", "#", ".", ".", ".", "|", ".",
+    "#", ".", ".", "#", "|", "#", ".", ".", "|", "#",
+    ".", ".", "|", ".", "|", ".", ".", ".", "|", ".",
+    ".", "#", ".", ".", "|", "|", ".", "#", "|", "|",
+    ".", "|", ".", ".", "#", "|", "|", "|", ".", ".",
+    "|", "#", ".", ".", "|", ".", ".", ".", ".", ".",
+    "#", "#", "#", ".", "#", ".", ".", "#", "|", "|",
+    ".", "|", ".", "#", "|", ".", ".", "|", ".", "."
+  ),
   10L, 10L
 )
 ```
@@ -151,13 +158,13 @@ count_non_empty <- function(n, acre = puzzle_data) {
     c(1L, 0L),
     c(1L, 1L)
   )
-  
+
   get_neighbors <- function(pos) {
     nbs <- t(t(dirs) + c(pos))
     nbs[between(nbs[, 1L], 1L, nrow(acre)) &
-          between(nbs[, 2L], 1L, ncol(acre)), , drop = FALSE]
+      between(nbs[, 2L], 1L, ncol(acre)), , drop = FALSE]
   }
-  
+
   change_state <- function(pos) {
     type <- acre[pos]
     nbs <- get_neighbors(pos)
@@ -172,7 +179,7 @@ count_non_empty <- function(n, acre = puzzle_data) {
     } else if (type == "#") {
       ## lumberyard
       if_else(sum(acre[nbs] == "#") >= 1 &&
-                sum(acre[nbs] == "|") >= 1, "#", ".")
+        sum(acre[nbs] == "|") >= 1, "#", ".")
     }
   }
 
@@ -200,7 +207,7 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the second part we re-implement the algorithm in R to be faster. We use a hash to 
+For the second part we re-implement the algorithm in C++ to be faster. We use a hash to 
 detect the cycle and once we detect it we fast forward.
 
 ```{Rcpp cpp-algorithm, file = "trees.cpp", cache = TRUE}
