@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2025-10-24" />
+        <meta name="date" content="2025-11-07" />
     
     <title>Task 18   </title>
 
@@ -1821,7 +1821,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-10-24</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2025-11-07</p>
            
 
    
@@ -2041,28 +2041,32 @@ library(tidyr)</code></pre>
 <h2><span class="header-section-number">1.2</span> Retrieve Data from <tt>AoC</tt></h2>
 <pre class="r"><code>session_cookie &lt;- set_cookies(session = keyring::key_get(&quot;AoC-GitHub-Cookie&quot;))
 base_url &lt;- paste0(&quot;https://adventofcode.com/&quot;, params$year, &quot;/day/&quot;, params$task_nr)
-puzzle &lt;- GET(base_url,
-              session_cookie) %&gt;% 
-  content(encoding = &quot;UTF-8&quot;) %&gt;% 
-  xml_find_all(&quot;///article&quot;) %&gt;% 
+puzzle &lt;- GET(
+  base_url,
+  session_cookie
+) %&gt;%
+  content(encoding = &quot;UTF-8&quot;) %&gt;%
+  xml_find_all(&quot;///article&quot;) %&gt;%
   lapply(as.character)
 
 parse_puzzle_data &lt;- function(text_block = readClipboard()) {
   if (length(text_block) == 1L) {
-    text_block &lt;- text_block %&gt;% 
-      str_split(&quot;\n&quot;) %&gt;% 
-      extract2(1L) %&gt;% 
+    text_block &lt;- text_block %&gt;%
+      str_split(&quot;\n&quot;) %&gt;%
+      extract2(1L) %&gt;%
       keep(nzchar)
   }
-  text_block %&gt;% 
-    str_split(&quot;&quot;) %&gt;% 
+  text_block %&gt;%
+    str_split(&quot;&quot;) %&gt;%
     do.call(rbind, .)
 }
 
 puzzle_data &lt;- local({
-  GET(paste0(base_url, &quot;/input&quot;),
-      session_cookie) %&gt;% 
-    content(encoding = &quot;UTF-8&quot;) %&gt;% 
+  GET(
+    paste0(base_url, &quot;/input&quot;),
+    session_cookie
+  ) %&gt;%
+    content(encoding = &quot;UTF-8&quot;) %&gt;%
     parse_puzzle_data()
 })</code></pre>
 </div>
@@ -2263,13 +2267,13 @@ After 10 minutes, there are <code>37</code> wooded acres and <code>31</code> lum
     c(1L, 0L),
     c(1L, 1L)
   )
-  
+
   get_neighbors &lt;- function(pos) {
     nbs &lt;- t(t(dirs) + c(pos))
     nbs[between(nbs[, 1L], 1L, nrow(acre)) &amp;
-          between(nbs[, 2L], 1L, ncol(acre)), , drop = FALSE]
+      between(nbs[, 2L], 1L, ncol(acre)), , drop = FALSE]
   }
-  
+
   change_state &lt;- function(pos) {
     type &lt;- acre[pos]
     nbs &lt;- get_neighbors(pos)
@@ -2284,7 +2288,7 @@ After 10 minutes, there are <code>37</code> wooded acres and <code>31</code> lum
     } else if (type == &quot;#&quot;) {
       ## lumberyard
       if_else(sum(acre[nbs] == &quot;#&quot;) &gt;= 1 &amp;&amp;
-                sum(acre[nbs] == &quot;|&quot;) &gt;= 1, &quot;#&quot;, &quot;.&quot;)
+        sum(acre[nbs] == &quot;|&quot;) &gt;= 1, &quot;#&quot;, &quot;.&quot;)
     }
   }
 
@@ -2321,7 +2325,7 @@ This important natural resource will need to last for at least thousands of year
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
-<p>For the second part we re-implement the algorithm in R to be faster. We use a hash to
+<p>For the second part we re-implement the algorithm in C++ to be faster. We use a hash to
 detect the cycle and once we detect it we fast forward.</p>
 <pre class="cpp"><code>#ifndef STANDALONE
 #include &lt;Rcpp.h&gt;

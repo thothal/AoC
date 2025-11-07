@@ -124,11 +124,16 @@ example_data <- list(target = matrix(11, ncol = 2,
 ### Description
 
 ```{r show-puzzle-a, echo = FALSE, results = "asis"}
-cat(puzzle[[1]] %>% 
-      str_replace_all("\\$", "\\\\$"))
+cat(puzzle[[1]])
 ```
 
 ### Solution
+
+The first part is rather straight forward. Construct the cave as indicated and sum the 
+terrain types. 
+
+*N.B.* We allow for an expanding factor, to calculate a bigger portion of the cave, which 
+will be needed for the second part of the puzzle.
 
 ```{r get-solution-1, cache = TRUE}
 print.erosion <- function(x, ...) {
