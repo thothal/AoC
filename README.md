@@ -42,6 +42,10 @@ of the assignments where I explain how I came up with the solution (if at all).
 <details>
 <summary> Archive</summary>
 
+### 2023
+
+### 2022
+
 ### 2021
 
 - [x] [Day 1](https://thothal.github.io/AoC/2021_task1.html)
@@ -69,6 +73,36 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 23](https://thothal.github.io/AoC/2021_task23.html)
 - [x] [Day 24](https://thothal.github.io/AoC/2021_task24.html)
 - [x] [Day 25](https://thothal.github.io/AoC/2021_task25.html)
+
+### 2020
+
+### 2019
+
+- [x] [Day 1](https://thothal.github.io/AoC/2019_task1.html)
+- [ ] Day 2
+- [ ] Day 3
+- [ ] Day 4
+- [ ] Day 5
+- [ ] Day 6
+- [ ] Day 7
+- [ ] Day 8
+- [ ] Day 9
+- [ ] Day 10
+- [ ] Day 11
+- [ ] Day 12
+- [ ] Day 13
+- [ ] Day 14
+- [ ] Day 15
+- [ ] Day 16
+- [ ] Day 17
+- [ ] Day 18
+- [ ] Day 19
+- [ ] Day 20
+- [ ] Day 21
+- [ ] Day 22
+- [ ] Day 23
+- [ ] Day 24
+- [ ] Day 25
 
 ### 2018
 
