@@ -1,0 +1,261 @@
+---
+params:
+   task_nr: 3
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split(",") %>% 
+    map(~ tibble(
+      dir = str_sub(.x, 1L, 1L),
+      dis = as.integer(str_sub(.x, 2L))
+    ))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+exs <- list(
+  c("R8,U5,L5,D3", "U7,R6,D4,L4"),
+  c("R75,D30,R83,U83,L12,D49,R71,U7,L72", "U62,R66,U55,R34,D71,R55,D58,R83"),
+  c("R98,U47,R26,D63,R33,U87,L62,D20,R33,U53,R51", "U98,R91,D20,R16,D67,R40,U7,R15,U6,R7")
+)
+example_data <- parse_puzzle_data(exs[[2L]])
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+First, we determine the maximum steps taken to all diretcions to be able to size the 
+matrix accordingly. Then, we loop through all instructions an place the wire marker on the
+fileds as indicated. If we hit an already occupied filed for the second wire, we mark it 
+with `X`. Eventually, we get the Manhattan distance from the start to all fields marked 
+with `X`.
+
+```{r get-solution-1}
+print.wires <- function(x, ...) {
+  apply(x, 1, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat()
+  invisible(x)
+}
+
+create_grid <- function(wire_dir = puzzle_data) {
+  ## first get extension for both wires
+  get_dim <- function(wire) {
+    wire %>% 
+      mutate(
+        dx = case_when(
+          dir == "R" ~ dis,
+          dir == "L" ~ -dis,
+          TRUE ~ 0L),
+        
+        dy = case_when(
+          dir == "D" ~ dis,
+          dir == "U" ~ -dis,
+          TRUE ~ 0L),
+        x = cumsum(dx),
+        y = cumsum(dy)
+      ) %>% 
+      summarize(
+        across(x:y, list(min = ~ min(c(0L, .x)),
+                         max = ~ max(c(0L, .x))))
+      )
+  }
+  dims <- map(wire_dir, get_dim) %>%
+    reduce(~ tibble(
+      x_min = min(.x$x_min, .y$x_min),
+      x_max = max(.x$x_max, .y$x_max),
+      y_min = min(.x$y_min, .y$y_min),
+      y_max = max(.x$y_max, .y$y_max)
+    ))
+  wires <- matrix(".", 
+                  dims$y_max - dims$y_min + 1L,
+                  dims$x_max - dims$x_min + 1L)
+  class(wires) <- "wires"
+  center <- cbind(
+    if_else(dims$y_min < 0, abs(dims$y_min) + 1L, 1L),
+    if_else(dims$x_min < 0, abs(dims$x_min) + 1L, 1L))
+  wires[center] <- "O"
+  path_length <- wires
+  path_length[] <- 0L
+  storage.mode(path_length) <- "integer"
+  for (j in seq_along(wire_dir)) {
+    pos <- center
+    wire <- wire_dir[[j]]
+    old_path_length <- path_length
+    path_length[] <- .Machine$integer.max
+    path <- 0L
+    for (i in seq_len(nrow(wire))) {
+      dir <- wire %>% 
+        slice(i)
+      if (dir$dir %in% c("L", "R")) {
+        offset <- if_else(dir$dir == "L", -1L, 1L)
+        idx <- cbind(pos[1L], 
+                     seq(pos[2L] + offset,
+                         by = offset, 
+                         length.out = dir$dis)
+        )
+      } else {
+        offset <- if_else(dir$dir == "U", -1L, 1L)
+        idx <- cbind(seq(pos[1L] + offset, by = offset, 
+                         length.out = dir$dis),
+                     pos[2L])
+      }
+      path <- path + seq(1L, length.out = dir$dis)
+      markers <- if_else(!wires[idx] %in% c(".", j), "X", as.character(j))
+      wires[idx] <- markers
+      path_length[idx] <- pmin(path_length[idx], path)
+      path <- tail(path, 1L)
+      pos <- tail(idx, 1L)
+    }
+    
+  }
+  crossings <- which(wires == "X", arr.ind = TRUE)
+  steps <- cbind(
+    path1 = old_path_length[crossings],
+    path2 = path_length[crossings])
+  attr(wires, "center") <- center
+  attr(wires, "steps") <- steps
+  wires
+}
+
+follow_wires <- function(wires) {
+  x_pos <- which(wires == "X", arr.ind = TRUE)
+  center <- attr(wires, "center")
+  sweep(x_pos, 2L, c(center), "-") %>% 
+    abs() %>% 
+    rowSums() %>% 
+    min()
+}
+
+grid <- create_grid(puzzle_data)
+follow_wires(grid)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we keep track of the path length, and store it for the intersection 
+points. Then we just have to return the minimum step sum for any of the intersections. 
+
+```{r get-solution-2}
+find_min_steps <- function(grid) {
+  attr(grid, "steps") %>% 
+    rowSums() %>% 
+    min()
+}
+
+find_min_steps(grid)
+```
