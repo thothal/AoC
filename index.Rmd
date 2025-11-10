@@ -90,6 +90,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 3](2019_task3.html)
 * [Day 4](2019_task4.html)
 * [Day 5](2019_task5.html)
+* [Day 6](2019_task6.html)
 
 # 2018
 
