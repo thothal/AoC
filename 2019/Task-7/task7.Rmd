@@ -308,7 +308,7 @@ cat(puzzle[[2]])
 For the second part, we create an infinite loop where the output of the previous amplifier
 is fed to the next one. Whenever an amplifier produces an output, we fed it to the next, 
 while the previous amplifier is in waiting mode to receive its next input. We continue
-this infinte loop unitl all amplifiers signaled their proper termination.
+this infinite loop until all amplifiers signaled their proper termination.
 
 ```{r get-solution-2}
 find_max_thrust_loop <- function(op_codes = puzzle_data, verbose = FALSE) {
