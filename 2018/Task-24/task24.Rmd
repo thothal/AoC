@@ -1,0 +1,295 @@
+---
+params:
+   task_nr: 24
+   year: 2018
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+
+```
+
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(purrr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  parse_army <- function(block) {
+    stats <- str_extract_all(block, "\\d+") %>% 
+      do.call(rbind, .) %>% 
+      set_colnames(c("units", "hp", "dmg", "initiative"))
+    storage.mode(stats) <- "integer"
+    attack <- str_extract(block, "\\S+ damage") %>% 
+      str_remove(" damage")
+    immune <- str_extract(block, "immune to [^;)]+") %>% 
+      str_remove("immune to ") %>% 
+      str_split(", ")
+    weak <- str_extract(block, "weak to [^;)]+") %>% 
+      str_remove("weak to ") %>% 
+      str_split(", ")
+    as_tibble(stats) %>% 
+      mutate(attack = attack,
+             weak = weak,
+             immune = immune)
+  }
+  army_blocks_start <- str_which(text_block, "Immune|Infection") + 1L
+  army_blocks_end <- c(army_blocks_start[[2L]] - 2L, length(text_block))
+  army_label <- c("immune", "infection")
+  pmap(list(army_blocks_start, army_blocks_end, army_label),
+        \(i, j, army) parse_army(text_block[i:j]) %>% 
+         mutate(army = army, .before = 1L)) %>% 
+    list_rbind() %>% 
+    mutate(id = paste0(str_sub(army, 1L, 2L), 1:n()), .by = army,
+           .before = 1L) %>% 
+    mutate(army_id = if_else(army == "infection", 0L, 1L),
+           .before = army)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- tibble(
+  id = c("im1", "im2", "in1", "in2"), 
+  army_id = rep(1:0, each = 2L),
+  army = c("immune", "immune", "infection", "infection"), 
+  units = c(17L, 989L, 801L, 4485L), 
+  hp = c(5390L, 1274L, 4706L, 2961L), 
+  dmg = c(4507L, 25L, 116L, 12L), 
+  initiative = c(2L, 3L, 1L, 4L), 
+  attack = c("fire", "slashing", "bludgeoning", "slashing"),
+  weak = list(c("radiation", "bludgeoning"), 
+              c("bludgeoning", "slashing"), 
+              "radiation", 
+              c("fire", "cold")), 
+  immune = list(NA_character_, "fire", NA_character_, "radiation")
+)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+For the first part, we start with a (slowish) un-optimized R version, which uses
+inner joins and sorting to find the relevant opponents. Event though the number of
+armies is small, the inherent copy on modify semantic of R slows the algorithm down.
+
+```{r get-solution-1, cache = TRUE}
+choose_opponents <- function(armies) {
+  armies <- armies %>% 
+    mutate(power = units * dmg) %>% 
+    arrange(desc(power), desc(initiative)) %>% 
+    mutate(opponent_id = (army_id + 1L) %% 2L,
+           id = factor(id, id)) 
+  armies %>% 
+    inner_join(armies,
+               join_by(army_id == opponent_id),
+               suffix = c("_attacker", "_defender"),
+               relationship = "many-to-many") %>% 
+    mutate(
+      is_weak = map2_lgl(attack_attacker, weak_defender, ~ .x %in% .y),
+      is_immune = map2_lgl(attack_attacker, immune_defender, ~.x %in% .y),
+      damage_dealt = power_attacker * case_when(is_weak ~ 2L,
+                                                is_immune ~ 0L,
+                                                .default = 1L)) %>% 
+    group_by(id_attacker) %>%
+    arrange(desc(damage_dealt), desc(power_defender), desc(initiative_defender),
+            .by_group = TRUE) %>%
+    group_split() %>%
+    reduce(.init = tibble(id_defender = character(0L)),
+           .f = function(acc, group) {
+             available <- group %>%
+               filter(!id_defender %in% acc$id_defender)
+             if (nrow(available) > 0L) {
+               acc <- bind_rows(acc, available %>%
+                                  slice(1L))
+             }
+             acc
+           }) %>%
+    arrange(desc(initiative_attacker)) %>% 
+    mutate(
+      id_attacker = as.character(id_attacker),
+      id_defender,
+      .keep = "none"
+    )
+}
+
+attack_opponents <- function(attack_order, armies) {
+  for (i in seq_len(nrow(attack_order))) {
+    battle <- attack_order %>% 
+      slice(i) %>% 
+      as.list()
+    attacker <- armies %>% 
+        filter(id == battle$id_attacker)
+    defender <- armies %>% 
+      filter(id == battle$id_defender)
+    if (attacker$units > 0L) {
+      power <- attacker$units * attacker$dmg * 
+        case_when(attacker$attack %in% defender$weak[[1L]] ~ 2L,
+                  attacker$attack %in% defender$immune[[1L]] ~ 0L, ## should never happen
+                  .default = 1L)
+      armies <- armies %>% 
+        mutate(units = if_else(id == battle$id_defender, 
+                               units - power %/% hp, 
+                               units))
+    }
+  }
+  armies %>% 
+    filter(units > 0L)
+}
+
+fight <- function(armies = puzzle_data) {
+  
+  is_done <- function(armies) {
+    armies %>% 
+      pull(army) %>% 
+      unique() %>% 
+      length() %>% 
+      equals(1L)
+  }
+  while (!is_done(armies)) {
+    attack_order <- choose_opponents(armies)
+    armies <- attack_opponents(attack_order, armies)
+  }
+  armies %>% 
+    summarize(remaining_force = sum(units)) %>% 
+    pull(remaining_force)
+}
+fight(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we re-implment the solution in C++ for a substantial speed gain.
+Then, we can use a binary search to find the minimal boost. We also included a stalemate
+check in this version, as it could happen that the remaining groups are still alive but to
+weak to kill a single opponent.
+
+```{Rcpp cpp-algorithm, file = "immune.cpp", cache = TRUE}
+```
+
+```{r get-solution-2, cache = TRUE}
+armies <- puzzle_data %>% 
+  rowwise() %>% 
+  group_split() %>% 
+  map(function(row) {
+    row <- as.list(row)
+    if (is.na(row$weak)) {
+      row$weak <- ""
+    } else {
+      row$weak <- paste(unlist(row$weak), collapse = ",")
+    }
+    if (is.na(row$immune)) {
+      row$immune <- ""
+    } else {
+      row$immune <- paste(unlist(row$immune), collapse = ",")
+    }
+    row
+  })
+
+find_minimum_booster(armies[1:10], armies[11:20])
+```
