@@ -86,6 +86,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # 2019
 
 * [Day 1](2019_task1.html)
+* [Day 2](2019_task2.html)
 
 # 2018
 
