@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 4
+   task_nr: 5
    year: 2019
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -94,7 +94,7 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       keep(nzchar)
   }
   text_block %>% 
-    str_split("-") %>% 
+    str_split(",") %>% 
     do.call(c, .) %>% 
     as.integer()
 }
@@ -122,8 +122,8 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We iterate through the range and count valid passwords. To split the number into digits, 
-we use a numeric version instead of the obvious `str_split` as it is faster.
+We include the parameter mode and the new op codes into the parser (and also include the
+op codes for the second part of the puzzle).
 
 ```{r get-solution-1}
 split_digits <- function(n) {
@@ -137,21 +137,110 @@ split_digits <- function(n) {
   digits
 }
 
-is_valid <- function(n) {
-  digits <- split_digits(n)
-  any(table(digits) >= 2) &&
-    all(diff(digits) >= 0L)
-}
-
-count_valid <- function(range = puzzle_data, validator = is_valid) {
-  cnt <- 0L
-  for (i in seq(range[1L], range[2L])) {
-    cnt <- cnt + validator(i)
+parse_op_codes <- function(op_codes = puzzle_data, input = 1L, verbose = FALSE) {
+  out_buffer <- integer(0L)
+  add <- function(x, y, res, modes) {
+    if (modes[1L] == 0L) {
+      x <- op_codes[x + 1L]
+    }
+    if (modes[2L] == 0L) {
+      y <- op_codes[y + 1L]
+    }
+    op_codes[[res + 1L]] <<- x + y
+    ip <<- ip + 4L
   }
-  cnt
+  mul <- function(x, y, res, modes) {
+    if (modes[1L] == 0L) {
+      x <- op_codes[x + 1L]
+    }
+    if (modes[2L] == 0L) {
+      y <- op_codes[y + 1L]
+    }
+    op_codes[[res + 1L]] <<- x * y
+    ip <<- ip + 4L
+  }
+  set <- function(res, ..., modes) {
+    op_codes[[res + 1L]] <<- input
+    ip <<- ip + 2L
+  }
+  out <- function(x, ..., modes) {
+    if (modes[1L] == 0L) {
+      x <- op_codes[x + 1L]
+    }
+    out_buffer <<- c(out_buffer, x)
+    if (verbose) {
+      cat(x, "\n")
+    }
+    ip <<- ip + 2L
+  }
+  jnz <- function(x, y, ..., modes) {
+    if (modes[1L] == 0L) {
+      x <- op_codes[x + 1L]
+    }
+    if (modes[2L] == 0L) {
+      y <- op_codes[y + 1L]
+    }
+    if (x != 0L) {
+      ip <<- y + 1L  
+    } else {
+      ip <<- ip + 3L
+    }
+  }
+  jeqz <- function(x, y, ..., modes) {
+    if (modes[1L] == 0L) {
+      x <- op_codes[x + 1L]
+    }
+    if (modes[2L] == 0L) {
+      y <- op_codes[y + 1L]
+    }
+    if (x == 0L) {
+      ip <<- y + 1L  
+    } else {
+      ip <<- ip + 3L
+    }
+  }
+  lt <- function(x, y, res, modes) {
+    if (modes[1L] == 0L) {
+      x <- op_codes[x + 1L]
+    }
+    if (modes[2L] == 0L) {
+      y <- op_codes[y + 1L]
+    }
+    op_codes[[res + 1L]] <<- (x < y)
+    ip <<- ip + 4L
+  }
+  
+  eq <- function(x, y, res, modes) {
+    if (modes[1L] == 0L) {
+      x <- op_codes[x + 1L]
+    }
+    if (modes[2L] == 0L) {
+      y <- op_codes[y + 1L]
+    }
+    op_codes[[res + 1L]] <<- (x == y)
+    ip <<- ip + 4L
+  }
+  
+  funs <- list(add, mul, set, out, jnz, jeqz, lt, eq)
+  get_op <- function(op_code) {
+    digits <- split_digits(op_code)
+    n <- length(digits)
+    digits <- c(rep(0L, 5L), digits)[seq(n + 1L, length.out = 5L)]
+    list(op = sum(digits[5:4] * 10L ^ (0:1)),
+         modes = digits[3:1])
+  }
+  ip <- 1L
+  n <- length(op_codes)
+  op <- get_op(op_codes[ip])
+  while(ip <= n && op$op %in% seq_along(funs)) {
+    args <- as.list(op_codes[seq(ip + 1L, length.out = 3L)])
+    do.call(funs[[op$op]], c(args, modes = list(op$modes)))
+    op <- get_op(op_codes[ip])
+  }
+  tail(out_buffer, 1L)
 }
 
-count_valid(puzzle_data)
+parse_op_codes(puzzle_data, 1L)
 ```
 
 ## Part 2
@@ -164,15 +253,8 @@ cat(puzzle[[2]])
 
 ### Solution
 
-We use a more complex validator, to make sure that we have at least one pure pair. 
+We use a differnt starting value this time to get the result. 
 
 ```{r get-solution-2}
-is_valid_complex <- function(n) {
-  digits <- split_digits(n)
-  r <- rle(digits)$length
-  all(diff(digits) >= 0L) &&
-    any(r == 2L)
-}
-
-count_valid(puzzle_data, is_valid_complex)
+parse_op_codes(puzzle_data, 5L)
 ```
