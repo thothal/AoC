@@ -1,7 +1,7 @@
 ---
 params:
-   task_nr: 25
-   year: 2018
+   task_nr: 1
+   year: 2019
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
   name: "Thorn Thaler"
@@ -42,8 +42,8 @@ editor_options:
   border-color: var(--blockquote-border-color);
   padding: 0 20px;
 }
-
 ```
+
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
@@ -72,8 +72,6 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
-library(igraph)
-
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -95,12 +93,8 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       extract2(1L) %>% 
       keep(nzchar)
   }
- res <- text_block %>% 
-   str_extract_all("-?\\d+") %>% 
-   do.call(rbind, .) %>% 
-   set_colnames(letters[23:26])
- storage.mode(res) <- "integer"
- res
+  text_block %>% 
+    as.integer()
 }
 
 puzzle_data <- local({
@@ -112,13 +106,6 @@ puzzle_data <- local({
 ```
 
 ```{r example-data, eval = interactive(), echo = FALSE}
-example_data <- matrix(
-  c(-1L, 0L, 0L, -1L, -2L, 3L, -1L, -1L, 0L, 3L, 2L,
-    0L, 0L, 2L, -2L, 0L, 3L, 0L, 2L, 0L, 2L, 2L, 0L,
-    0L, -2L, 2L, 2L, -1L, 1L, 0L, 0L, -2L, -2L, 0L, 2L, 
-    -1L, 2L, 0L, -2L, 0L), 10L, 4L,
-  dimnames = list(NULL, letters[23:26])
-)
 ```
 
 # Puzzle Day `r params$task_nr`
@@ -133,19 +120,16 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We solve this puzzle by calculating all pairwise distances between the fixed points and
-then constructing a graph, where 2 points are connected iif their distance is less or 
-equal 3. Then we simply have to count all components.
+Hohoho! Welcome to this year's AoC. Let the games begin. 
+
+For this puzzle we simply need to sum up the input integer divided by 3 minus 2.
+
 
 ```{r get-solution-1}
-construct_graph <- function(fixed_points = puzzle_data) {
-  n <- seq_len(nrow(fixed_points))
-  dis <- outer(n, n, \(i, j) rowSums(abs(fixed_points[i, ] - fixed_points[j, ])))
-  e <- which(dis <= 3L & lower.tri(dis), arr.ind = TRUE)
-  G <- graph_from_edgelist(e, FALSE)
-  components(G)$no
+sum_fuel <- function(x = puzzle_data) {
+  sum(x %/% 3L - 2L)
 }
-construct_graph(puzzle_data)
+sum_fuel(puzzle_data)
 ```
 
 ## Part 2
@@ -158,5 +142,21 @@ cat(puzzle[[2]])
 
 ### Solution
 
-Hohoho, that’s it for 2018!
+For the second part, we calculate the fuel per module, and calculate the fuel needed for 
+the fuel itself.
 
+```{r get-solution-2}
+sum_fuel_fuel <- function(x = puzzle_data) {
+  fuel_components <- x %/% 3L - 2L
+  map_int(fuel_components, function(fuel) {
+    extra_fuel <- fuel %/% 3L - 2L
+    while(extra_fuel > 0L) {
+      fuel <- fuel + extra_fuel
+      extra_fuel <- extra_fuel %/% 3L - 2L
+    }
+    fuel
+  }) %>% 
+    sum()
+}
+sum_fuel_fuel(puzzle_data)
+```
