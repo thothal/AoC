@@ -1,0 +1,223 @@
+---
+params:
+   task_nr: 10
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+For the first part, we get the directions from each asteroid to all the others, normalize
+the directions and count unique directions, which coreponds ot the asteroids in line of 
+sight.
+
+```{r get-solution-1}
+gcd <- function(a, b) {
+  if (b == 0L) {
+    abs(a)
+  } else {
+    Recall(b, a %% b)
+  }
+}
+
+count_asteroids <- function(asteroid_map = puzzle_data) {
+ cand <- which(asteroid_map == "#", arr.ind = TRUE)
+  max_vis <- 0L
+  
+  for (i in seq_len(nrow(cand))) {
+    origin <- cand[i, , drop = TRUE]
+    # get direction to all other asteroids
+    others <- cand[-i, , drop = FALSE]
+    d <- t(t(others) - origin)
+    # normalize directions
+    g <- mapply(gcd, d[, 1L], d[, 2L])
+    d <- d / g
+    # count unqiue directions
+    n_visible <- length(unique(apply(d, 1L, paste, collapse = " ")))
+    if (n_visible > max_vis) {
+      max_vis <- n_visible
+      best_idx <- origin
+    }
+  }
+  list(max_vis = max_vis, best = best_idx)
+}
+
+best_pos <- count_asteroids(puzzle_data)
+best_pos$max_vis
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we calculate angle and distance from the best asteroid as determined 
+in part 1, sort the asteroids according to angle and distance and loop through all unqiue 
+angles. The first asteroid being on a trajectory with this angle will be vaporized.
+
+```{r get-solution-2, comment = ""}
+vaporize <- function(asteroid_map, station, n = 200) {
+  cand <- which(asteroid_map == "#", arr.ind = TRUE) - 1L
+  station <- c(station) - 1L
+  # remove station
+  cand <- cand[!(cand[, 1] == station[1] & cand[, 2] == station[2]), , drop = FALSE]
+  cand <- cand[, 2:1]
+  station <- station[2:1]
+  # relative position
+  dx <- cand[,1] - station[1]
+  dy <- cand[,2] - station[2]
+  
+  # calculate angle: 0 = up, clockwise
+  angle <- (atan2(dx, -dy) * 180 / pi) %% 360
+  dist <- sqrt(dx ^ 2 + dy ^ 2)
+  # sort according to angle and dist
+  dt <- tibble(x = cand[, 1L], y = cand[, 2L], angle = angle, dist = dist) %>% 
+    arrange(angle, dist)
+
+  vaporized <- dt %>%
+    select(x, y) %>% 
+    slice(0L)
+  while (nrow(dt) > 0 && length(vaporized) < n) {
+    angles <- unique(dt$angle)
+    for (a in angles) {
+      target_idx <- which(dt$angle == a)[1L]
+      vaporized <- rbind(vaporized, dt %>% 
+                           slice(target_idx) %>% 
+                           select(x, y))
+      dt <- dt %>% 
+        slice(-target_idx)
+    }
+  }
+  # get nth vaporized asteroid
+  if (nrow(vaporized) >= n) {
+    vaporized %>% 
+      slice(n) %>% 
+      mutate(res = 100L * x + y) %>% 
+      pull(res)
+  } else {
+    NULL
+  }
+}
+
+vaporize(puzzle_data, best_pos$best)
+
+```
