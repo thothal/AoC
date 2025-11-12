@@ -44,6 +44,9 @@ editor_options:
 }
 ```
 
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
@@ -73,6 +76,8 @@ library(dplyr)
 library(purrr)
 library(stringr)
 library(rlang)
+library(bit64)
+library(igraph)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -97,7 +102,7 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
   text_block %>% 
     str_split(",") %>% 
     do.call(c, .) %>% 
-    as.integer()
+    as.integer64()
 }
 
 puzzle_data <- local({
@@ -129,7 +134,7 @@ We further improve our parser from [Day 7 @ 2019](2019_task7.html) and adapt it 
 ```{r get-solution-1}
 split_digits <- function(n) {
   i <- floor(log10(n)) + 1L
-  digits <- integer(i)
+  digits <- integer64(i)
   while (n > 0) {
     digits[i] <- n %% 10L
     n <- n %/% 10L
@@ -138,9 +143,19 @@ split_digits <- function(n) {
   digits
 }
 
-parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L,
+get_op <- function(op_code) {
+  digits <- split_digits(op_code)
+  n <- length(digits)
+  digits <- tail(c(rep(as.integer64(0L), 5L), digits), 5L)
+  list(op = as.integer(sum(digits[5:4] * 10L ^ (0:1))),
+       modes = digits[3:1])
+}
+
+parse_op_codes <- function(input, op_codes = puzzle_data, 
+                           ip = 1L, 
+                           rel_base = as.integer64(0L),
                            verbose = FALSE) {
-  out_buffer <- integer(0L)
+  out_buffer <- integer64(0L)
   get_val <- function(..., modes) {
     args <- enquos(...)
     nms <- vapply(args, quo_name, character(1L))
@@ -149,28 +164,47 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
     res <- map2(args, modes, \(var, mod) {
       if (mod == 0L) {
         if ((var + 1L) > length(op_codes)) {
-          0L
-        } else {
-          op_codes[var + 1L]
+          enlarge(var + 1L)
         }
+        op_codes[as.integer(var + 1L)]
       } else if (mod == 1L) {
         var
       } else if (mod == 2L) {
-        if ((rel_base + var) > length(op_codes)) {
-          0L
-        } else {
-          op_codes[rel_base + var]
+        if ((rel_base + var + 1L) > length(op_codes)) {
+          enlarge(rel_base + var + 1L)
         }
+        op_codes[as.integer(rel_base + var + 1L)]
       }
     }) %>% 
       set_names(nms)
     res
   }
   
+  get_addr <- function(res, mode) {
+    if (mode == 0L) {
+      if (res == 65) browser()
+      as.integer(res)
+    } else if (mode == 2L) {
+      if ((rel_base + res) == 65) browser()
+      as.integer(rel_base + res)
+    } else {
+      stop("unsopported mode for output")
+    }
+  }
+  
+  enlarge <- function(idx) {
+    gap <- as.integer(idx) - length(op_codes)
+    if (gap > 0L) {
+      op_codes <<- c(op_codes, rep(as.integer64(0L), gap))
+    }
+  }
+  
   add <- function(x, y, res, modes) {
     args <- get_val(x, y, modes = modes)
     x <- args$x
     y <- args$y
+    res <- get_addr(res, modes[3L])
+    enlarge(res + 1L)
     op_codes[[res + 1L]] <<- x + y
     ip <<- ip + 4L
     TRUE
@@ -179,6 +213,8 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
     args <- get_val(x, y, modes = modes)
     x <- args$x
     y <- args$y
+    res <- get_addr(res, modes[3L])
+    enlarge(res + 1L)
     op_codes[[res + 1L]] <<- x * y
     ip <<- ip + 4L
     TRUE
@@ -187,6 +223,8 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
     if (length(input) == 0L) {
       return (FALSE)
     }
+    res <- get_addr(res, modes[1L])
+    enlarge(res + 1L)
     op_codes[[res + 1L]] <<- head(input, 1L)
     ip <<- ip + 2L
     input <<- tail(input, -1L)
@@ -207,7 +245,7 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
     x <- args$x
     y <- args$y
     if (x != 0L) {
-      ip <<- y + 1L  
+      ip <<- as.integer(y + 1L)  
     } else {
       ip <<- ip + 3L
     }
@@ -218,7 +256,7 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
     x <- args$x
     y <- args$y
     if (x == 0L) {
-      ip <<- y + 1L  
+      ip <<- as.integer(y + 1L)  
     } else {
       ip <<- ip + 3L
     }
@@ -228,6 +266,8 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
     args <- get_val(x, y, modes = modes)
     x <- args$x
     y <- args$y
+    res <- get_addr(res, modes[3L])
+    enlarge(res + 1L)
     op_codes[[res + 1L]] <<- (x < y)
     ip <<- ip + 4L
     TRUE
@@ -236,6 +276,8 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
     args <- get_val(x, y, modes = modes)
     x <- args$x
     y <- args$y
+    res <- get_addr(res, modes[3L])
+    enlarge(res + 1L)
     op_codes[[res + 1L]] <<- (x == y)
     ip <<- ip + 4L
     TRUE
@@ -248,21 +290,13 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
     TRUE
   }
   
-  
   ops <- list(add, mul, set, out, jnz, jeqz, lt, eq, rbo)
-  get_op <- function(op_code) {
-    digits <- split_digits(op_code)
-    n <- length(digits)
-    digits <- c(rep(0L, 5L), digits)[seq(n + 1L, length.out = 5L)]
-    list(op = sum(digits[5:4] * 10L ^ (0:1)),
-         modes = digits[3:1])
-  }
   n <- length(op_codes)
   op <- get_op(op_codes[ip])
   done <- TRUE
-  while(ip <= n && op$op %in% c(seq_along(ops), 99L)) {
+  while(op$op %in% c(seq_along(ops), 99L)) {
     args <- as.list(op_codes[seq(ip + 1L, length.out = 3L)])
-    cont <- do.call(ops[[op$op]], c(args, modes = list(op$modes)))
+    cont <- do.call(ops[[op$op]], c(args, list(modes = op$modes)))
     if (!cont) {
       done <- FALSE
       break
@@ -274,32 +308,10 @@ parse_op_codes <- function(input, op_codes = puzzle_data, ip = 1L, rel_base = 1L
       cat("Unknown op code", op$op, "\n")
     }
   }
-  attr(out_buffer, "status") <- list(ip = ip, op_codes = op_codes, done = done)
   out_buffer
 }
 
-find_max_thrust <- function(op_codes = puzzle_data, verbose = FALSE) {
-  all_codes <- permutations(5L, 5L, 0:4)
-  n <- nrow(all_codes)
-  max_out <- -.Machine$integer.max
-  for (i in seq_len(n)) {
-    code <- all_codes[i, ]
-    code <- c(code[1L], 0L, tail(code, -1L))
-    for (amp_id in 1:5) {
-      input <- head(code, 2L)
-      out <- parse_op_codes(input, op_codes) %>% 
-        tail(1L)
-      if (amp_id != 5) {
-        code <- tail(code, -2L)
-        code <- c(code[1L], out, tail(code, -1L))
-      }
-    }
-    max_out <- max(max_out, out)
-  }
-  max_out
-}
-
-find_max_thrust(puzzle_data)
+parse_op_codes(1L, puzzle_data)
 ```
 
 ## Part 2
@@ -312,42 +324,147 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the second part, we create an infinite loop where the output of the previous amplifier
-is fed to the next one. Whenever an amplifier produces an output, we fed it to the next, 
-while the previous amplifier is in waiting mode to receive its next input. We continue
-this infinite loop until all amplifiers signaled their proper termination.
+While the original parser works and is very R idomatic, it is awefully slow. We refactor 
+the code to gain a significant speed gain. Additionally, we implemented the code also in
+C++ (in the appendix) for possible future use.
 
 ```{r get-solution-2}
-find_max_thrust_loop <- function(op_codes = puzzle_data, verbose = FALSE) {
-  all_codes <- permutations(5L, 5L, 5:9)
-  n <- nrow(all_codes)
-  max_out <- -.Machine$integer.max
-  for (i in seq_len(n)) {
-    code <- all_codes[i, ]
-    code <- c(code[1L], 0L, tail(code, -1L))
-    amplifiers <- rep(list(list(op_codes = op_codes, ip = 1L, done = FALSE)), 5L)
-    while (TRUE) {
-      for (amp_id in seq_along(amplifiers)) {
-        input <- head(code, min(2L, length(code)))
-        amp <- amplifiers[[amp_id]]
-        out <- parse_op_codes(input, amp$op_codes, amp$ip)
-        amplifiers[[amp_id]] <- attr(out, "status")
-        attr(out, "status") <- NULL
-        code <- tail(code, -2L)
-        if (length(code) == 0L) {
-          code <- out
-        } else {
-          code <- c(code[1L], out, tail(code, -1L))
-        }
-      }
-      if (all(vapply(amplifiers, \(a) a$done, logical(1L)))) {
-        break
-      }
+parse_op_codes_fast <- function(op_codes = as.numeric(puzzle_data), input = numeric(), 
+                                verbose = FALSE) {
+  ip <- 1L
+  rel_base <- 0L
+  out_buffer <- numeric(0)
+  out_len <- 0L
+  out_block <- 1024L
+  block_size <- 1024L  # Speicherblockgröße zum Wachsen
+  
+  grow_memory <- function(idx) {
+    if (idx > length(op_codes)) {
+      new_size <- ceiling(idx / block_size) * block_size
+      op_codes <<- c(op_codes, rep(0, new_size - length(op_codes)))
     }
-    max_out <- max(max_out, out)
   }
-  max_out
+  
+  append_out <- function(val) {
+    if (out_len + 1L > length(out_buffer)) {
+      new_size <- length(out_buffer) + out_block
+      out_buffer <<- c(out_buffer, rep(0, new_size - length(out_buffer)))
+    }
+    out_len <<- out_len + 1L
+    out_buffer[out_len] <<- val
+  }
+  
+  get_val <- function(param, mode) {
+    if (mode == 0L) {
+      grow_memory(param + 1L)
+      return(op_codes[param + 1L])
+    } else if (mode == 1L) {
+      return(param)
+    } else if (mode == 2L) {
+      idx <- rel_base + param + 1L
+      grow_memory(idx)
+      return(op_codes[idx])
+    } else {
+      stop("unknown mode")
+    }
+  }
+  
+  get_addr <- function(param, mode) {
+    if (mode == 0L) {
+      return(param + 1L)
+    } else if (mode == 2L) {
+      return(rel_base + param + 1L)
+    } else {
+      stop("invalid write mode")
+    }
+  }
+  
+  halt <- FALSE
+  while (!halt) {
+    instr <- op_codes[ip]
+    op <- instr %% 100L
+    modes <- c(
+      (instr %/% 100L) %% 10L, 
+      (instr %/% 1000L) %% 10L, 
+      (instr %/% 10000L) %% 10L
+    )
+    
+    if (op == 1L) { # add
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      grow_memory(addr)
+      op_codes[addr] <- a + b
+      ip <- ip + 4L
+    } else if (op == 2L) { # mul
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      grow_memory(addr)
+      op_codes[addr] <- a * b
+      ip <- ip + 4L
+    } else if (op == 3L) { # input
+      if (length(input) == 0L) {
+        stop("No input available")
+      }
+      addr <- get_addr(op_codes[ip + 1L], modes[1])
+      grow_memory(addr)
+      op_codes[addr] <- input[1L]
+      input <- input[-1]
+      ip <- ip + 2L
+    } else if (op == 4L) { # output
+      val <- get_val(op_codes[ip + 1L], modes[1])
+      append_out(val)
+      if (verbose) cat(val, "\n")
+      ip <- ip + 2L
+    } else if (op == 5L) { # jump-if-true
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      if (a != 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 6L) { # jump-if-false
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      if (a == 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 7L) { # less than
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a < b)
+      ip <- ip + 4L
+    } else if (op == 8L) { # equals
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a == b)
+      ip <- ip + 4L
+    } else if (op == 9L) { # adjust relative base
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      rel_base <- rel_base + a
+      ip <- ip + 2L
+    } else if (op == 99L) { # halt
+      halt <- TRUE
+    } else {
+      stop("Unknown opcode ", op)
+    }
+  }
+  return(out_buffer[1:out_len])
 }
 
-find_max_thrust_loop(puzzle_data)
+parse_op_codes_fast(as.numeric(puzzle_data), 2)
+```
+
+
+# C++ Version
+
+```{Rcpp cpp-algorithm, file = "parser.cpp", cache = TRUE}
 ```
