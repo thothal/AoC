@@ -1,0 +1,330 @@
+---
+params:
+   task_nr: 11
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+ text_block %>% 
+    str_split(",") %>% 
+    do.call(c, .) %>% 
+    as.integer64()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We re-use the fast parser from []() and feed it the int code.
+
+```{r get-solution-1}
+parse_op_codes_fast <- function(op_codes = as.numeric(puzzle_data), input = numeric(), 
+                                start_col = 0L,
+                                verbose = FALSE) {
+  ip <- 1L
+  rel_base <- 0L
+  out_buffer <- numeric(0)
+  out_len <- 0L
+  out_block <- 1024L
+  block_size <- 1024L  # size of memory
+  hash <- new.env(parent = emptyenv())
+  pos <- c(x = 0L, y = 0L, dir = 0L)
+  get_key <- function(pos) {
+    sprintf("%s,%s", pos[1L], pos[2L])
+  }
+  hash[[get_key(pos)]] <- start_col
+  grow_memory <- function(idx) {
+    if (idx > length(op_codes)) {
+      new_size <- ceiling(idx / block_size) * block_size
+      op_codes <<- c(op_codes, rep(0, new_size - length(op_codes)))
+    }
+  }
+  
+  append_out <- function(val) {
+    if (out_len + 1L > length(out_buffer)) {
+      new_size <- length(out_buffer) + out_block
+      out_buffer <<- c(out_buffer, rep(0, new_size - length(out_buffer)))
+    }
+    out_len <<- out_len + 1L
+    out_buffer[out_len] <<- val
+  }
+  
+  get_val <- function(param, mode) {
+    if (mode == 0L) {
+      grow_memory(param + 1L)
+      return(op_codes[param + 1L])
+    } else if (mode == 1L) {
+      return(param)
+    } else if (mode == 2L) {
+      idx <- rel_base + param + 1L
+      grow_memory(idx)
+      return(op_codes[idx])
+    } else {
+      stop("unknown mode")
+    }
+  }
+  
+  get_addr <- function(param, mode) {
+    if (mode == 0L) {
+      return(param + 1L)
+    } else if (mode == 2L) {
+      return(rel_base + param + 1L)
+    } else {
+      stop("invalid write mode")
+    }
+  }
+  
+  halt <- FALSE
+  while (!halt) {
+    instr <- op_codes[ip]
+    op <- instr %% 100L
+    modes <- c(
+      (instr %/% 100L) %% 10L, 
+      (instr %/% 1000L) %% 10L, 
+      (instr %/% 10000L) %% 10L
+    )
+    
+    if (op == 1L) { # add
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      grow_memory(addr)
+      op_codes[addr] <- a + b
+      ip <- ip + 4L
+    } else if (op == 2L) { # mul
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      grow_memory(addr)
+      op_codes[addr] <- a * b
+      ip <- ip + 4L
+    } else if (op == 3L) { # input
+      if (length(input) == 0L) {
+        stop("No input available")
+      }
+      addr <- get_addr(op_codes[ip + 1L], modes[1])
+      grow_memory(addr)
+      op_codes[addr] <- input[1L]
+      input <- input[-1]
+      ip <- ip + 2L
+    } else if (op == 4L) { # output
+      val <- get_val(op_codes[ip + 1L], modes[1])
+      append_out(val)
+      if (out_len %% 2L == 1L) {
+        # first instruction is paint
+        key <- get_key(pos)
+        hash[[key]] <- val
+      } else {
+        # second instruction is move
+        pos["dir"] <- (pos["dir"] + if_else(val == 0L, -1L, 1L)) %% 4L
+        if (pos["dir"] == 0L) {
+          ## up
+          pos["y"] <- pos["y"] - 1L
+        } else if (pos["dir"] == 1L) {
+          ## right
+          pos["x"] <- pos["x"] + 1L
+        } else if (pos["dir"] == 2L) {
+          ## down
+          pos["y"] <- pos["y"] + 1L
+        } else {
+          ## left
+          pos["x"] <- pos["x"] - 1L
+        }
+        key <- get_key(pos)
+        if (!exists(key, hash)) {
+          input <- 0L
+        } else {
+          input <- hash[[key]]
+        }
+      }
+      if (verbose) cat(val, "\n")
+      ip <- ip + 2L
+    } else if (op == 5L) { # jump-if-true
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      if (a != 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 6L) { # jump-if-false
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      if (a == 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 7L) { # less than
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a < b)
+      ip <- ip + 4L
+    } else if (op == 8L) { # equals
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      b <- get_val(op_codes[ip + 2L], modes[2])
+      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a == b)
+      ip <- ip + 4L
+    } else if (op == 9L) { # adjust relative base
+      a <- get_val(op_codes[ip + 1L], modes[1])
+      rel_base <- rel_base + a
+      ip <- ip + 2L
+    } else if (op == 99L) { # halt
+      halt <- TRUE
+    } else {
+      stop("Unknown opcode ", op)
+    }
+  }
+  fields <- ls(hash)
+  coords <- fields %>% 
+    str_split(",") %>% 
+    do.call(rbind, .)
+  storage.mode(coords) <- "integer"
+  coords <- cbind(coords, unlist(mget(fields, hash)))
+  coords
+}
+coords <- parse_op_codes_fast(as.numeric(puzzle_data), 0L)
+nrow(coords)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we costruct the picture from the single pixels.
+
+```{r get-solution-2, comment = ""}
+get_registration <- function(op_codes = as.numeric(puzzle_data)) {
+  final_coords <-  parse_op_codes_fast(op_codes, 1L)
+  deltas <- 2 - apply(final_coords, 2L, min)
+  deltas[3L] <- 0L
+  final_coords <- sweep(final_coords, 2, deltas, `+`)
+  dd <- apply(final_coords, 2L, max)
+  grid <- matrix(" ", dd[2L] + 1L, dd[1L])
+  grid[final_coords[, 2:1]] <- if_else(final_coords[, 3] == 1L, "\U2588", " ")
+  apply(grid, 1, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat()
+  invisible(coords)
+}
+
+get_registration(as.numeric(puzzle_data)) ## ABCLFUHJ
+```
