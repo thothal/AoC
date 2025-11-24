@@ -1,0 +1,215 @@
+---
+params:
+   task_nr: 14
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_extract_all("\\d+ [A-Z]+") %>% 
+    map(function(reaction) {
+      goal <- tail(reaction, 1L) %>% 
+        str_split(" ") %>% 
+        extract2(1L) %>% 
+        as.list() %>% 
+        set_names(c("qty", "chemical")) %>% 
+        as_tibble() %>% 
+        mutate(qty = as.integer(qty)) %>% 
+        select(chemical, qty)
+      from <- head(reaction, -1L) %>% 
+        str_split(" ") %>% 
+        do.call(rbind, .) %>% 
+        set_colnames(c("qty", "from")) %>% 
+        as_tibble() %>% 
+        mutate(qty = as.integer(qty),
+               to = goal %>% 
+                 pull(chemical)) %>% 
+        select(from, to, qty)
+      list(edges = from, 
+           vertices = goal)
+    })
+  edges <- map(res, "edges") %>% 
+    list_rbind()
+  vertices <- map(res, "vertices") %>% 
+    list_rbind() %>% 
+    add_row(chemical = "ORE", qty = NA_integer_)
+  list(E = edges, V = vertices)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- parse_puzzle_data()
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We build a graph from the reactions. Each node gets a value indicating how much this 
+reaction produces. Each edge has a value indicating how much of this chemical is needed.
+
+Then, we can walk backwards from `FUEL` in topological order and determine how many 
+production cycles we need to produce the amount needed. Then, we use the production costs
+to determine for eahc of the neighbors how many units we need of those in turn. 
+
+```{r get-solution-1}
+create_factory <- function(rules = puzzle_data) {
+  graph_from_data_frame(rules$E, TRUE, rules$V)
+}
+
+count_ore <- function(G, needed = 1L) {
+  V(G)$needed <- 0L
+  V(G)["FUEL"]$needed <- needed
+  todo <- topo_sort(G, "in")
+  for (v in todo) {
+    goal_needed <- V(G)[v]$needed
+    nr_prod <- ceiling(goal_needed / V(G)[v]$qty)
+    for (nb in neighbors(G, v, "in")) {
+      cost <- E(G)[nb %->% v]$qty
+      V(G)[nb]$needed <- V(G)[nb]$needed + cost * nr_prod
+    }
+  }
+  V(G)["ORE"]$needed
+}
+
+G <- create_factory(puzzle_data)
+count_ore(G, 1L)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we use a binary search to determine the needed `ORE` for a given fuel
+amount. If this amount exceeds the available `ORE` we lower the limit, otherwise we 
+increase it (as per the normal binary search pattern).
+
+```{r get-solution-2}
+max_fuel <- function(G, available_ore) {
+  low <- 0L
+  high <- available_ore 
+  while (low < high) {
+    mid <- ceiling((low + high) / 2)
+    needed_ore <- count_ore(G, mid)
+    if (needed_ore <= available_ore) {
+      low <- mid
+    } else {
+      high <- mid - 1
+    }
+  }
+  low
+}
+
+max_fuel(G, 1000000000000)
+
+```
