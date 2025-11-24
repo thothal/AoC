@@ -88,8 +88,8 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 8](https://thothal.github.io/AoC/2019_task8.html)
 - [x] [Day 9](https://thothal.github.io/AoC/2019_task9.html)
 - [x] [Day 10](https://thothal.github.io/AoC/2019_task10.html)
-- [ ] Day 11
-- [ ] Day 12
+- [x] [Day 11](https://thothal.github.io/AoC/2019_task11.html)
+- [x] [Day 12](https://thothal.github.io/AoC/2019_task12.html)
 - [ ] Day 13
 - [ ] Day 14
 - [ ] Day 15
