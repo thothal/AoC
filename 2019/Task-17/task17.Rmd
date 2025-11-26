@@ -1,0 +1,450 @@
+---
+params:
+   task_nr: 17
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+ text_block %>% 
+    str_split(",") %>% 
+    do.call(c, .) %>% 
+    as.numeric()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We build upon the code from [Day 15 @ 2019](2019_task15.html) and simply store the output
+in a matrix. To determine the alignment parameters, we first filter fields with a `#` 
+and keep only those, which have a `#` neighbor on all sides.
+
+```{r get-solution-1}
+print.scaffold<- function(x, ...) {
+  apply(x, 1, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat()
+  invisible(x)
+}
+
+parse_op_codes_fast <- function(op_codes = puzzle_data, input = numeric(0L), 
+                                verbose = FALSE) {
+  ip <- 1L
+  rel_base <- 0L
+  
+  out_buffer <- numeric(0)
+  out_len <- 0L
+  out_block <- 1024L
+  block_size <- 1024L
+  
+  grow_memory <- function(idx) {
+    if (idx > length(op_codes)) {
+      new_size <- ceiling(idx / block_size) * block_size
+      op_codes <<- c(op_codes, rep(0, new_size - length(op_codes)))
+    }
+  }
+  
+  append_out <- function(val) {
+    if (out_len + 1L > length(out_buffer)) {
+      new_size <- length(out_buffer) + out_block
+      out_buffer <<- c(out_buffer, rep(0, new_size - length(out_buffer)))
+    }
+    out_len <<- out_len + 1L
+    out_buffer[out_len] <<- val
+  }
+  
+  get_val <- function(param, mode) {
+    if (mode == 0L) {
+      grow_memory(param + 1L)
+      return(op_codes[param + 1L])
+    } else if (mode == 1L) {
+      return(param)
+    } else if (mode == 2L) {
+      idx <- rel_base + param + 1L
+      grow_memory(idx)
+      return(op_codes[idx])
+    } else {
+      stop("unknown mode")
+    }
+  }
+  
+  get_addr <- function(param, mode) {
+    if (mode == 0L) {
+      return(param + 1L)
+    } else if (mode == 2L) {
+      return(rel_base + param + 1L)
+    } else {
+      stop("invalid write mode")
+    }
+  }
+  
+  halt <- FALSE
+  while (!halt) {
+    instr <- op_codes[ip]
+    op <- instr %% 100L
+    modes <- c(
+      (instr %/% 100L) %% 10L, 
+      (instr %/% 1000L) %% 10L, 
+      (instr %/% 10000L) %% 10L
+    )
+    
+    if (op == 1L) { # add
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- a + b
+      ip <- ip + 4L
+    } else if (op == 2L) { # mul
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- a * b
+      ip <- ip + 4L
+    } else if (op == 3L) { # input
+      if (length(input) == 0L) {
+        stop("No input available")
+      }
+      addr <- get_addr(op_codes[ip + 1L], modes[1])
+      grow_memory(addr)
+      op_codes[addr] <- input[1L]
+      input <- input[-1]
+      ip <- ip + 2L
+    } else if (op == 4L) { # output
+      val <- get_val(op_codes[ip + 1L], modes[1])
+      append_out(val)
+      if (verbose) cat(val, "\n")
+      ip <- ip + 2L
+    } else if (op == 5L) { # jump-if-true
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      if (a != 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 6L) { # jump-if-false
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      if (a == 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 7L) { # less than
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a < b)
+      ip <- ip + 4L
+    } else if (op == 8L) { # equals
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a == b)
+      ip <- ip + 4L
+    } else if (op == 9L) { # adjust relative base
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      rel_base <- rel_base + a
+      ip <- ip + 2L
+    } else if (op == 99L) { # halt
+      halt <- TRUE
+    } else {
+      stop("Unknown opcode ", op)
+    }
+  }
+  out_buffer[1:out_len]
+}
+
+create_scaffold <- function(out_buffer) {
+  scaffold <- intToUtf8(out_buffer) %>% 
+    str_split("\n") %>% 
+    extract2(1L) %>% 
+    str_split( "") %>% 
+    do.call(rbind, .)
+  pos <- which(scaffold == "#", arr.ind = TRUE)
+  ## look only into interior points
+  interior <- pos[between(pos[, 1L], 2L, nrow(scaffold) - 1L) &
+                    between(pos[, 2L], 2L, ncol(scaffold) - 1L), ]
+  int_idx <- apply(interior, 1, function(coord) {
+    i <- coord[1L]
+    j <- coord[2L]
+    scaffold[i - 1L, j] == "#" &&
+      scaffold[i + 1L, j] == "#" &&
+      scaffold[i, j - 1L] == "#" &&
+      scaffold[i, j + 1L] == "#"
+  })
+  intersections <- interior[int_idx, , drop = FALSE]
+  scaffold[intersections] <- "O"
+  attr(scaffold, "intersections") <- intersections
+  class(scaffold) <- "scaffold"
+  scaffold
+}
+
+scaffold <- parse_op_codes_fast(puzzle_data) %>% 
+  create_scaffold()
+attr(scaffold, "intersections") %>% 
+  apply(1, \(coord) prod(coord - 1L)) %>% 
+  sum()
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+```{r path-length, include = FALSE}
+measure_length <- function(scaffold) {
+  n <- nrow(scaffold)
+  m <- ncol(scaffold)
+  horizontal <- vertical <- integer(0L)
+  for (i in seq_len(n)) {
+    cur_line <- 0L
+    for (j in seq_len(m)) {
+      if (scaffold[i, j] == ".") {
+        if (cur_line > 0L) {
+          horizontal <- c(horizontal, cur_line)
+        }
+        cur_line <- 0
+      } else {
+        cur_line <- cur_line + 1L
+      }
+    }
+  }
+  for (j in seq_len(m)) {
+    cur_line <- 0L
+    for (i in seq_len(n)) {
+      if (scaffold[i, j] == ".") {
+        if (cur_line > 0L) {
+          vertical <- c(vertical, cur_line)
+        }
+        cur_line <- 0
+      } else {
+        cur_line <- cur_line + 1L
+      }
+    }
+  }
+  list(horizontal = sort(unique(horizontal[horizontal > 1L])),
+       vertical = sort(unique(vertical[vertical > 1L])))
+}
+(path_lengths <- measure_length(scaffold))
+```
+
+For the second part, we analyse the map. First observation is that straight lines are 
+either `r combine_words(unique(unlist(path_lengths)), and = " or ", oxford_comma = FALSE)`
+fields long.
+
+```{r show-path-length}
+<<path-length>>
+```
+
+Then, we collected the segment lengths, assuming that we do not turn at intersection 
+points. Once, we had the segment lengths, we were looking for recurring patterns, and
+we could identify that this program let the robot stay on the scaffold:
+
+* **Program**: `A,B,A,C,B,C,B,A,C,B`
+* **A**: `L,6,R,8,R,12,L,6,L,8`
+* **B**: `L,10,L,8,R,12`
+* **C**: `L,8,L,10,L,6,L,6`
+
+*N.B.* In an earlier version, we used a too long variant of `C`, but it turned out that 
+this is basically `B` so we could rmeove it form `C` and add `Bs` instead to the program.
+
+This screenshot shows the process and the paths lengths:
+
+```{r show-solving-step, echo = FALSE}
+include_graphics(here::here("2019", "Task-17", "scaffold.png"))
+```
+
+Eventually, we tested this walk and the robot stays safe:
+
+```{r test-walk}
+test_walk <- function(scaffold, program, funs) {
+  pos <- which(scaffold == "^", arr.ind = TRUE)
+  for (p in program) {
+    steps <- funs[[p]]
+    for (s in steps) {
+      if (s %in% c("L", "R")) {
+        rbt <- scaffold[pos]
+        if (s == "L") {
+          rbt <- case_when(
+            rbt == "^" ~ "<",
+            rbt == ">" ~ "^",
+            rbt == "v" ~ ">",
+            rbt == "<" ~ "v"
+          )
+        } else {
+          rbt <- case_when(
+            rbt == "^" ~ ">",
+            rbt == ">" ~ "v",
+            rbt == "v" ~ "<",
+            rbt == "<" ~ "^"
+          )
+        }
+        scaffold[pos] <- rbt
+      } else {
+        n <- as.integer(s)
+        rbt <- scaffold[pos]
+        dir <- switch(rbt,
+                      "^" = cbind(seq(-1L, by = -1L, length.out = n), 0L),
+                      ">" = cbind(0L, seq(1L, by = 1L, length.out = n)),
+                      "v" = cbind(seq(1L, by = 1L, length.out = n), 0L),
+                      "<" = cbind(0L, seq(-1L, by = -1L, length.out = n))
+        )
+        if (any(scaffold[t(t(dir) + c(pos))] == ".")) {
+          return(FALSE)
+        }
+        scaffold[pos] <- "#"
+        pos <- pos + tail(dir, 1L)
+        scaffold[pos] <- rbt
+      }
+    }
+  }
+  TRUE
+}
+
+program <- c("A", "B", "A", "C", "B", "C", "B", "A", "C", "B")
+fns <- list(A = c("L", 6, "R", 8, "R", 12, "L", 6, "L", 8),
+               B = c("L", 10, "L", 8, "R", 12),
+               C = c("L", 8, "L", 10, "L", 6, "L", 6))
+test_walk(scaffold, program, fns)
+```
+
+Now we can feed these parameters to the intcode compiler.
+
+```{r get-solution-2}
+encode_input <- function(program, fns) {
+  encode <- function(x) { 
+    paste(x, collapse = ",") %>% 
+      paste0("\n") %>% 
+      charToRaw() %>% 
+      as.integer()
+  }
+  program <- encode(program)
+  fns <- map(fns, encode)
+  
+  c(program, unlist(fns), charToRaw("n\n") %>% as.integer()) %>% 
+    unname()
+}
+mission <- puzzle_data
+mission[1] <- 2L
+tail(parse_op_codes_fast(mission, encode_input(program, fns)), 1L)
+```
+
