@@ -1,0 +1,460 @@
+---
+params:
+   task_nr: 15
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+ text_block %>% 
+    str_split(",") %>% 
+    do.call(c, .) %>% 
+    as.numeric()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We further finetune the code from [Day 13 @ 2019](2019_task13.html) (and get rid of some 
+legacy code). The basic idea is to first build the complete maze BFS (as we need the full 
+maze for part 2 anyways). Then, we run a BFS to find the shortest path form start to end.
+
+```{r get-solution-1}
+print.maze <- function(x, ...) {
+  margins <- apply(x[, 1:2], 2L, min)
+  x_norm <- sweep(x[, 1:2], 2, margins, \(x, y) x - y + 1L)
+  m <- matrix(".", max(x_norm[, 2L]), max(x_norm[, 1L]))
+  m[x_norm[, 2:1]] <- case_when(
+    x[, 3L] == -1L ~ "S",
+    x[, 3L] == 0L  ~ "#",
+    x[, 3L] == 1L  ~ " ",
+    x[, 3L] == 2L  ~ "Z"
+  )
+  apply(m, 1, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat()
+  invisible(x)
+}
+
+parse_op_codes_fast <- function(op_codes = puzzle_data, input = numeric(0L), 
+                                verbose = FALSE) {
+  ip <- 1L
+  rel_base <- 0L
+  
+  out_buffer <- numeric(0L)
+  out_len <- 0L
+  out_block <- integer(1L)
+  block_size <- 1L  # size of memory
+  
+  maze <- matrix(c(0L, 0L, -1L), 1L, 3L, 
+                 dimnames = list(NULL, c("x", "y", "type")))
+  
+  grow_memory <- function(idx) {
+    if (idx > length(op_codes)) {
+      new_size <- ceiling(idx / block_size) * block_size
+      op_codes <<- c(op_codes, rep(0, new_size - length(op_codes)))
+    }
+  }
+  
+  append_out <- function(val) {
+    if (out_len + 1L > length(out_buffer)) {
+      new_size <- length(out_buffer) + out_block
+      out_buffer <<- c(out_buffer, rep(0, new_size - length(out_buffer)))
+    }
+    out_len <<- out_len + 1L
+    out_buffer[out_len] <<- val
+  }
+  
+  get_val <- function(param, mode) {
+    if (mode == 0L) {
+      grow_memory(param + 1L)
+      return(op_codes[param + 1L])
+    } else if (mode == 1L) {
+      return(param)
+    } else if (mode == 2L) {
+      idx <- rel_base + param + 1L
+      grow_memory(idx)
+      return(op_codes[idx])
+    } else {
+      stop("unknown mode")
+    }
+  }
+  
+  get_addr <- function(param, mode) {
+    if (mode == 0L) {
+      return(param + 1L)
+    } else if (mode == 2L) {
+      return(rel_base + param + 1L)
+    } else {
+      stop("invalid write mode")
+    }
+  }
+  
+  get_key <- function(...) {
+    paste(c(...), collapse = ",")
+  }
+  
+  pick_dir <- function(pos) {
+    for (d in seq_along(dirs)) {
+      dir <- dirs[[d]]
+      np <- pos + dir
+      k <- get_key(np)
+      if (!exists(k, visited)) {
+        return (d)
+      }
+    }
+    ## no unseen possibility at this stage => go back
+    if (length(stack) > 1L) {
+      return(stack[[length(stack)]]$back)
+    }
+    return (NA_integer_)
+  }
+  
+  dirs <- list(c(0L, -1L), 
+               c(0L, 1L), 
+               c(-1L, 0L), 
+               c(1L, 0L))
+  opp_dir <- c(2L, 1L, 4L, 3L)
+  
+  
+ visited <- new.env(parent = emptyenv())
+
+  pos <- c(0L, 0L)
+  
+  visited[[get_key(pos)]] <- TRUE
+  
+  stack <- list(
+    list(
+      pos = pos,
+      back = NA_integer_
+    )
+  )
+  
+  halt <- done <- FALSE
+  while (!halt) {
+    instr <- op_codes[ip]
+    op <- instr %% 100L
+    modes <- c(
+      (instr %/% 100L) %% 10L, 
+      (instr %/% 1000L) %% 10L, 
+      (instr %/% 10000L) %% 10L
+    )
+    
+    if (op == 1L) { # add
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- a + b
+      ip <- ip + 4L
+    } else if (op == 2L) { # mul
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- a * b
+      ip <- ip + 4L
+    } else if (op == 3L) { # input
+      if (done) {
+        halt <- TRUE
+        next
+      }
+      dir <- pick_dir(pos)
+      if (is.na(dir)) {
+        done <- TRUE
+        next
+      }
+      addr <- get_addr(op_codes[ip + 1L], modes[1L])
+      grow_memory(addr)
+      op_codes[addr] <- dir
+      ip <- ip + 2L
+    } else if (op == 4L) { # output
+      val <- get_val(op_codes[ip + 1L], modes[1L])
+      step <- dirs[[dir]]
+      
+      prev_pos <- pos
+      next_pos <- pos + step
+      k <- get_key(next_pos)
+      if (!exists(k, visited)) {
+        maze <- rbind(maze, c(next_pos, val))
+      }
+      visited[[k]] <- TRUE
+      if (val %in% 1:2) {
+        pos <- next_pos
+        back_dir <- opp_dir[dir]
+        if (!is.na(stack[[length(stack)]]$back) &&
+            dir == stack[[length(stack)]]$back) {
+          ## backtrack
+          stack <- stack[-length(stack)]
+        } else {
+          ## new depth save state
+          stack <- c(stack, list(list(pos = pos, back = back_dir)))
+        }
+
+      }
+
+      if (verbose) cat(val, "\n")
+      ip <- ip + 2L
+    } else if (op == 5L) { # jump-if-true
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      if (a != 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 6L) { # jump-if-false
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      if (a == 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 7L) { # less than
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a < b)
+      ip <- ip + 4L
+    } else if (op == 8L) { # equals
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a == b)
+      ip <- ip + 4L
+    } else if (op == 9L) { # adjust relative base
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      rel_base <- rel_base + a
+      ip <- ip + 2L
+    } else if (op == 99L) { # halt
+      halt <- TRUE
+    } else {
+      stop("Unknown opcode ", op)
+    }
+  }
+  class(maze) <- "maze"
+  maze
+}
+shortest_path <- function(maze) {
+  start <- maze[maze[, "type"] == -1L, c("x", "y")]
+  goal <- maze[maze[, "type"] == 2L, c("x", "y")]
+  
+  free_cells <- maze[maze[, "type"] != 0L, c("x", "y")]
+  free_keys <- paste(free_cells[, 1L], free_cells[, 2L], sep = ",")
+  free_set <- new.env(parent = emptyenv())
+  visited <- new.env(parent = emptyenv())
+  for (k in free_keys) {
+    free_set[[k]] <- TRUE
+  }
+
+  get_key <- function(p) {
+    paste(p, collapse = ",")
+  }
+  
+  dirs <- list(
+    c(0L, -1L), 
+    c(0L, 1L), 
+    c(-1L, 0L), 
+    c(1L, 0L)
+  )
+  
+  # BFS-Queue
+  queue <- list(
+    list(
+      pos = start, 
+      path = list()
+      )
+  )
+  visited[[get_key(start)]] <- TRUE
+
+  while (length(queue) > 0L) {
+    current <- queue[[1L]]
+    queue <- queue[-1L]
+    
+    if (identical(current$pos, goal)) {
+      return(unlist(current$path))
+    }
+    for (d in seq_along(dirs)) {
+      np <- current$pos + dirs[[d]]
+      k <- get_key(np)
+      if (exists(k, free_set) && !exists(k, visited)) {
+        visited[[k]] <- TRUE
+        
+        queue <- c(
+          queue, 
+          list(list(pos = np, 
+                    path = c(current$path, d))
+          )
+        )
+      }
+    }
+  }
+  return(NULL)
+}
+
+maze <- parse_op_codes_fast(puzzle_data)
+shortest_path(maze) %>% 
+  length()
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we start from the goal and flood the maze with oxygen.
+
+```{r get-solution-2}
+flood <- function(maze) {
+  get_neighbors <- function(pos) {
+    dirs <- rbind(
+      c(-1L, 0L),
+      c(1L, 0L),
+      c(0L, -1L),
+      c(0L, 1L)
+    )
+    nbs <- apply(pos, 1L, function(r) t(t(dirs) + r), simplify = FALSE) %>% 
+      do.call(rbind, .)
+    nbs <- nbs[!duplicated(nbs), , drop = FALSE]
+    nbs <- nbs[between(nbs[, 1L], 1L, nrow(m)) &
+                 between(nbs[, 2L], 1L, ncol(m)), , drop = FALSE]
+    if (nrow(nbs) == 0L) {
+      return(matrix(NA_integer_, 0L, 2L))
+    }
+    free <- is.na(m[nbs])
+    return (nbs[free, , drop = FALSE])
+  }
+  margins <- apply(maze[, 1:2], 2L, min)
+  x_norm <- sweep(maze[, 1:2], 2, margins, \(x, y) x - y + 1L)
+  m <- matrix("#", max(x_norm[, 2L]), max(x_norm[, 1L]))
+  m[x_norm[, 2:1]] <- case_when(
+    maze[, 3L] %in% c(-1L, 1L, 2L) ~ NA_character_,
+    maze[, 3L] == 0L  ~ "#"
+  )
+  queue <- x_norm[maze[, 3L] == 2L, 2:1, drop = FALSE]
+  mins <- -1L
+  while(nrow(queue) > 0L) {
+    mins <- mins + 1L
+    pos <- queue
+    queue <- get_neighbors(pos)
+    m[pos] <- "O"
+  }
+  mins
+}
+flood(maze)
+```
