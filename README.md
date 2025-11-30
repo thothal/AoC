@@ -92,10 +92,22 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 12](https://thothal.github.io/AoC/2019_task12.html)
 - [x] [Day 13](https://thothal.github.io/AoC/2019_task13.html)
 - [x] [Day 14](https://thothal.github.io/AoC/2019_task14.html)
+<<<<<<< Updated upstream
 - [x] [Day 15](https://thothal.github.io/AoC/2019_task15.html)
 - [x] [Day 16](https://thothal.github.io/AoC/2019_task16.html)
 - [x] [Day 17](https://thothal.github.io/AoC/2019_task17.html)
 - [ ] Day 18
+||||||| constructed merge base
+- [ ] Day 15
+- [ ] Day 16
+- [ ] Day 17
+- [ ] Day 18
+=======
+- [ ] Day 15
+- [ ] Day 16
+- [ ] Day 17
+- [x] [Day 18](https://thothal.github.io/AoC/2019_task18.html)
+>>>>>>> Stashed changes
 - [ ] Day 19
 - [ ] Day 20
 - [ ] Day 21
