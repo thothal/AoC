@@ -287,10 +287,8 @@ int main() {
                                        "########.########",
                                        "#l.F..d...h..C.m#",
                                        "#################"};
-  std::vector<std::string> maze_vec2 = {
-      "#######", "#a.#Cd#", "##1#2##", "#######", "##3#4##", "#cB#Ab#", "#######"};
   std::vector<Coord> pois;
-  /*Coord start;
+  Coord start;
   int nrow = maze_vec.size();
   int ncol = maze_vec[0].size();
   for (int i = 0; i < nrow; ++i) {
@@ -306,26 +304,8 @@ int main() {
     }
   }
   Path result = bfs(maze_vec, pois);
-  COUT << get_key_path_length(result, start) << std::endl;
-*/
-  std::array<Coord, 4> starts;
-  int nrow = maze_vec2.size();
-  int ncol = maze_vec2[0].size();
-  int idx = 0;
-  for (int i = 0; i < nrow; ++i) {
-    for (int j = 0; j < ncol; ++j) {
-      char cell = maze_vec2[i][j];
-      if ((cell >= '1' && cell <= '4') || (cell >= 'a' && cell <= 'z')) {
-        Coord poi = {j, i, cell};
-        pois.push_back(poi);
-        if ((cell >= '1' && cell <= '4')) {
-          starts[idx++] = poi;
-        }
-      }
-    }
-  }
-  Path result = bfs(maze_vec2, pois);
-  COUT << get_key_path_length(result, starts, pois.size() - 4) << std::endl;
+  COUT << get_key_path_length(result, start, pois.size() - 1) << std::endl;
+
   return 0;
 }
 #endif

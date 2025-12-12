@@ -161,20 +161,6 @@ fft <- function(signal, nr_phases) {
 }
 
 fft(puzzle_data, 100L)
-
-fft_phase <- function(signal) {
-  out <- signal
-  for (i in (length(out) - 1L):1) {
-    out[i] <- (out[i] + out[i + 1L]) %% 10L
-  }
-  out
-}
-
-fft_phase <- function(signal) {
-  out <- rev(signal)
-  rev(cumsum(out) %% 10L)
-}
-
 ```
 
 ## Part 2
