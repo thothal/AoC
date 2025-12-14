@@ -145,7 +145,11 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
     set_names(all_portals) %>% 
     c("." = ".", " " = " ", "#" = "#", .)
   maze[] <- lkp[c(maze)]
-  structure(maze, class = "maze", start = "A", goal = tail(lkp, 1L))
+  warp <- map(lkp[-(1:3)], function(ptl) {
+    which(maze == ptl, arr.ind = TRUE)
+  }) %>% 
+    set_names(lkp[-(1:3)])
+  structure(maze, class = "maze", start = "A", goal = tail(lkp, 1L), warp = warp)
 }
 
 puzzle_data <- local({
@@ -171,181 +175,83 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We build upon the code from [Day 15 @ 2019](2019_task15.html) and simply store the output
-in a matrix. To determine the alignment parameters, we first filter fields with a `#` 
-and keep only those, which have a `#` neighbor on all sides.
+We solve the first part by a straight forward BFS, where we just have to make sure that 
+entering a warp field moves the current position on the field before the warp field.
 
 ```{r get-solution-1}
-print.scaffold<- function(x, ...) {
+print.maze <- function(x, ...) {
   apply(x, 1, paste, collapse = "") %>% 
     paste(collapse = "\n") %>% 
     cat()
   invisible(x)
 }
 
-parse_op_codes_fast <- function(op_codes = puzzle_data, input = numeric(0L), 
-                                verbose = FALSE) {
-  ip <- 1L
-  rel_base <- 0L
+find_shortest_path <- function(maze = puzzle_data) {
+  dir <- rbind(
+    "^" = c(-1L, 0L),
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L),
+    "<" = c(0L, -1L)
+  )
   
-  out_buffer <- numeric(0)
-  out_len <- 0L
-  out_block <- 1024L
-  block_size <- 1024L
+  warp <- attr(maze, "warp")
+  start <- attr(maze, "start")
+  goal <- attr(maze, "goal")
   
-  grow_memory <- function(idx) {
-    if (idx > length(op_codes)) {
-      new_size <- ceiling(idx / block_size) * block_size
-      op_codes <<- c(op_codes, rep(0, new_size - length(op_codes)))
+  walk_out <- function(pos) {
+    for (i in seq_len(nrow(dir))) {
+      new_pos <- pos + dir[i, , drop = FALSE]
+      if (maze[new_pos] == ".") {
+        return(new_pos)
+      }
     }
-  }
-  
-  append_out <- function(val) {
-    if (out_len + 1L > length(out_buffer)) {
-      new_size <- length(out_buffer) + out_block
-      out_buffer <<- c(out_buffer, rep(0, new_size - length(out_buffer)))
-    }
-    out_len <<- out_len + 1L
-    out_buffer[out_len] <<- val
-  }
-  
-  get_val <- function(param, mode) {
-    if (mode == 0L) {
-      grow_memory(param + 1L)
-      return(op_codes[param + 1L])
-    } else if (mode == 1L) {
-      return(param)
-    } else if (mode == 2L) {
-      idx <- rel_base + param + 1L
-      grow_memory(idx)
-      return(op_codes[idx])
-    } else {
-      stop("unknown mode")
-    }
-  }
-  
-  get_addr <- function(param, mode) {
-    if (mode == 0L) {
-      return(param + 1L)
-    } else if (mode == 2L) {
-      return(rel_base + param + 1L)
-    } else {
-      stop("invalid write mode")
-    }
-  }
-  
-  halt <- FALSE
-  while (!halt) {
-    instr <- op_codes[ip]
-    op <- instr %% 100L
-    modes <- c(
-      (instr %/% 100L) %% 10L, 
-      (instr %/% 1000L) %% 10L, 
-      (instr %/% 10000L) %% 10L
-    )
     
-    if (op == 1L) { # add
-      a <- get_val(op_codes[ip + 1L], modes[1L])
-      b <- get_val(op_codes[ip + 2L], modes[2L])
-      addr <- get_addr(op_codes[ip + 3L], modes[3L])
-      grow_memory(addr)
-      op_codes[addr] <- a + b
-      ip <- ip + 4L
-    } else if (op == 2L) { # mul
-      a <- get_val(op_codes[ip + 1L], modes[1L])
-      b <- get_val(op_codes[ip + 2L], modes[2L])
-      addr <- get_addr(op_codes[ip + 3L], modes[3L])
-      grow_memory(addr)
-      op_codes[addr] <- a * b
-      ip <- ip + 4L
-    } else if (op == 3L) { # input
-      if (length(input) == 0L) {
-        stop("No input available")
+  }
+  n <- nrow(maze)
+  m <- ncol(maze)
+  dist <- matrix(-1L, n, m)
+  start_pos <- which(maze == start, arr.ind = TRUE) 
+  dist[start_pos] <- 0L
+  start_pos <- walk_out(start_pos)
+  dist[start_pos] <- 0L
+  queue <- matrix(NA_integer_, n * m, 2L)
+  head_ptr <- tail_ptr <- 1L
+  queue[head_ptr, ] <- start_pos
+  while (head_ptr <= tail_ptr) {
+    cur_pos <- queue[head_ptr, , drop = FALSE]
+    head_ptr <- head_ptr + 1L
+    nbs <- t(t(dir) + c(cur_pos))
+    valid_nbs <- between(nbs[, 1L], 1L, n) &
+      between(nbs[, 2L], 1L, m) &
+      !maze[nbs] %in% c(" ", "#") &
+      dist[nbs] == -1L
+    nbs <- nbs[valid_nbs, , drop = FALSE]
+    for (i in seq_len(nrow(nbs))) {
+      nb <- nbs[i, , drop = FALSE]
+      if (maze[nb] == goal) {
+        return(dist[cur_pos])
+      } else if (maze[nb] %in% names(warp)) {
+        # warp
+        targets <- warp[[maze[nb]]]
+        dist[nb] <- dist[cur_pos]
+        for (j in seq_len(nrow(targets))) {
+          target <- targets[j, , drop = FALSE]
+          if (!all(target == nb)) {
+            dist[target] <- dist[cur_pos]
+            nb <- walk_out(target)
+            break
+          }
+        }
       }
-      addr <- get_addr(op_codes[ip + 1L], modes[1])
-      grow_memory(addr)
-      op_codes[addr] <- input[1L]
-      input <- input[-1]
-      ip <- ip + 2L
-    } else if (op == 4L) { # output
-      val <- get_val(op_codes[ip + 1L], modes[1])
-      append_out(val)
-      if (verbose) cat(val, "\n")
-      ip <- ip + 2L
-    } else if (op == 5L) { # jump-if-true
-      a <- get_val(op_codes[ip + 1L], modes[1L])
-      b <- get_val(op_codes[ip + 2L], modes[2L])
-      if (a != 0L) {
-        ip <- b + 1L
-      } else {
-        ip <- ip + 3L
-      }
-    } else if (op == 6L) { # jump-if-false
-      a <- get_val(op_codes[ip + 1L], modes[1L])
-      b <- get_val(op_codes[ip + 2L], modes[2L])
-      if (a == 0L) {
-        ip <- b + 1L
-      } else {
-        ip <- ip + 3L
-      }
-    } else if (op == 7L) { # less than
-      a <- get_val(op_codes[ip + 1L], modes[1L])
-      b <- get_val(op_codes[ip + 2L], modes[2L])
-      addr <- get_addr(op_codes[ip + 3L], modes[3L])
-      grow_memory(addr)
-      op_codes[addr] <- as.numeric(a < b)
-      ip <- ip + 4L
-    } else if (op == 8L) { # equals
-      a <- get_val(op_codes[ip + 1L], modes[1L])
-      b <- get_val(op_codes[ip + 2L], modes[2L])
-      addr <- get_addr(op_codes[ip + 3L], modes[3L])
-      grow_memory(addr)
-      op_codes[addr] <- as.numeric(a == b)
-      ip <- ip + 4L
-    } else if (op == 9L) { # adjust relative base
-      a <- get_val(op_codes[ip + 1L], modes[1L])
-      rel_base <- rel_base + a
-      ip <- ip + 2L
-    } else if (op == 99L) { # halt
-      halt <- TRUE
-    } else {
-      stop("Unknown opcode ", op)
+      dist[nb] <- dist[cur_pos] + 1L
+      tail_ptr <- tail_ptr + 1L
+      queue[tail_ptr, ] <- nb
     }
   }
-  out_buffer[1:out_len]
+  NA_integer_
 }
 
-create_scaffold <- function(out_buffer) {
-  scaffold <- intToUtf8(out_buffer) %>% 
-    str_split("\n") %>% 
-    extract2(1L) %>% 
-    str_split( "") %>% 
-    do.call(rbind, .)
-  pos <- which(scaffold == "#", arr.ind = TRUE)
-  ## look only into interior points
-  interior <- pos[between(pos[, 1L], 2L, nrow(scaffold) - 1L) &
-                    between(pos[, 2L], 2L, ncol(scaffold) - 1L), ]
-  int_idx <- apply(interior, 1, function(coord) {
-    i <- coord[1L]
-    j <- coord[2L]
-    scaffold[i - 1L, j] == "#" &&
-      scaffold[i + 1L, j] == "#" &&
-      scaffold[i, j - 1L] == "#" &&
-      scaffold[i, j + 1L] == "#"
-  })
-  intersections <- interior[int_idx, , drop = FALSE]
-  scaffold[intersections] <- "O"
-  attr(scaffold, "intersections") <- intersections
-  class(scaffold) <- "scaffold"
-  scaffold
-}
-
-scaffold <- parse_op_codes_fast(puzzle_data) %>% 
-  create_scaffold()
-attr(scaffold, "intersections") %>% 
-  apply(1, \(coord) prod(coord - 1L)) %>% 
-  sum()
-
+find_shortest_path(puzzle_data)
 ```
 
 ## Part 2
@@ -358,141 +264,93 @@ cat(puzzle[[2]])
 
 ### Solution
 
-```{r path-length, include = FALSE}
-measure_length <- function(scaffold) {
-  n <- nrow(scaffold)
-  m <- ncol(scaffold)
-  horizontal <- vertical <- integer(0L)
-  for (i in seq_len(n)) {
-    cur_line <- 0L
-    for (j in seq_len(m)) {
-      if (scaffold[i, j] == ".") {
-        if (cur_line > 0L) {
-          horizontal <- c(horizontal, cur_line)
-        }
-        cur_line <- 0
-      } else {
-        cur_line <- cur_line + 1L
-      }
-    }
-  }
-  for (j in seq_len(m)) {
-    cur_line <- 0L
-    for (i in seq_len(n)) {
-      if (scaffold[i, j] == ".") {
-        if (cur_line > 0L) {
-          vertical <- c(vertical, cur_line)
-        }
-        cur_line <- 0
-      } else {
-        cur_line <- cur_line + 1L
-      }
-    }
-  }
-  list(horizontal = sort(unique(horizontal[horizontal > 1L])),
-       vertical = sort(unique(vertical[vertical > 1L])))
-}
-(path_lengths <- measure_length(scaffold))
-```
-
-For the second part, we analyse the map. First observation is that straight lines are 
-either `r combine_words(unique(unlist(path_lengths)), and = " or ", oxford_comma = FALSE)`
-fields long.
-
-```{r show-path-length}
-<<path-length>>
-```
-
-Then, we collected the segment lengths, assuming that we do not turn at intersection 
-points. Once, we had the segment lengths, we were looking for recurring patterns, and
-we could identify that this program let the robot stay on the scaffold:
-
-* **Program**: `A,B,A,C,B,C,B,A,C,B`
-* **A**: `L,6,R,8,R,12,L,6,L,8`
-* **B**: `L,10,L,8,R,12`
-* **C**: `L,8,L,10,L,6,L,6`
-
-*N.B.* In an earlier version, we used a too long variant of `C`, but it turned out that 
-this is basically `B` so we could rmeove it form `C` and add `Bs` instead to the program.
-
-This screenshot shows the process and the paths lengths:
-
-```{r show-solving-step, echo = FALSE}
-include_graphics(here::here("2019", "Task-17", "scaffold.png"))
-```
-
-Eventually, we tested this walk and the robot stays safe:
-
-```{r test-walk}
-test_walk <- function(scaffold, program, funs) {
-  pos <- which(scaffold == "^", arr.ind = TRUE)
-  for (p in program) {
-    steps <- funs[[p]]
-    for (s in steps) {
-      if (s %in% c("L", "R")) {
-        rbt <- scaffold[pos]
-        if (s == "L") {
-          rbt <- case_when(
-            rbt == "^" ~ "<",
-            rbt == ">" ~ "^",
-            rbt == "v" ~ ">",
-            rbt == "<" ~ "v"
-          )
-        } else {
-          rbt <- case_when(
-            rbt == "^" ~ ">",
-            rbt == ">" ~ "v",
-            rbt == "v" ~ "<",
-            rbt == "<" ~ "^"
-          )
-        }
-        scaffold[pos] <- rbt
-      } else {
-        n <- as.integer(s)
-        rbt <- scaffold[pos]
-        dir <- switch(rbt,
-                      "^" = cbind(seq(-1L, by = -1L, length.out = n), 0L),
-                      ">" = cbind(0L, seq(1L, by = 1L, length.out = n)),
-                      "v" = cbind(seq(1L, by = 1L, length.out = n), 0L),
-                      "<" = cbind(0L, seq(-1L, by = -1L, length.out = n))
-        )
-        if (any(scaffold[t(t(dir) + c(pos))] == ".")) {
-          return(FALSE)
-        }
-        scaffold[pos] <- "#"
-        pos <- pos + tail(dir, 1L)
-        scaffold[pos] <- rbt
-      }
-    }
-  }
-  TRUE
-}
-
-program <- c("A", "B", "A", "C", "B", "C", "B", "A", "C", "B")
-fns <- list(A = c("L", 6, "R", 8, "R", 12, "L", 6, "L", 8),
-               B = c("L", 10, "L", 8, "R", 12),
-               C = c("L", 8, "L", 10, "L", 6, "L", 6))
-test_walk(scaffold, program, fns)
-```
-
-Now we can feed these parameters to the intcode compiler.
+For the second part we use an A*-algorithm. For this we first calculate the distances
+between all warp points
 
 ```{r get-solution-2}
-encode_input <- function(program, fns) {
-  encode <- function(x) { 
-    paste(x, collapse = ",") %>% 
-      paste0("\n") %>% 
-      charToRaw() %>% 
-      as.integer()
-  }
-  program <- encode(program)
-  fns <- map(fns, encode)
+bfs <- function(maze, start_pos) {
+  dir <- rbind(
+    "^" = c(-1L, 0L),
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L),
+    "<" = c(0L, -1L)
+  )
   
-  c(program, unlist(fns), charToRaw("n\n") %>% as.integer()) %>% 
-    unname()
+  warp <- attr(maze, "warp")
+  
+  walk_out <- function(pos) {
+    for (i in seq_len(nrow(dir))) {
+      new_pos <- pos + dir[i, , drop = FALSE]
+      if (maze[new_pos] == ".") {
+        return(new_pos)
+      }
+    }
+  }
+  
+  is_outer <- function(pos) {
+    pos[1L] %in% c(2L, n - 1) ||
+      pos[2L] %in% c(2L, m - 1)
+  }
+  n <- nrow(maze)
+  m <- ncol(maze)
+  start <- maze[start_pos]
+  dist <- matrix(-1L, n, m)
+  dist[start_pos] <- 0L
+  start_outer <- is_outer(start_pos)
+  start_pos <- walk_out(start_pos)
+  dist[start_pos] <- 0L
+  queue <- matrix(NA_integer_, n * m, 2L)
+  head_ptr <- tail_ptr <- 1L
+  queue[head_ptr, ] <- start_pos
+  res <- tibble(from = character(0L),
+                to = character(0L),
+                distance = integer(0L), 
+                from_outer = logical(0L),
+                to_outer = logical(0L))
+  while (head_ptr <= tail_ptr) {
+    cur_pos <- queue[head_ptr, , drop = FALSE]
+    head_ptr <- head_ptr + 1L
+    nbs <- t(t(dir) + c(cur_pos))
+    valid_nbs <- between(nbs[, 1L], 1L, n) &
+      between(nbs[, 2L], 1L, m) &
+      !maze[nbs] %in% c(" ", "#") &
+      dist[nbs] == -1L
+    nbs <- nbs[valid_nbs, , drop = FALSE]
+    for (i in seq_len(nrow(nbs))) {
+      nb <- nbs[i, , drop = FALSE]
+      if (maze[nb] %in% names(warp)) {
+        dist[nb] <- dist[cur_pos]
+        res <- add_row(res,
+                       from = start,
+                       to = maze[nb],
+                       distance = dist[cur_pos],
+                       from_outer = start_outer,
+                       to_outer = is_outer(nb))
+      }
+      dist[nb] <- dist[cur_pos] + 1L
+      tail_ptr <- tail_ptr + 1L
+      queue[tail_ptr, ] <- nb
+    }
+  }
+  res
 }
-mission <- puzzle_data
-mission[1] <- 2L
-tail(parse_op_codes_fast(mission, encode_input(program, fns)), 1L)
+
+precompute_distances <- function(maze = puzzle_data) {
+  warp <- attr(maze, "warp")
+  map(warp, function(wp) {
+    res <- vector("list", nrow(wp))
+    for (i in seq_len(nrow(wp))) {
+      pos <- wp[i, , drop = FALSE]
+      res[[i]] <- bfs(maze, pos)
+    }
+    list_rbind(res)
+  }) %>% 
+    list_rbind()
+}
+tic("BFS")
+warp_distances <- precompute_distances(puzzle_data)
+toc()
 ```
+
+
 
