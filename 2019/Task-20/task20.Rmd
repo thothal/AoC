@@ -178,6 +178,7 @@ cat(puzzle[[1]])
 We solve the first part by a straight forward BFS, where we just have to make sure that 
 entering a warp field moves the current position on the field before the warp field.
 
+
 ```{r get-solution-1}
 print.maze <- function(x, ...) {
   apply(x, 1, paste, collapse = "") %>% 
@@ -205,7 +206,6 @@ find_shortest_path <- function(maze = puzzle_data) {
         return(new_pos)
       }
     }
-    
   }
   n <- nrow(maze)
   m <- ncol(maze)
@@ -347,9 +347,7 @@ precompute_distances <- function(maze = puzzle_data) {
   }) %>% 
     list_rbind()
 }
-tic("BFS")
 warp_distances <- precompute_distances(puzzle_data)
-toc()
 ```
 
 
