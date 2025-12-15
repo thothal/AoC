@@ -72,6 +72,8 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
+library(igraph)
+library(collections)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -264,11 +266,37 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the second part we use an A*-algorithm. For this we first calculate the distances
-between all warp points
+For the second part we use an A*-algorithm. For this we first calculate the distances from
+each warp point to all its reachable other warp points. As the position (inner vs outer)
+of the warp points becomes important now, we rename the warp points and add suffixes
+`_i` and `_o` for **i**nner and **o**uter warp points respectively.
 
-```{r get-solution-2}
-bfs <- function(maze, start_pos) {
+```{r pre-compute-distances}
+refactor_maze <- function(maze) {
+  n <- nrow(maze)
+  m <- ncol(maze)
+  is_outer <- function(pos) {
+    pos[, 1L] %in% c(2L, n - 1) |
+      pos[, 2L] %in% c(2L, m - 1)
+  }
+  start <- attr(maze, "start")
+  goal <- attr(maze, "goal")
+  warp <- attr(maze, "warp")
+  iwalk(warp, function(pos, wp) {
+    new_wp <- paste0(wp, if_else(is_outer(pos), "_o", "_i"))  
+    maze[pos] <<- new_wp
+  })
+  warp <- str_extract(maze, "^._[io]$")
+  maze <- structure(c(maze), 
+                    dim = dim(maze), 
+                    warp = warp[!is.na(warp)],
+                    start = paste0(start, "_o"),
+                    goal = paste0(goal, "_o"))
+  maze
+}
+
+
+bfs <- function(maze, start) {
   dir <- rbind(
     "^" = c(-1L, 0L),
     ">" = c(0L, 1L),
@@ -286,17 +314,11 @@ bfs <- function(maze, start_pos) {
       }
     }
   }
-  
-  is_outer <- function(pos) {
-    pos[1L] %in% c(2L, n - 1) ||
-      pos[2L] %in% c(2L, m - 1)
-  }
   n <- nrow(maze)
   m <- ncol(maze)
-  start <- maze[start_pos]
+  start_pos <- which(maze == start, arr.ind = TRUE)
   dist <- matrix(-1L, n, m)
   dist[start_pos] <- 0L
-  start_outer <- is_outer(start_pos)
   start_pos <- walk_out(start_pos)
   dist[start_pos] <- 0L
   queue <- matrix(NA_integer_, n * m, 2L)
@@ -304,9 +326,7 @@ bfs <- function(maze, start_pos) {
   queue[head_ptr, ] <- start_pos
   res <- tibble(from = character(0L),
                 to = character(0L),
-                distance = integer(0L), 
-                from_outer = logical(0L),
-                to_outer = logical(0L))
+                distance = integer(0L))
   while (head_ptr <= tail_ptr) {
     cur_pos <- queue[head_ptr, , drop = FALSE]
     head_ptr <- head_ptr + 1L
@@ -318,14 +338,12 @@ bfs <- function(maze, start_pos) {
     nbs <- nbs[valid_nbs, , drop = FALSE]
     for (i in seq_len(nrow(nbs))) {
       nb <- nbs[i, , drop = FALSE]
-      if (maze[nb] %in% names(warp)) {
+      if (maze[nb] %in% warp) {
         dist[nb] <- dist[cur_pos]
         res <- add_row(res,
                        from = start,
                        to = maze[nb],
-                       distance = dist[cur_pos],
-                       from_outer = start_outer,
-                       to_outer = is_outer(nb))
+                       distance = dist[cur_pos])
       }
       dist[nb] <- dist[cur_pos] + 1L
       tail_ptr <- tail_ptr + 1L
@@ -336,41 +354,229 @@ bfs <- function(maze, start_pos) {
 }
 
 precompute_distances <- function(maze = puzzle_data) {
+  maze <- refactor_maze(maze)
   warp <- attr(maze, "warp")
-  map(warp, function(wp) {
-    res <- vector("list", nrow(wp))
-    for (i in seq_len(nrow(wp))) {
-      pos <- wp[i, , drop = FALSE]
-      res[[i]] <- bfs(maze, pos)
-    }
-    list_rbind(res)
-  }) %>% 
-    list_rbind()
+  poi <- attributes(maze)[c("start", "goal")] %>% 
+    unlist() %>% 
+    unname()
+  stairs <- setdiff(warp, poi) %>% 
+    str_remove("_[io]$") %>% 
+    unique() %>% 
+    sort()
+  stairs <- tibble(from = c(paste0(stairs, "_i"),
+                            paste0(stairs, "_o")),
+                   to = c(paste0(stairs, "_o"),
+                            paste0(stairs, "_i")),
+                   distance = 1L)
+  res <- map(warp, ~ bfs(maze, .x)) %>% 
+    list_rbind() %>% 
+    rbind(stairs) %>% 
+    filter(!((from %in% poi & str_detect(to, "_o$")) | 
+               (to %in% poi & str_detect(from, "_o$"))))
+  attr(res, "start") <- poi[1L]
+  attr(res, "goal") <- poi[2L]
+  res
 }
 
-summarize_path <- function(dist, start, visited) {
-  cur <- start
-  is_linear <- TRUE
-  weight <- 0L
-  visited <- c(visited, cur)
-  while(is_linear) {
-    cand <- dist %>% 
-      filter(from == cur, !to %in% visited)
-    is_linear <- nrow(cand) == 1L
-    if (is_linear) {
-            cur <- cand %>% pull(to)
-      visited <- c(visited, cur)
-      weight <- weight + cand %>% pull(distance)
-
-    }
-  }
-  tibble(from = start,
-         to = tail(visited, 1L),
-         distance = weight,
-         lvl = sum(str_count(tail(visited, -2L), "_o$")))
-}
 warp_distances <- precompute_distances(puzzle_data)
 ```
 
+With the distances pre-computed we can plot the network:
 
+```{r show-network, fig.width = 12, fig.height = 10, echo = FALSE}
+lay <- matrix(
+  c(9L, 1L, 10L, 3L, 11L, 9L, 8L, 1L, 10L, 2L, 10L, 8L, 
+    14L, 2L, 14L, 13L, 1L, 12L, 6L, 5L, 3L, 14L, 4L, 4L, 14L, 4L, 
+    5L, 4L, 5L, 1L, 1L, 8L, 7L, 7L, 7L, 6L, 6L, 1L, 1L, 2L, 3L, 14L, 
+    12L, 4L, 10L, 14L, 9L, 2L, 14L, 11L, 5L, 9L, 13L, 8L, 1L, 3L, 
+    9L, 3L, 8L, 7L, 7L, 7L, 9L, 2L, 9L, 7L, 7L, 7L, 6L, 1L, 7L, 7L, 
+    1L, 7L, 1L, 1L, 1L, 4L, 0L, 1L, 5L, 7L, 8L, 8L, 7L, 7L, 6L, 1L, 
+    1L, 7L, 8L, 8L, 7L, 4L, 5L, 8L, 8L, 3L, 1L, 9L, 1L, 1L, 8L, 9L, 
+    2L, 1L, 9L, 1L, 1L, 8L, 9L, 9L), 
+  56L, 2L
+)
+plot_graph <- function(G, lay) {
+  G <- G %>%  
+    set_graph_attr(name = "layout", value = lay) %>% 
+    set_graph_attr(name = "margin", 0) %>% 
+    set_graph_attr(name = "asp", 0)
+  V(G)$color <- "beige"
+  V(G)["A_o"]$color <- "firebrick"
+  V(G)["c_o"]$color <- "forestgreen"
+  V(G)$label_color <- "black"
+  V(G)$shape <- "circle"
+  V(G)$size <- 10L
+  V(G)$label.cex <- 1.25
+  V(G)[c("A_o", "c_o")]$label.color <- "white"
+  V(G)[c("A_o", "c_o")]$shape <- "square"
+  
+  E(G)$arrow.mode <- 0
+  plot(G)
+}
+G <- graph_from_data_frame(warp_distances)
+plot_graph(G, lay)
+```
 
+We see that we can further reduce the graph. Take the sequence 
+`X_i -> X_o -> O_i -> O_o -> E_i -> E_o` for instance. Each of the nodes (except the
+very first one) has exactly one descendant. We can collapse these nodes by summing their
+distance, removing the nodes, and adding a simple new edge between `X_o` and `E_o`
+with the updated weight.
+
+```{r compress_graph}
+compress_network <- function(dist) {
+  queue <- rep(NA_character_, dist %>% 
+                    pull(from) %>% 
+                    unique() %>% 
+                    length())
+  head_ptr <- tail_ptr <- 1L
+  queue[head_ptr] <- attr(dist, "start")
+
+  res <- dist[0L, ] %>% 
+    cbind(levels = integer(0L))
+  skip <- tibble(from = character(0L), to = character(0L))
+  while (head_ptr <= tail_ptr) {
+    cur <- queue[head_ptr]
+    head_ptr <- head_ptr + 1L
+    cands <- dist %>% 
+      filter(from == cur) %>% 
+      anti_join(skip, c("from", "to"))
+    for (i in seq_len(nrow(cands))) {
+      cand <- cands %>% 
+        slice(i)
+      weight <- cand %>% 
+        pull(distance)
+      start <- parent <- cand %>% 
+        pull(from)
+      kid <- cand %>% 
+        pull(to)
+      levels <- 0L
+      while (TRUE) {
+        kids <- dist %>% 
+          filter(from == kid, to != parent)
+        if (str_remove(parent, "_[io]$") == str_remove(kid, "_[io]$")) {
+          if (str_detect(parent, "_i$")) {
+            levels <- levels - 1L
+          } else {
+            levels <- levels + 1L
+          }
+        }
+        
+        if (nrow(kids) > 1L || nrow(kids) == 0L) {
+          res <- rbind(res, 
+                       tibble(from = c(start, kid), 
+                              to = c(kid, start), distance = weight, 
+                              levels = c(levels, -levels)))
+          skip <- rbind(skip, 
+                        tibble(from = c(kid, parent), to = c(parent, kid)))
+          if (!kid %in% queue) {
+            tail_ptr <- tail_ptr + 1L
+            queue[tail_ptr] <- kid
+          }
+          break
+        } else {
+          parent <- kid
+          kid <- kids %>% 
+            pull(to)
+          weight <- weight + kids %>% 
+            pull(distance)
+        }
+
+      }
+    }
+  }
+  attr(res, "start") <- attr(dist, "start")
+  attr(res, "goal") <- attr(dist, "goal")
+  res
+}
+compressed_distances <- compress_network(warp_distances)
+```
+
+This compressed graph looks like this (the edges are labeled by the distance / level 
+change):
+
+```{r show-compressed-network, fig.height = 8, fig.width = 12, echo = FALSE}
+lay2 <- matrix(c(1:2, rep(2:3, 3), rep(4:1, each = 2)), 8L, 2L)
+G2 <- graph_from_data_frame(compressed_distances) 
+E(G2)$label <- NA
+E(G2)[seq(1L, ecount(G2), by = 2L)]$label <- paste(
+  E(G2)[seq(1L, ecount(G2), by = 2L)]$distance,
+  E(G2)[seq(1L, ecount(G2), by = 2L)]$levels,
+  sep = " / ")
+E(G2)$label.cex <- 1.25
+plot_graph(G2, lay2)
+```
+
+We just have to be careful to not allow using the path `X_i -> W_i` on the ground level of 
+the maze, as it would pass through `D_o` which is not existing on the ground floor.
+Likewise we must not use the edge `H_i -> c_o` on any other floor than the ground floor.
+Finally, we must not use edges which would lead to a non-existing floor > 0 
+(`A_o -> X_i -> E_o -> W_i -> X_i` for example).
+
+With this setup we are ready to implement an A-Star search where the current portal and 
+the current floor form the state. We use the current floor times the minimum distance as 
+heuristic `h` (it will never overestimate the real costs).
+
+```{r get-solution-2}
+a_star_search <- function(dist) {
+  pq <- priority_queue()
+  costs <- new.env(parent = emptyenv())
+  d_min <- dist %>% 
+    pull(distance) %>% 
+    min()
+  h <- function(state) {
+    abs(state$level) * d_min
+  }
+  get_key <- function(state) {
+    sprintf("%s_%d", state$pos, state$level)
+  }
+  
+  goal  <- attr(dist, "goal")
+  start <- list(pos = attr(dist, "start"), level = 0L)
+  start_key <- get_key(start)
+
+  costs[[start_key]] <- 0
+  pq$push(start, -(costs[[start_key]] + h(start)))
+
+  while(pq$size() > 0) {
+    cur <- pq$pop()
+    cur_key <- get_key(cur)
+    g_cur <- costs[[cur_key]]
+    
+    if (cur$pos == goal) {
+      return(costs[[cur_key]])
+    }
+    
+    cands <- dist %>% 
+      mutate(new_level = cur$level + levels) %>% 
+      filter(from == cur$pos, new_level <= 0L) 
+    if (cur$level == 0L) {
+      ## on level 0 we must not use x_i -> W_i
+      cands <- cands %>% 
+        filter(!(from == "X_i" & to == "W_i"))
+    } else {
+      ## on any other level we must not use H_i -> c_o
+      cands <- cands %>% 
+        filter(!(from == "H_i" & to == "c_o"))
+    }
+    for (i in seq_len(nrow(cands))) {
+      to_node   <- cands$to[i]
+      new_level <- cands$new_level[i]
+      dis       <- cands$distance[i]
+
+      new_state <- list(pos = to_node, level = new_level)
+      new_key   <- get_key(new_state)
+      if (!exists(new_key, costs, inherits = FALSE)) {
+        costs[[new_key]] <- Inf
+      }
+      tentative_g <- g_cur + dis
+      if (tentative_g < costs[[new_key]]) {
+        costs[[new_key]] <- tentative_g
+        f <- -(tentative_g + h(new_state))
+        pq$push(new_state, f)
+      }
+    }
+  }
+}
+a_star_search(compressed_distances)
+```
