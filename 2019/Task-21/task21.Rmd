@@ -275,24 +275,23 @@ map_surface <- function(springscript, program = puzzle_data) {
 }
 
 map_surface(c(
-"NOT B T",
-"AND A T",
-"AND C J",
-"NOT B T",
-"AND C T",
-"NOT C T",
-"OR T J",
-"NOT A T",
-"AND B T",
-"AND C T",
-"OR T J",
-"AND D J"
+  "OR D J",
+  "NOT C T",
+  "AND T J",
+  "NOT C T",
+  "OR T J",
+  "NOT B T",
+  "AND T J",
+  "AND D J",
+  "NOT A T",
+  "OR T J"
 ), puzzle_data)
 
 
 #####..#.######## NOT A J
 #####...######### NOT B J
 #####.########### NOT D J
+#####.#..########
 
 ```
 
