@@ -510,8 +510,10 @@ plot_graph(G2, lay2)
 We just have to be careful to not allow using the path `X_i -> W_i` on the ground level of 
 the maze, as it would pass through `D_o` which is not existing on the ground floor.
 Likewise we must not use the edge `H_i -> c_o` on any other floor than the ground floor.
-Finally, we must not use edges which would lead to a non-existing floor > 0 
-(`A_o -> X_i -> E_o -> W_i -> X_i` for example).
+In general, we must not use edges which would lead to a non-existing floor > 0 
+(`A_o -> X_i -> E_o -> W_i -> X_i` for example). This rule also ensures that we do not use
+the illegal edge on level 0. The special rule for entering the exit (`H_i -> c_o`) must 
+be checked however on each turn.
 
 With this setup we are ready to implement an A-Star search where the current portal and 
 the current floor form the state. We use the current floor times the minimum distance as 
@@ -550,12 +552,8 @@ a_star_search <- function(dist) {
     cands <- dist %>% 
       mutate(new_level = cur$level + levels) %>% 
       filter(from == cur$pos, new_level <= 0L) 
-    if (cur$level == 0L) {
-      ## on level 0 we must not use x_i -> W_i
-      cands <- cands %>% 
-        filter(!(from == "X_i" & to == "W_i"))
-    } else {
-      ## on any other level we must not use H_i -> c_o
+    if (cur$level < 0L) {
+      ## we must not use H_i -> c_o on any level other than 0
       cands <- cands %>% 
         filter(!(from == "H_i" & to == "c_o"))
     }
