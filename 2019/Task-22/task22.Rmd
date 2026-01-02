@@ -1,0 +1,353 @@
+---
+params:
+   task_nr: 22
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  str_split(text_block, "\\s") %>% 
+    map(~ c(head(.x, 1L), tail(.x, 1L))) %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("op", "inc")) %>% 
+    as_tibble() %>% 
+    mutate(inc = if_else(inc == "stack", NA_character_, inc),
+           inc = as.integer(inc),
+           op = if_else(is.na(inc), "rev", op))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- tibble(
+  op = c("rev", "cut", "deal", "cut", "cut", "deal", 
+         "cut", "deal", "deal", "cut"), 
+  inc = c(NA, -2L, 7L, 8L, -4L, 7L, 3L, 9L, 3L, -1L))
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We solve the first part by implementing the shuffle methods and consecutively applying the
+shuffle methods.
+
+```{r get-solution-1}
+shuffle <- function(n, ops = puzzle_data) {
+  stack <- 0:(n - 1L)
+  shuffles <- list(
+    rev = function(inc) {
+      # inc not used here
+      stack <<- rev(stack)
+    },
+    cut = function(inc) {
+      if (inc > 0L) {
+        idx <- c(seq(inc + 1L, n), 1:inc)
+      } else {
+        idx <- c(seq(n + inc + 1L, length.out = abs(inc)), 1:(n + inc))
+      }
+      stack <<- stack[idx]
+    },
+    deal = function(inc) {
+      idx <- (seq(0L, by = inc, length.out = n) %% n) + 1L
+      stack[idx] <<- stack
+    }
+  )
+  for (i in seq_len(nrow(ops))) {
+    row <- ops %>% 
+      slice(i)
+    op <- row %>% 
+      pull(op)
+    inc <- row %>% 
+      pull(inc)
+    shuffles[[op]](inc)
+  }
+  stack
+}
+
+which(shuffle(10007L, puzzle_data) == 2019) - 1L
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+This brute force algorithm does not work with such a large number of cards. We need to use
+some modulo arithmetic to solve this puzzle.
+Assume that $k_i$ denotes the position before the shuffle, then the new position is given 
+by:
+
+1. `rev`:
+$$
+k_{i+1} = (n - 1 - k_{i}) \bmod n$$
+1. `cut(j)`: 
+$$
+k_{i+1} =
+\begin{cases}
+(k_i - j) \bmod n, & \text{if } j \ge 0,\\[6pt]
+(k_i + |j|) \bmod n, & \text{if } j < 0.
+\end{cases}
+$$
+1. `deal(j)`: 
+$$
+k_{i+1} = (k_i \cdot j)\bmod n
+$$
+We see that each transformation has the form
+$$
+k_{i+1} = a_{\text{op}}\cdot k_i + b_{\text{op}}
+$$
+with
+$$
+(a_{\text{op}}, b_{\text{op}}) =
+\begin{cases}
+(-1, n - 1), & \text{if op = } \mathtt{rev}, \\
+(1, -j), & \text{if op = } \mathtt{cut}, \\
+(j, 0), & \text{if op = } \mathtt{deal}.
+\end{cases}
+$$
+
+Then, we combine several operations we can use the affine transformation (with $a_0 = 1$ 
+and $b_0 = 0$):
+$$
+\begin{align}
+a_{i+1} &= (a_i\cdot a_{\text{op}}) \bmod n\\
+b_{i+1} &= (a_{\text{op}} \cdot b_i + b_{\text{op}}) \bmod n\\
+\end{align}
+$$
+
+Repeating this transformations $m$ times is equivalent to:
+$$
+T^m(k)\equiv (A\cdot k + B) \bmod n,\quad A = a^m\bmod n,
+\quad B = b \cdot\underbrace{( 1+ a + a^2+\cdots + a^{m-1})}_{=:S_m}
+$$
+Eventually, we have to find the inverse modulo $n$:
+
+$$
+k\equiv A^{-1} (x - B) \bmod n
+$$
+
+```{r get-solution-2}
+shuffle_position <- function(n, m, x, ops = puzzle_data) {
+  a <- as.integer64(1L)
+  b <- as.integer64(0L)
+  ## define modulo safe operations for -, +, * and the geom sum
+  `%+%` <- function(x, y) {
+    if (y <= n - x) {
+      x + y
+    } else {
+      x + y - n
+    }
+  }
+  
+  `%-%` <- function(x, y) {
+    if (x >= y) {
+      x - y
+    } else {
+      x - y + n
+    }
+  }
+  
+  `%*%` <- function(x, y) {
+    x <- x %% n
+    res <- as.integer64(0L)
+    while (y > 0) {
+      if (y %% 2L == 1L) {
+        res <- res %+% x
+      }
+      x <- x %+% x
+      y <- y %/% 2L
+    }
+    res
+  }
+  
+  `%^%` <- function(x, m) {
+    # returns (A, S) = (a^m mod n, sum_{i=0}^{m-1} a^i mod n)
+    x <- x %% n
+    pow <- function(x, m) {
+      if (m == 0L) {
+        list(A = as.integer64(1L),
+             S = as.integer64(0L))
+      } else if ((m %% 2) == 0L) {
+        half <- Recall(x, m %/% 2L)
+        A_half <- half$A
+        S_half <- half$S
+        A <- A_half %*% A_half
+        S <- S_half %*% (A_half %+% as.integer64(1L))
+        list(A = A, S = S)
+      } else {
+        prev <- Recall(x, m %-% as.integer64(1L))
+        A <- prev$A %*% x
+        S <- prev$S %+% prev$A
+        list(A = A, S = S)
+      }
+    }
+    if (x == 1L) {
+      A <- as.integer64(1L)
+      S <- m %% n
+    } else {
+      pow(x, m)
+    }
+  }
+  
+  modinv <- function(x) {
+    x <- x %% n
+    t0 <- as.integer64(0L)
+    t1 <- as.integer64(1L)
+    r0 <- n
+    r1 <- x
+    while (r1 > 0L) {
+      q <- r0 %/% r1
+      r2 <- r0 %% r1
+      prod <- (q %% n) %*% (t1 %% n)
+      t2 <- t0 %-% prod
+      r0 <- r1
+      r1 <- r2
+      t0 <- t1
+      t1 <- t2
+    }
+    t0 %% n
+  }
+  shuffles <- list(
+    rev = function(inc) {
+      # inc not used here
+      a <<- -a %% n
+      b <<- (-b - as.integer64(1L)) %% n
+    },
+    cut = function(inc) {
+      b <<- (b - as.integer64(inc)) %% n
+    },
+    deal = function(inc) {
+      inc <- as.integer64(inc)
+      a <<- (a * inc) %% n
+      b <<- (b * inc) %% n
+    }
+  )
+  for (i in seq_len(nrow(ops))) {
+    row <- ops %>% 
+      slice(i)
+    op <- row %>% 
+      pull(op)
+    inc <- row %>% 
+      pull(inc)
+    shuffles[[op]](inc)
+  }
+  ps <- a %^% m
+  A <- ps$A
+  S <- ps$S
+  B <- b %*% S 
+  A_inv <- modinv(A)
+  A_inv %*% (as.integer64(x) %% n %-% B)
+}
+
+shuffle_position(as.integer64(119315717514047), 
+                 as.integer64(101741582076661),
+                 2020L, puzzle_data)
+```
