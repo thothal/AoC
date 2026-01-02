@@ -1,0 +1,482 @@
+---
+params:
+   task_nr: 21
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+mark_code <- function(code, pos) {
+  code <- str_replace(code, "\\.\\.\\.", "&#46;&#46;&#46;")
+  left <- str_sub(code, 1L, pos - 1L)
+  right <- str_sub(code, pos + 1L)
+  char <- str_sub(code, pos, pos)
+  sprintf("<code>%s<span style=\"color:red;\">%s</span>%s</code>",
+          left, char, right)
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(knitr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+ text_block %>% 
+    str_split(",") %>% 
+    do.call(c, .) %>% 
+    as.numeric()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We build upon the code from [Day 19 @ 2019](2019_task19.html). First we need to try some
+springscripts to get an idea of the holes. We start with the easy rules to jump if there
+is a hole in 1, 2 or 4 fields:
+
+
+```{r map-surface-1, results = "asis"}
+parse_op_codes_fast <- function(op_codes = puzzle_data, input = numeric(0L), 
+                                verbose = FALSE) {
+  ip <- 1L
+  rel_base <- 0L
+  
+  out_buffer <- numeric(0)
+  out_len <- 0L
+  out_block <- 1024L
+  block_size <- 1024L
+  
+  grow_memory <- function(idx) {
+    if (idx > length(op_codes)) {
+      new_size <- ceiling(idx / block_size) * block_size
+      op_codes <<- c(op_codes, rep(0, new_size - length(op_codes)))
+    }
+  }
+  
+  append_out <- function(val) {
+    if (out_len + 1L > length(out_buffer)) {
+      new_size <- length(out_buffer) + out_block
+      out_buffer <<- c(out_buffer, rep(0, new_size - length(out_buffer)))
+    }
+    out_len <<- out_len + 1L
+    out_buffer[out_len] <<- val
+  }
+  
+  get_val <- function(param, mode) {
+    if (mode == 0L) {
+      grow_memory(param + 1L)
+      return(op_codes[param + 1L])
+    } else if (mode == 1L) {
+      return(param)
+    } else if (mode == 2L) {
+      idx <- rel_base + param + 1L
+      grow_memory(idx)
+      return(op_codes[idx])
+    } else {
+      stop("unknown mode")
+    }
+  }
+  
+  get_addr <- function(param, mode) {
+    if (mode == 0L) {
+      return(param + 1L)
+    } else if (mode == 2L) {
+      return(rel_base + param + 1L)
+    } else {
+      stop("invalid write mode")
+    }
+  }
+  
+  halt <- FALSE
+  while (!halt) {
+    instr <- op_codes[ip]
+    op <- instr %% 100L
+    modes <- c(
+      (instr %/% 100L) %% 10L, 
+      (instr %/% 1000L) %% 10L, 
+      (instr %/% 10000L) %% 10L
+    )
+    
+    if (op == 1L) { # add
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- a + b
+      ip <- ip + 4L
+    } else if (op == 2L) { # mul
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- a * b
+      ip <- ip + 4L
+    } else if (op == 3L) { # input
+      if (length(input) == 0L) {
+        stop("No input available")
+      }
+      addr <- get_addr(op_codes[ip + 1L], modes[1])
+      grow_memory(addr)
+      op_codes[addr] <- input[1L]
+      input <- input[-1]
+      ip <- ip + 2L
+    } else if (op == 4L) { # output
+      val <- get_val(op_codes[ip + 1L], modes[1])
+      append_out(val)
+      if (verbose) cat(val, "\n")
+      ip <- ip + 2L
+    } else if (op == 5L) { # jump-if-true
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      if (a != 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 6L) { # jump-if-false
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      if (a == 0L) {
+        ip <- b + 1L
+      } else {
+        ip <- ip + 3L
+      }
+    } else if (op == 7L) { # less than
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a < b)
+      ip <- ip + 4L
+    } else if (op == 8L) { # equals
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
+      grow_memory(addr)
+      op_codes[addr] <- as.numeric(a == b)
+      ip <- ip + 4L
+    } else if (op == 9L) { # adjust relative base
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      rel_base <- rel_base + a
+      ip <- ip + 2L
+    } else if (op == 99L) { # halt
+      halt <- TRUE
+    } else {
+      stop("Unknown opcode ", op)
+    }
+  }
+  out_buffer[1:out_len]
+}
+
+encode_input <- function(springscript, walk) {
+  cmd <- if_else(walk, "WALK", "RUN")
+  paste(springscript, collapse = "\n") %>% 
+    paste0("\n", cmd, "\n") %>% 
+    charToRaw() %>% 
+    as.integer()
+}
+
+decode_output <- function(out) {
+  if (all(out <= 255)) {
+    intToUtf8(out) %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  } else {
+    tail(out, 1L)
+  }
+}
+
+run_script <- function(script, program, walk = TRUE) {
+  parse_op_codes_fast(program, encode_input(script, walk)) %>% 
+    decode_output()
+}
+
+show_holes <- function(chk_script, program = puzzle_data, walk = TRUE, numbered = TRUE) {
+  res <- map_chr(chk_script, 
+                 ~ run_script(.x, program, walk) %>% 
+                   extract(11L)) %>% 
+    paste0("`",. , "`")
+  if (numbered) {
+    iwalk(res, ~ cat(.y, ". ", .x, "\n", sep = ""))
+  } else {
+    walk(res, ~ cat(.x, "\n"))
+  }
+}
+
+test_scripts <- list(
+  "NOT A J", 
+  "NOT B J", 
+  "NOT D J"
+)
+
+show_holes(test_scripts, puzzle_data, TRUE)
+```
+
+Now we want to define a sequence which jumps over these patterns:
+
+1. We observe that jumping if there is a hole one field away will jump over patterns 2 
+and 3.
+1. For pattern 1 we need to jump if there is solid ground 1 and 4 spaces away, while 
+there is a hole 2 and 3 spaces away.
+1. Eventually, we need to combine this 2 rules using the temporary register.
+
+We feed that to our program and get yet another pattern:
+
+```{r map-surface-2, results = "asis"}
+test_scripts <- c(
+  test_scripts,
+  list(c(
+    "NOT C J",
+    "AND A J",
+    "NOT B T",
+    "AND T J",
+    "AND D J",
+    "NOT A T",
+    "OR T J"
+  )
+  )
+)
+show_holes(test_scripts, puzzle_data, TRUE)
+```
+
+
+With these patterns we can define now the following Boolean logic (jump off point is
+marked in red):
+
+1. $\lnot A \land D$: jumps over `r mark_code("#####.###########", 5L)`.
+1. $\lnot A \land \lnot B \land \lnot C \land D$: jumps over 
+`r mark_code("#####...#########", 5L)`.
+1. $A \land B \land \lnot C \land D$: Jumps over the first gap in 
+`r mark_code("#####.#..########", 3L)`.
+1. $\lnot A \land \lnot B \land C \land D$: Jumps over the second gap in 
+`r mark_code("#####.#..########", 7L)`.
+1. $A \land \lnot B \land \lnot C \land D$: Jumps over the first gap in 
+`r mark_code("#####..#.########", 4L)` ; the second gap is taken care of pattern 1.
+
+We see that all patterns contain the term `D` which we can factor out, which leads us to 
+the form 
+$$
+J = D \land \left(\lnot A \lor (\lnot A \land \lnot B \land \lnot C) \lor 
+   (A \land B \land \lnot C) \lor (\lnot A \land \lnot B \land C) \lor
+   (A \land \lnot B \land \lnot C)\right)
+$$
+The term $\lnot A$ makes the terms $(\lnot A \land \lnot B \land \lnot C)$ and
+$(\lnot A \land \lnot B \land C)$ redundant, which leaves us with
+
+$$
+J = D \land (\lnot A \lor \underbrace{(A \land B \land \lnot C) \lor 
+(A \land \lnot B \land \lnot C)}_{=:F})
+$$
+We can further simplify the inner term:
+$$
+\begin{align}
+F &= 
+\underbrace{(A \lor A)}_{=1} \land (A\lor \lnot B) \land (A\lor \lnot C) \land (A\lor B) 
+\land \underbrace{(B \lor \lnot B)}_{=1}\land (B \lor \lnot C) \land(A \lor \lnot C) \land
+(\lnot B \lor \lnot C) \land \underbrace{(\lnot C \lor \lnot C)}_{=\lnot C}\\
+&=\underbrace{(A\lor \lnot B) \land (A\lor B)}_{=A} \land 
+\underbrace{(A\lor \lnot C) \land(A \lor \lnot C)}_{=(A \lor \lnot C)} \land 
+\underbrace{(B \lor \lnot C) \land (\lnot B \lor \lnot C)}_{=\lnot C} \land \lnot C\\
+&= A \land (A\lor \lnot C) \land \underbrace{(\lnot C \land \lnot C)}_{=\lnot C}\\
+&=(A \land \lnot C) \land (A \land \lnot C)\\
+&= A \land \lnot C
+\end{align}
+$$
+With this simplification, we finally obtain the formula
+$$
+J = D \land (\lnot A \lor (A \land \lnot C))
+$$
+Which we translate to springscript as follows:
+
+```{r get-solution-1}
+springscript <- c(
+  "NOT C J",
+  "AND A J",
+  "NOT A T",
+  "OR T J",
+  "AND D J"
+)
+
+run_script(springscript, puzzle_data)
+```
+
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We start again first by screening the area and see what happens if we run the previous 
+solution in `RUN` mode:
+
+```{r map-surface-large, results = "asis"}
+test_scripts_wide <- c(
+  test_scripts,
+  list(
+    springscript
+  )
+)
+
+show_holes(test_scripts_wide, puzzle_data, FALSE)
+```
+
+We observe a new pattern `r mark_code("#####.#.#...#####", 3L)`. With the existing rules 
+the droid would jump too early and land on the first plateau. We can avoid this by joining 
+the term $(G \land E) \lor H$ by `AND` to the previous solution:
+
+$$
+J' = D \land (\lnot A \lor (A \land \lnot C)) \land ((G \land E) \lor H)
+$$
+However, this reveals yet another pattern:
+
+```{r find-next-hole, results = "asis"}
+show_holes(list(c(springscript,
+        "OR G T",
+        "AND E T",
+        "OR H T",
+        "AND T J"
+      )), 
+  puzzle_data,
+  FALSE,
+  FALSE
+)
+```
+
+To find a valid solution we must ensure that
+
+1. The droid does not jump unnecessarily (to avoid landing on a piece where a
+consequent jump is too late). $\lnot (A \land B \land C \land D) ensures this.
+1. The jump must be safe, i.e. $D$.
+1. If a second jump right after the first jump is needed, it must be safe, i.e.
+$E\lor H$.
+
+Hence, we finally come up with the following solution:
+
+$$
+J_W = D \land (E \lor H) \land \lnot(A \land B \land C \land D)
+$$
+(we could remove $D$ from the first term because after expanding we will 
+have $. \lor(D \land \lnot D)$)
+
+```{r get-solution-2}
+springscript_wide <- c(
+      "OR E J",
+      "OR H J",
+      "AND D J",
+      "OR A T",
+      "AND B T",
+      "AND C T",
+      "NOT T T",
+      "AND T J"
+    )
+
+run_script(springscript_wide, puzzle_data, FALSE)
+```
+
