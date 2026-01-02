@@ -20,7 +20,7 @@ output:
   rmdformats::downcute:
     highlight: tango
     use_bookdown: TRUE
-    mathjax: NULL
+    mathjax: TRUE
     lightbox: TRUE
     gallery: TRUE
 editor_options: 
@@ -57,6 +57,15 @@ tt <- function(x) {
   } else {
     x
   }
+}
+
+mark_code <- function(code, pos) {
+  code <- str_replace(code, "\\.\\.\\.", "&#46;&#46;&#46;")
+  left <- str_sub(code, 1L, pos - 1L)
+  right <- str_sub(code, pos + 1L)
+  char <- str_sub(code, pos, pos)
+  sprintf("<code>%s<span style=\"color:red;\">%s</span>%s</code>",
+          left, char, right)
 }
 
 ```
@@ -123,9 +132,12 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We build upon the code from [Day 19 @ 2019](2019_task19.html).
+We build upon the code from [Day 19 @ 2019](2019_task19.html). First we need to try some
+springscripts to get an idea of the holes. We start with the easy rules to jump if there
+is a hole in 1, 2 or 4 fields:
 
-```{r get-solution-1}
+
+```{r map-surface-1, results = "asis"}
 parse_op_codes_fast <- function(op_codes = puzzle_data, input = numeric(0L), 
                                 verbose = FALSE) {
   ip <- 1L
@@ -258,42 +270,138 @@ parse_op_codes_fast <- function(op_codes = puzzle_data, input = numeric(0L),
   out_buffer[1:out_len]
 }
 
-encode_input <- function(springscript) {
+encode_input <- function(springscript, walk) {
+  cmd <- if_else(walk, "WALK", "RUN")
   paste(springscript, collapse = "\n") %>% 
-    paste0("\nWALK\n") %>% 
+    paste0("\n", cmd, "\n") %>% 
     charToRaw() %>% 
     as.integer()
 }
 
 decode_output <- function(out) {
-  intToUtf8(out)
+  if (all(out <= 255)) {
+    intToUtf8(out) %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  } else {
+    tail(out, 1L)
+  }
 }
 
-map_surface <- function(springscript, program = puzzle_data) {
-  res <- parse_op_codes_fast(program, encode_input(springscript))
-  cat(decode_output(res))
+run_script <- function(script, program, walk = TRUE) {
+  parse_op_codes_fast(program, encode_input(script, walk)) %>% 
+    decode_output()
 }
 
-map_surface(c(
-  "OR D J",
-  "NOT C T",
-  "AND T J",
-  "NOT C T",
-  "OR T J",
-  "NOT B T",
-  "AND T J",
-  "AND D J",
-  "NOT A T",
-  "OR T J"
-), puzzle_data)
+show_holes <- function(chk_script, program = puzzle_data, walk = TRUE, numbered = TRUE) {
+  res <- map_chr(chk_script, 
+                 ~ run_script(.x, program, walk) %>% 
+                   extract(11L)) %>% 
+    paste0("`",. , "`")
+  if (numbered) {
+    iwalk(res, ~ cat(.y, ". ", .x, "\n", sep = ""))
+  } else {
+    walk(res, ~ cat(.x, "\n"))
+  }
+}
 
+test_scripts <- list(
+  "NOT A J", 
+  "NOT B J", 
+  "NOT D J"
+)
 
-#####..#.######## NOT A J
-#####...######### NOT B J
-#####.########### NOT D J
-#####.#..########
-
+show_holes(test_scripts, puzzle_data, TRUE)
 ```
+
+Now we want to define a sequence which jumps over these patterns:
+
+1. We observe that jumping if there is a hole one field away will jump over patterns 2 
+and 3.
+1. For pattern 1 we need to jump if there is solid ground 1 and 4 spaces away, while 
+there is a hole 2 and 3 spaces away.
+1. Eventually, we need to combine this 2 rules using the temporary register.
+
+We feed that to our program and get yet another pattern:
+
+```{r map-surface-2, results = "asis"}
+test_scripts <- c(
+  test_scripts,
+  list(c(
+    "NOT C J",
+    "AND A J",
+    "NOT B T",
+    "AND T J",
+    "AND D J",
+    "NOT A T",
+    "OR T J"
+  )
+  )
+)
+show_holes(test_scripts, puzzle_data, TRUE)
+```
+
+
+With these patterns we can define now the following Boolean logic (jump off point is
+marked in red):
+
+1. $\lnot A \land D$: jumps over `r mark_code("#####.###########", 5L)`.
+1. $\lnot A \land \lnot B \land \lnot C \land D$: jumps over 
+`r mark_code("#####...#########", 5L)`.
+1. $A \land B \land \lnot C \land D$: Jumps over the first gap in 
+`r mark_code("#####.#..########", 3L)`.
+1. $\lnot A \land \lnot B \land C \land D$: Jumps over the second gap in 
+`r mark_code("#####.#..########", 7L)`.
+1. $A \land \lnot B \land \lnot C \land D$: Jumps over the first gap in 
+`r mark_code("#####..#.########", 4L)` ; the second gap is taken care of pattern 1.
+
+We see that all patterns contain the term `D` which we can factor out, which leads us to 
+the form 
+$$
+J = D \land \left(\lnot A \lor (\lnot A \land \lnot B \land \lnot C) \lor 
+   (A \land B \land \lnot C) \lor (\lnot A \land \lnot B \land C) \lor
+   (A \land \lnot B \land \lnot C)\right)
+$$
+The term $\lnot A$ makes the terms $(\lnot A \land \lnot B \land \lnot C)$ and
+$(\lnot A \land \lnot B \land C)$ redundant, which leaves us with
+
+$$
+J = D \land (\lnot A \lor \underbrace{(A \land B \land \lnot C) \lor 
+(A \land \lnot B \land \lnot C)}_{=:F})
+$$
+We can further simplify the inner term:
+$$
+\begin{align}
+F &= 
+\underbrace{(A \lor A)}_{=1} \land (A\lor \lnot B) \land (A\lor \lnot C) \land (A\lor B) 
+\land \underbrace{(B \lor \lnot B)}_{=1}\land (B \lor \lnot C) \land(A \lor \lnot C) \land
+(\lnot B \lor \lnot C) \land \underbrace{(\lnot C \lor \lnot C)}_{=\lnot C}\\
+&=\underbrace{(A\lor \lnot B) \land (A\lor B)}_{=A} \land 
+\underbrace{(A\lor \lnot C) \land(A \lor \lnot C)}_{=(A \lor \lnot C)} \land 
+\underbrace{(B \lor \lnot C) \land (\lnot B \lor \lnot C)}_{=\lnot C} \land \lnot C\\
+&= A \land (A\lor \lnot C) \land \underbrace{(\lnot C \land \lnot C)}_{=\lnot C}\\
+&=(A \land \lnot C) \land (A \land \lnot C)\\
+&= A \land \lnot C
+\end{align}
+$$
+With this simplification, we finally obtain the formula
+$$
+J = D \land (\lnot A \lor (A \land \lnot C))
+$$
+Which we translate to springscript as follows:
+
+```{r get-solution-1}
+springscript <- c(
+  "NOT C J",
+  "AND A J",
+  "NOT A T",
+  "OR T J",
+  "AND D J"
+)
+
+run_script(springscript, puzzle_data)
+```
+
 
 ## Part 2
 
@@ -305,83 +413,70 @@ cat(puzzle[[2]])
 
 ### Solution
 
-```{r get-solution-2}
-print.beam <- function(x) {
-  apply(x, 1, paste, collapse = "") %>% 
-    paste(collapse = "\n") %>% 
-    cat()
-  invisible(x)
-}
-make_grid <- function(rows, cols, op_codes = puzzle_data) {
-  grid <- matrix(".", diff(range(rows)) + 1L, diff(range(cols)) + 1L)
-  for (i in rows[1L]:rows[2L]) {
-    for (j in cols[1L]:cols[2L]) {
-      grid[i - rows[1L] + 1L, j - cols[1L] + 1L] <- if_else(do_scan(j, i, op_codes) == 1, "#", ".")
-    }
-  }
-  class(grid) <- "beam"
-  grid
-}
+We start again first by screening the area and see what happens if we run the previous 
+solution in `RUN` mode:
 
-find_parking_slot <- function(pre_scan, op_codes = puzzle_data, size = 100L) {
-  get_max_width <- function(row) {
-    idx <- seq(row, length.out = size)
-    max_left <- max(limits[idx, "left"])
-    min_right <- min(limits[idx, "right"])
-    list(width = min_right - max_left + 1L, left = max_left)
-  }
-  get_new_limits <- function(n, last_limit) {
-    left <- last_limit[1L]
-    right <- last_limit[2L]
-    while (!do_scan(left, n, op_codes)) {
-      left <- left + 1L
-    }
-    
-    if (right < left) {
-      right <- left
-    }
-    while(do_scan(right + 1L, n, op_codes)) {
-      right <- right + 1L
-    }
-    c(left, right)
-  }
-  limits_grow_rate <- 2048L
-  limits <- pre_scan %>% 
-    apply(1, function(r) {
-      if(!any(r == "#")) {
-        rep(NA_integer_, 2L)
-      } else {
-        range(which(r == "#") - 1L)
-      }
-    }) %>% 
-    t() %>% 
-    set_colnames(c("left", "right"))
-  row <- 1L
-  n <- nrow(pre_scan) + 1L
-  limits <- rbind(
-    limits,
-    matrix(NA_integer_, limits_grow_rate - nrow(limits), 2L)
+```{r map-surface-large, results = "asis"}
+test_scripts_wide <- c(
+  test_scripts,
+  list(
+    springscript
   )
-  while (TRUE) {
-    if (n > size) {
-      width <- get_max_width(row)
-      if (!is.na(width$width) && width$width >= size) {
-        return((row - 1L) + 10000L * width$left)
-      }
-      row <- row + 1L
-    }
-    last_limit <- limits[n - 1L, ]
-    limits[n, ] <- get_new_limits(n - 1L, last_limit)
-    n <- n + 1L
-    if (n > nrow(limits)) {
-      limits <- rbind(
-        limits,
-        matrix(NA_integer_, limits_grow_rate, 2L)
-      )
-    }
-  }
-}
+)
 
-find_parking_slot(scan, puzzle_data, 100L)
+show_holes(test_scripts_wide, puzzle_data, FALSE)
+```
+
+We observe a new pattern `r mark_code("#####.#.#...#####", 3L)`. With the existing rules 
+the droid would jump too early and land on the first plateau. We can avoid this by joining 
+the term $(G \land E) \lor H$ by `AND` to the previous solution:
+
+$$
+J' = D \land (\lnot A \lor (A \land \lnot C)) \land ((G \land E) \lor H)
+$$
+However, this reveals yet another pattern:
+
+```{r find-next-hole, results = "asis"}
+show_holes(list(c(springscript,
+        "OR G T",
+        "AND E T",
+        "OR H T",
+        "AND T J"
+      )), 
+  puzzle_data,
+  FALSE,
+  FALSE
+)
+```
+
+To find a valid solution we must ensure that
+
+1. The droid does not jump unnecessarily (to avoid landing on a piece where a
+consequent jump is too late). $\lnot (A \land B \land C \land D) ensures this.
+1. The jump must be safe, i.e. $D$.
+1. If a second jump right after the first jump is needed, it must be safe, i.e.
+$E\lor H$.
+
+Hence, we finally come up with the following solution:
+
+$$
+J_W = D \land (E \lor H) \land \lnot(A \land B \land C \land D)
+$$
+(we could remove $D$ from the first term because after expanding we will 
+have $. \lor(D \land \lnot D)$)
+
+```{r get-solution-2}
+springscript_wide <- c(
+      "OR E J",
+      "OR H J",
+      "AND D J",
+      "OR A T",
+      "AND B T",
+      "AND C T",
+      "NOT T T",
+      "AND T J"
+    )
+
+run_script(springscript_wide, puzzle_data, FALSE)
 ```
 
