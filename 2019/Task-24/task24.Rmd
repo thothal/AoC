@@ -1,0 +1,311 @@
+---
+params:
+   task_nr: 24
+   year: 2019
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  str_split(text_block, "") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+example_data <- matrix(c(".", "#", "#", ".", "#", 
+                         ".", ".", ".", ".", ".", 
+                         ".", ".", "?", "#", ".", 
+                         ".", "#", "#", ".", ".",
+                         "#", ".", "#", ".", "."), 
+                       5L, 5L)
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We solve the first part by creating a list of valid neighbors for each tile. The we use 
+matrix indexing to extract all neighbors and update the bugs according to the rules. We
+keep a hash list of all identified bug patterns and as soon as we hit a previously seen
+pattern we stop.
+
+```{r get-solution-1}
+simulate_bugs <- function(bugs = puzzle_data) {
+  nr <- nrow(bugs)
+  nc <- ncol(bugs)
+  nbs <- map(seq_along(bugs), function(idx) {
+    row <- ((idx - 1L) %% nr) + 1L
+    col <- ((idx - 1L) %/% nc) + 1L
+    dirs <- rbind(
+      "^" = c(-1L, 0L),
+      ">" = c(0L, 1L),
+      "v" = c(1L, 0L),
+      "<" = c(0L, -1L)
+    )
+    nbs <- t(t(dirs) + c(row, col))
+    nbs[between(nbs[, 1L], 1L, nr) & between(nbs[, 2L], 1L, nc), , drop = FALSE]
+  })
+  has_dupes <- FALSE
+  hash <- new.env(parent = emptyenv())
+  rnd <- 1L
+  while (!has_dupes) {
+    nr_bugs <- map_int(nbs, ~ sum(bugs[.x] == "#"))
+    is_bug <- bugs == "#"
+    bugs[is_bug & nr_bugs != 1L] <- "."
+    bugs[!is_bug & between(nr_bugs, 1L, 2L)] <- "#"
+    key <- paste(t(bugs), collapse = "")
+    if (!is.null(hash[[key]])) {
+      return (sum((c(t(bugs)) == "#") * (2 ^ (0:24))))
+    } else {
+      hash[[key]] <- rnd
+    }
+    rnd <- rnd + 1L
+  }
+}
+simulate_bugs(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+The second part is similar to the first in the sense that we have to define a list 
+of neighbors first. But this time we have to account for the special neighborhoods around 
+the outer and the inner rim. We use a 3d array for this, where we name the dimensions
+rather than relying on integer indexing. This makes it easier to label the floors 
+properly. The trick is to store just the floor delta for each neighbor, then we just need
+to add the current floor to the delta to get the proper floor.
+
+In each iteration we have to check whether we need to expand the current floors. This 
+happens if there are bugs on the inner or outer rim of the last and the first floor
+respectively, because in this case the new floor will inherit some bugs.
+
+```{r get-solution-2, cache = TRUE}
+simulate_bugs_recursive <- function(rounds, bugs = puzzle_data) {
+  ## use character row- and col names to allow later to select by 3 column
+  ## character matrices
+  empty <- bugs
+  empty[] <- "."
+  bugs[3L, 3L] <- empty[3L, 3L] <- "?"
+  nr <- nrow(bugs)
+  nc <- ncol(bugs)
+  rn <- as.character(seq_len(nr))
+  cn <- as.character(seq_len(nc))
+  levels <- array(bugs, c(dim(bugs), 1L), list(rn, cn , "0"))
+  inner_rim <- c(8L, 12L, 14L, 18L)
+  outer_rim <- c(1:6, 10:11, 15:16, 20:25)
+  add_floor <- function(front = TRUE, back = TRUE) {
+    new_dim <- dim(levels)
+    start <- 1L
+    end <- new_dim[3L]
+    new_dim[3L] <- new_dim[3L] + front + back
+    dn <- dimnames(levels)
+    if (front) {
+      dn[[3L]] <- c(as.integer(dn[[3L]][1L]) - 1L, dn[[3L]])
+    }
+    if (back) {
+      dn[[3L]] <- c(dn[[3L]], as.integer(tail(dn[[3L]], 1L)) + 1L)
+    }
+    new_levels <- array(NA, new_dim, dn)
+    if (front) {
+      new_levels[, , 1L] <- empty
+      start <- 2L
+      end <- end + 1L
+    }
+    if (back) {
+      new_levels[, , new_dim[3L]] <- empty
+    }
+    new_levels[, , start:end] <- levels
+    new_levels
+  }
+  get_neighbors <- function(idx) {
+    if (idx == 13L) {
+      ## center piece
+      return (NULL)
+    } 
+    row <- ((idx - 1L) %% nr) + 1L
+    col <- ((idx - 1L) %/% nc) + 1L
+    dirs <- rbind(
+      "^" = c(-1L, 0L),
+      ">" = c(0L, 1L),
+      "v" = c(1L, 0L),
+      "<" = c(0L, -1L)
+    )
+    nbs <- cbind(t(t(dirs) + c(row, col)), 0L)
+    nbs <- nbs[between(nbs[, 1L], 1L, nr) & between(nbs[, 2L], 1L, nc), , drop = FALSE]
+    if (idx %in% inner_rim) {
+      is_center <- apply(nbs, 1, \(x) all(x == c(3L, 3L, 0L)))
+      nbs <- nbs[!is_center, , drop = FALSE]
+      
+      ## inner rim 
+      if (idx %in% c(12L, 14L)) {
+        inner_nbs <- cbind(if_else(idx == 12L, 1L, 5L), 1:5, 1L) %>% 
+          set_rownames(rep(if_else(idx == 12L, "vv", "^v"), 5L))
+      } else {
+        inner_nbs <- cbind(1:5, if_else(idx == 8L, 1L, 5L), 1L) %>% 
+          set_rownames(rep(if_else(idx == 8L, ">v", "<v"), 5L))
+      }
+      nbs <- rbind(nbs, inner_nbs)
+    } else if (idx %in% outer_rim) {
+      ## outer rim
+      outer_nbs <- matrix(NA_integer_, 0L, 3L)
+      if (idx %in% 1:5) {
+        outer_nbs <- outer_nbs %>% 
+          rbind("<^" = c(3L, 2L, -1L))
+      }
+      if (idx %in% seq(1L, 21L, 5L)) {
+        outer_nbs <- outer_nbs %>% 
+          rbind("^^" = c(2L, 3L, -1L))
+      }
+      if (idx %in% seq(5L, 25L, 5L)) {
+        outer_nbs <- outer_nbs %>% 
+          rbind("v^" = c(4L, 3L, -1L))
+      }
+      if (idx %in% 21:25) {
+        outer_nbs <- outer_nbs %>% 
+          rbind(">^" = c(3L, 4L, -1L))
+      }
+      nbs <- rbind(nbs, outer_nbs)
+    }
+    nbs
+  }
+  nbs <- map(1:25, get_neighbors)
+  cells <- setdiff(1:25, 13L)
+  for (rnd in seq_len(rounds)) {
+    nr_floors <- dim(levels)[3L]
+    add_outer <- any(levels[, , 1L][outer_rim] == "#")
+    add_inner <- any(levels[, , nr_floors][inner_rim] == "#")
+    if(add_outer || add_inner) {
+      ## add new floors if needed
+      levels <- add_floor(add_outer, add_inner)
+    }
+    floors <- as.integer(dimnames(levels)[[3L]])
+    min_floor <- floors[1L]
+    max_floor <- floors[length(floors)]
+    nr_bugs <- array(-1L, dim(levels), dimnames(levels))
+    for (fi in seq_along(floors)) {
+      nf <- floors[fi]
+      for (r in cells) {
+        nb <- nbs[[r]]
+        nb[, 3L] <- nb[, 3L] + nf
+        nb <- nb[nb[, 3L] >= min_floor & nb[, 3L] <= max_floor, , drop = FALSE]
+        storage.mode(nb) <- "character"
+        nr_bugs[, , fi][r] <- sum(levels[nb] == "#")
+      }
+    }
+    is_bug <- levels == "#"
+    levels[is_bug & nr_bugs != 1L] <- "."
+    levels[!is_bug & nr_bugs >= 1L & nr_bugs <= 2L] <- "#"
+  }
+  sum(levels == "#")
+}
+simulate_bugs_recursive(200, puzzle_data)
+```
