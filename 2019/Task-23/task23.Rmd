@@ -122,29 +122,34 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We build upon the code from [Day 21 @ 2019](2019_task21.html).
+We build upon the code from [Day 21 @ 2019](2019_task21.html). We loop through all nodes
+and run the intcodes. If a node is expecting some input and its queue is empty, we
+return the control to the next node. We need to return the complete state (i.e. relative
+base instruction pointer and intcodes), to be able to resume execution from the last 
+break point.
 
-```{r map-surface-1, results = "asis"}
+*N.B.* We included some code needed only for part 2 of the puzzle.
+
+```{r get-solution-1}
 parse_op_codes_fast <- function(op_codes = as.numeric(puzzle_data), input = numeric(), 
+                                ip = 1L, rel_base = 0L, has_booted = FALSE, 
                                 verbose = FALSE) {
-  ip <- 1L
-  rel_base <- 0L
-  out_buffer <- numeric(0)
+  out_buffer <- numeric(0L)
   out_len <- 0L
-  out_block <- 3L
-  block_size <- 3L  # size of memory
-  tiles <- matrix(NA_integer_, 0L, 3L, dimnames = list(NULL, c("x", "y", "bt")))
+  out_block <- 300L
+  block_size <- 1024L
+  
   grow_memory <- function(idx) {
     if (idx > length(op_codes)) {
       new_size <- ceiling(idx / block_size) * block_size
-      op_codes <<- c(op_codes, rep(0, new_size - length(op_codes)))
+      op_codes <<- c(op_codes, rep(0L, new_size - length(op_codes)))
     }
   }
   
   append_out <- function(val) {
     if (out_len + 1L > length(out_buffer)) {
       new_size <- length(out_buffer) + out_block
-      out_buffer <<- c(out_buffer, rep(0, new_size - length(out_buffer)))
+      out_buffer <<- c(out_buffer, rep(0L, new_size - length(out_buffer)))
     }
     out_len <<- out_len + 1L
     out_buffer[out_len] <<- val
@@ -176,7 +181,6 @@ parse_op_codes_fast <- function(op_codes = as.numeric(puzzle_data), input = nume
   }
   
   halt <- FALSE
-  ball_pos <- paddle_pos <- NULL
   while (!halt) {
     instr <- op_codes[ip]
     op <- instr %% 100L
@@ -187,92 +191,73 @@ parse_op_codes_fast <- function(op_codes = as.numeric(puzzle_data), input = nume
     )
     
     if (op == 1L) { # add
-      a <- get_val(op_codes[ip + 1L], modes[1])
-      b <- get_val(op_codes[ip + 2L], modes[2])
-      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
       grow_memory(addr)
       op_codes[addr] <- a + b
       ip <- ip + 4L
     } else if (op == 2L) { # mul
-      a <- get_val(op_codes[ip + 1L], modes[1])
-      b <- get_val(op_codes[ip + 2L], modes[2])
-      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
       grow_memory(addr)
       op_codes[addr] <- a * b
       ip <- ip + 4L
     } else if (op == 3L) { # input
-      ## move into the direction of the ball
-      input <- sign(ball_pos[1L] - paddle_pos[1L])
-      addr <- get_addr(op_codes[ip + 1L], modes[1])
-      grow_memory(addr)
-      op_codes[addr] <- input[1L]
-      input <- input[-1]
-      ip <- ip + 2L
+      if (length(input) == 0L) {
+        ## no input yet
+        halt <- TRUE
+      } else {
+        addr <- get_addr(op_codes[ip + 1L], modes[1])
+        grow_memory(addr)
+        op_codes[addr] <- input[1L]
+        input <- input[-1L]
+        if (!has_booted) {
+          if (verbose) {
+            cat("node", op_codes[addr], "booted...\n")
+          }
+          has_booted <- TRUE
+        } 
+        ip <- ip + 2L
+      }
     } else if (op == 4L) { # output
       val <- get_val(op_codes[ip + 1L], modes[1])
       append_out(val)
-      if (out_len %% 3L == 0L) {
-        ## we got a full triple
-        new_line <- as.integer(out_buffer[1:3])
-        out_len <- 0L
-        idx <- which(tiles[, 1L] == new_line[1L] & tiles[, 2L] == new_line[2L])
-        if (length(idx) == 1L) {
-          tiles[idx, 3L] <- new_line[3L]
-        } else {
-          stopifnot(length(idx) == 0L)
-          tiles <- rbind(tiles, new_line)
-        }
-        class(tiles) <- "tiles"
-        if (!identical(new_line[1:2], c(-1L, 0L))) {
-          if (new_line[3L] == 3L) {
-            paddle_pos <- new_line[1:2]
-          } else if (new_line[3L] == 4L) { # ball
-            if (is.null(ball_pos)) {
-              # erster Ballframe
-              prev_ball_pos <- new_line[1:2]
-              ball_pos <- new_line[1:2]
-            } else {
-              prev_ball_pos <- ball_pos
-              ball_pos <- new_line[1:2]
-              ball_dir <- ball_pos - prev_ball_pos
-            }
-          }
-        }
-      }
       if (verbose) cat(val, "\n")
       ip <- ip + 2L
     } else if (op == 5L) { # jump-if-true
-      a <- get_val(op_codes[ip + 1L], modes[1])
-      b <- get_val(op_codes[ip + 2L], modes[2])
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
       if (a != 0L) {
         ip <- b + 1L
       } else {
         ip <- ip + 3L
       }
     } else if (op == 6L) { # jump-if-false
-      a <- get_val(op_codes[ip + 1L], modes[1])
-      b <- get_val(op_codes[ip + 2L], modes[2])
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
       if (a == 0L) {
         ip <- b + 1L
       } else {
         ip <- ip + 3L
       }
     } else if (op == 7L) { # less than
-      a <- get_val(op_codes[ip + 1L], modes[1])
-      b <- get_val(op_codes[ip + 2L], modes[2])
-      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
       grow_memory(addr)
       op_codes[addr] <- as.numeric(a < b)
       ip <- ip + 4L
     } else if (op == 8L) { # equals
-      a <- get_val(op_codes[ip + 1L], modes[1])
-      b <- get_val(op_codes[ip + 2L], modes[2])
-      addr <- get_addr(op_codes[ip + 3L], modes[3])
+      a <- get_val(op_codes[ip + 1L], modes[1L])
+      b <- get_val(op_codes[ip + 2L], modes[2L])
+      addr <- get_addr(op_codes[ip + 3L], modes[3L])
       grow_memory(addr)
       op_codes[addr] <- as.numeric(a == b)
       ip <- ip + 4L
     } else if (op == 9L) { # adjust relative base
-      a <- get_val(op_codes[ip + 1L], modes[1])
+      a <- get_val(op_codes[ip + 1L], modes[1L])
       rel_base <- rel_base + a
       ip <- ip + 2L
     } else if (op == 99L) { # halt
@@ -281,100 +266,70 @@ parse_op_codes_fast <- function(op_codes = as.numeric(puzzle_data), input = nume
       stop("Unknown opcode ", op)
     }
   }
-  tiles
+  res <- out_buffer[1:out_len]
+  attr(res, "status") <- list(op_codes = op_codes, ip = ip, rel_base = rel_base,
+                                     has_booted = has_booted)
+  res
 }
 
-
+start_network <- function(nic, use_nat = FALSE) {
+  nodes <- vector("list", 50)
+  queues <- vector("list", 50)
+  for(i in 0:49) {
+    res <- parse_op_codes_fast(nic, i)
+    nodes[[i + 1]] <- list(nic = attr(res, "status"), packet_part = 0L)
+    queues[[i + 1]] <- list() 
+  }
+  nat_packet <- NULL
+  nat_sent_history <- numeric(0L)
+  while(TRUE) {
+    for (i in 1:50) {
+      node <- nodes[[i]]
+      if (length(queues[[i]]) > 0L) {
+        node$nic$input <- queues[[i]][[1L]][[node$packet_part + 1L]]
+        if (node$packet_part == 1L) {
+          queues[[i]] <- queues[[i]][-1L]
+        }
+        node$packet_part <- (node$packet_part + 1L) %% 2L
+      } else {
+        node$nic$input <- -1L
+      }
+      
+      res <- do.call(parse_op_codes_fast, node$nic)
+      node$nic <- attr(res, "status")
+      
+      while (length(res) >= 3L) {
+        dest <- res[1L]
+        packet <- list(X = res[2L], Y = res[3L])
+        if (dest == 255L) {
+          if (!use_nat) {
+            cat("\n")
+            return (packet$Y)
+          } else {
+            nat_packet <- packet
+          }
+        } else {
+          queues[[dest + 1L]] <- c(queues[[dest + 1L]], list(packet))
+        }
+        res <- res[-(1:3)]
+      }
+      nodes[[i]] <- node
+    }
+    if (use_nat) {
+      all_empty <- all(lengths(queues) == 0L)
+      if (all_empty && !is.null(nat_packet)) {
+        queues[[1L]] <- c(queues[[1L]], list(nat_packet))
+        nat_sent_history <- c(nat_sent_history, nat_packet$Y)
+        n <- length(nat_sent_history)
+        if (n >= 2L && nat_sent_history[n] == nat_sent_history[n - 1L]) {
+        return(nat_packet$Y)
+        }
+      }
+    }
+  }
+}
+start_network(as.numeric(puzzle_data))
 ```
-
-Now we want to define a sequence which jumps over these patterns:
-
-1. We observe that jumping if there is a hole one field away will jump over patterns 2 
-and 3.
-1. For pattern 1 we need to jump if there is solid ground 1 and 4 spaces away, while 
-there is a hole 2 and 3 spaces away.
-1. Eventually, we need to combine this 2 rules using the temporary register.
-
-We feed that to our program and get yet another pattern:
-
-```{r map-surface-2, results = "asis"}
-test_scripts <- c(
-  test_scripts,
-  list(c(
-    "NOT C J",
-    "AND A J",
-    "NOT B T",
-    "AND T J",
-    "AND D J",
-    "NOT A T",
-    "OR T J"
-  )
-  )
-)
-show_holes(test_scripts, puzzle_data, TRUE)
-```
-
-
-With these patterns we can define now the following Boolean logic (jump off point is
-marked in red):
-
-1. $\lnot A \land D$: jumps over `r mark_code("#####.###########", 5L)`.
-1. $\lnot A \land \lnot B \land \lnot C \land D$: jumps over 
-`r mark_code("#####...#########", 5L)`.
-1. $A \land B \land \lnot C \land D$: Jumps over the first gap in 
-`r mark_code("#####.#..########", 3L)`.
-1. $\lnot A \land \lnot B \land C \land D$: Jumps over the second gap in 
-`r mark_code("#####.#..########", 7L)`.
-1. $A \land \lnot B \land \lnot C \land D$: Jumps over the first gap in 
-`r mark_code("#####..#.########", 4L)` ; the second gap is taken care of pattern 1.
-
-We see that all patterns contain the term `D` which we can factor out, which leads us to 
-the form 
-$$
-J = D \land \left(\lnot A \lor (\lnot A \land \lnot B \land \lnot C) \lor 
-   (A \land B \land \lnot C) \lor (\lnot A \land \lnot B \land C) \lor
-   (A \land \lnot B \land \lnot C)\right)
-$$
-The term $\lnot A$ makes the terms $(\lnot A \land \lnot B \land \lnot C)$ and
-$(\lnot A \land \lnot B \land C)$ redundant, which leaves us with
-
-$$
-J = D \land (\lnot A \lor \underbrace{(A \land B \land \lnot C) \lor 
-(A \land \lnot B \land \lnot C)}_{=:F})
-$$
-We can further simplify the inner term:
-$$
-\begin{align}
-F &= 
-\underbrace{(A \lor A)}_{=1} \land (A\lor \lnot B) \land (A\lor \lnot C) \land (A\lor B) 
-\land \underbrace{(B \lor \lnot B)}_{=1}\land (B \lor \lnot C) \land(A \lor \lnot C) \land
-(\lnot B \lor \lnot C) \land \underbrace{(\lnot C \lor \lnot C)}_{=\lnot C}\\
-&=\underbrace{(A\lor \lnot B) \land (A\lor B)}_{=A} \land 
-\underbrace{(A\lor \lnot C) \land(A \lor \lnot C)}_{=(A \lor \lnot C)} \land 
-\underbrace{(B \lor \lnot C) \land (\lnot B \lor \lnot C)}_{=\lnot C} \land \lnot C\\
-&= A \land (A\lor \lnot C) \land \underbrace{(\lnot C \land \lnot C)}_{=\lnot C}\\
-&=(A \land \lnot C) \land (A \land \lnot C)\\
-&= A \land \lnot C
-\end{align}
-$$
-With this simplification, we finally obtain the formula
-$$
-J = D \land (\lnot A \lor (A \land \lnot C))
-$$
-Which we translate to springscript as follows:
-
-```{r get-solution-1}
-springscript <- c(
-  "NOT C J",
-  "AND A J",
-  "NOT A T",
-  "OR T J",
-  "AND D J"
-)
-
-run_script(springscript, puzzle_data)
-```
-
 
 ## Part 2
 
@@ -386,70 +341,9 @@ cat(puzzle[[2]])
 
 ### Solution
 
-We start again first by screening the area and see what happens if we run the previous 
-solution in `RUN` mode:
-
-```{r map-surface-large, results = "asis"}
-test_scripts_wide <- c(
-  test_scripts,
-  list(
-    springscript
-  )
-)
-
-show_holes(test_scripts_wide, puzzle_data, FALSE)
-```
-
-We observe a new pattern `r mark_code("#####.#.#...#####", 3L)`. With the existing rules 
-the droid would jump too early and land on the first plateau. We can avoid this by joining 
-the term $(G \land E) \lor H$ by `AND` to the previous solution:
-
-$$
-J' = D \land (\lnot A \lor (A \land \lnot C)) \land ((G \land E) \lor H)
-$$
-However, this reveals yet another pattern:
-
-```{r find-next-hole, results = "asis"}
-show_holes(list(c(springscript,
-        "OR G T",
-        "AND E T",
-        "OR H T",
-        "AND T J"
-      )), 
-  puzzle_data,
-  FALSE,
-  FALSE
-)
-```
-
-To find a valid solution we must ensure that
-
-1. The droid does not jump unnecessarily (to avoid landing on a piece where a
-consequent jump is too late). $\lnot (A \land B \land C \land D) ensures this.
-1. The jump must be safe, i.e. $D$.
-1. If a second jump right after the first jump is needed, it must be safe, i.e.
-$E\lor H$.
-
-Hence, we finally come up with the following solution:
-
-$$
-J_W = D \land (E \lor H) \land \lnot(A \land B \land C \land D)
-$$
-(we could remove $D$ from the first term because after expanding we will 
-have $. \lor(D \land \lnot D)$)
+We switch on the NAT logic, where packets sent to address 255 are handled separately.
 
 ```{r get-solution-2}
-springscript_wide <- c(
-      "OR E J",
-      "OR H J",
-      "AND D J",
-      "OR A T",
-      "AND B T",
-      "AND C T",
-      "NOT T T",
-      "AND T J"
-    )
-
-run_script(springscript_wide, puzzle_data, FALSE)
+start_network(as.numeric(puzzle_data), TRUE)
 ```
 
