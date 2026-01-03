@@ -102,7 +102,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 22](https://thothal.github.io/AoC/2019_task22.html)
 - [x] [Day 23](https://thothal.github.io/AoC/2019_task23.html)
 - [x] [Day 24](https://thothal.github.io/AoC/2019_task24.html)
-- [ ] Day 25
+- [x] [Day 25](https://thothal.github.io/AoC/2019_task25.html)
 
 ### 2018
 
