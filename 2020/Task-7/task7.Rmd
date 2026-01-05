@@ -1,0 +1,202 @@
+---
+params:
+   task_nr: 7
+   year: 2020
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  rules <- text_block %>% 
+    str_remove_all(" bags?| contain|,|\\.") %>% 
+    map(function(rule) {
+      if (str_detect(rule, "no other")) {
+        vertices <- tibble(name = str_remove(rule, " no other"))
+        edges <- tibble(from = character(0L),
+                        to = character(0L),
+                        amt = integer(0L))
+      } else {
+        colors <- str_split(rule, " \\d+ ") %>% 
+          extract2(1L)
+        nrs <- str_extract_all(rule, "\\d+") %>% 
+          extract2(1L)
+        vertices <- tibble(name = unique(colors))
+        edges <- tibble(from = colors[1L],
+                        to = colors[-1L],
+                        amt = as.integer(nrs))
+      }
+      list(vertices = vertices, edges = edges)
+    })
+  list(rules = map(rules, "edges") %>%
+         list_rbind(),
+       colors = map(rules, "vertices") %>%
+         list_rbind() %>%
+         distinct())
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We construct a graph from the rule set. Each color represent a vertex and colors are 
+connected if one color may contain the other. Then we have to count the number of unique 
+ancestors.
+
+```{r get-solution-1}
+construct_graph <- function(rules) {
+  G <- graph_from_data_frame(rules$rules, vertices = rules$colors)
+}
+
+count_ancestors <- function(G, target = "shiny gold") {
+  vid <- which(V(G)$name == target)
+  ancestors <- subcomponent(G, vid, mode = "in")
+  ancestors <- setdiff(ancestors, vid)
+  length(ancestors)
+}
+
+G <- construct_graph(puzzle_data)
+
+count_ancestors(G)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
+```
+
+### Solution
+
+We need to sort the graph topologically and move from the leaves upwards until we reach 
+the "root" (i.e. the shiny gold bag). While moving upwards we sum the children weights
+multiplied by the respective edges weights (+1 coounting for the parent bag as well).
+
+```{r get-solution-2}
+count_bags <- function(G, root = "shiny gold") {
+  vid <- which(V(G)$name == root)
+  reach <- subcomponent(G, vid, mode = "out")
+  sg <- induced_subgraph(G, vids = reach)
+  ord <- topo_sort(sg, mode = "out")
+  S <- integer(vcount(sg))
+  for (v in rev(as.integer(ord))) {
+    e_out <- incident(sg, v, mode = "out")
+    if (length(e_out) == 0L) {
+      S[v] <- 0L
+    } else {
+      w <- edge_attr(sg, "amt", index = e_out)
+      targets <- ends(sg, e_out, names = FALSE)[, 2L]
+      S[v] <- sum(w * (1 + S[as.integer(targets)]))
+    }
+  }
+  S[which(V(sg)$name == root)]
+}
+count_bags(G)
+```
