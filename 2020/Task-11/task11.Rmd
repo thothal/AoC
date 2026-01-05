@@ -1,0 +1,246 @@
+---
+params:
+   task_nr: 11
+   year: 2020
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We simulate the process by counting occupied seats in each direction. For a fast 
+calculation we operate on the whole matrix and build the sum by shifting the matrix in 
+each of the 8 directions.
+
+```{r get-solution-1}
+simulate_seats <- function(seats) {
+  nr <- nrow(seats)
+  nc <- ncol(seats)
+  unstable <- TRUE
+  nbs <- vector("list", 8L)
+  k <- 1
+  for (i in -1:1) {
+    for (j in -1:1) {
+      if (i == 0L && j == 0) {
+        next
+      }
+      nbs[[k]] <- list(from = list(r = max(1L, 1L - i):min(nr, nr - i),
+                                   c = max(1L, 1L - j):min(nc, nc - j)),
+                       to = list(r = max(1L, 1 + i):min(nr, nr + i),
+                                 c = max(1, 1 + j):min(nc, nc + j))
+                       )
+      k <- k + 1L
+    }
+  }
+  count_neighbors <- function(x) {
+    new <- matrix(0L, nr, nc)
+    for (il in nbs) {
+      new[il$to$r, il$to$c] <- new[il$to$r, il$to$c] + x[il$from$r, il$from$c]
+    }
+    new
+  }
+  while (unstable) {
+    prev <- seats
+    nbs_cnt <- count_neighbors(seats == "#")
+    seats[seats == "L" & nbs_cnt == 0L] <- "#"
+    seats[seats == "#" & nbs_cnt >= 4L] <- "L"
+    unstable <- !identical(prev, seats)
+  }
+  sum(seats == "#")
+}
+
+simulate_seats(puzzle_data)
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
+```
+
+### Solution
+
+To implement the line-of-sight we pre-compute for each position the next seat ignoring
+the floor. Then we iterate over each elemt in the matrix and use the pre-computed indices 
+to get the neighbors.
+
+```{r get-solution-2}
+get_neighbors <- function(seats) {
+  nr <- nrow(seats)
+  nc <- ncol(seats)
+  idx <- function(coord) {
+    (coord[, 2L] - 1L) * nr + coord[, 1L]
+  }
+  dirs <- cbind(
+    rep(-1:1, each = 3L),
+    rep(-1:1, 3L)
+  )[-5L, , drop  = FALSE]
+  nbs <- vector("list", nr * nc)
+  for (r in seq_len(nr)) {
+    for (c in seq_len(nc)) {
+      if (seats[r, c] != ".") {
+        vis <- integer(0L)
+        for (di in seq_len(8L)) {
+          d <- dirs[di, , drop = FALSE]
+          start <- cbind(r, c)
+          nb <- start + d
+          in_bounds <- nb[, 1L] >= 1L & nb[, 1L] <= nr & nb[, 2L] >= 1L & nb[, 2L] <= nc
+          found <- FALSE
+          while (in_bounds && !found) {
+            if (seats[nb] != ".") {
+              vis <- c(vis, idx(nb))
+              found <- TRUE
+            } else {
+              nb <- nb + d
+              in_bounds <- nb[, 1L] >= 1L & nb[, 1L] <= nr & 
+                nb[, 2L] >= 1L & nb[, 2L] <= nc
+            }
+          }
+          nbs[[idx(start)]] <- unname(vis)
+        }        
+      }
+    }
+  }
+  nbs
+}
+
+simulate_seats_los <- function(seats) {
+  nr <- nrow(seats)
+  nc <- ncol(seats)
+  unstable <- TRUE
+  nbs <- get_neighbors(seats)
+  r <- 1L
+  while (unstable) {
+    prev <- seats
+    seat_idx <- which(seats != ".")
+    for (idx in seat_idx) {
+      nbs_cnt <- sum(prev[nbs[[idx]]] == "#")
+      if (prev[idx] == "L" && nbs_cnt == 0L) {
+        seats[idx] <- "#"
+      } else if (prev[idx] == "#" && nbs_cnt >= 5L) {
+        seats[idx] <- "L"
+      }
+    }
+    unstable <- !identical(prev, seats)
+  }
+  sum(seats == "#")
+}
+
+simulate_seats_los(puzzle_data)
+```
