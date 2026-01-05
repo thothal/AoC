@@ -72,7 +72,6 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
-library(igraph)
 library(bit64)
 ```
 
@@ -123,7 +122,7 @@ cat(puzzle[[1]])
 ### Solution
 
 We sort the adapters according to their joltage, add the charging outlet to the beginning 
-and the device adaptor to the end, form the differences, count them and multiply them to 
+and the device adapter to the end, form the differences, count them and multiply them to 
 get the answer.
 
 ```{r get-solution-1}
@@ -147,39 +146,29 @@ cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
 
 ### Solution
 
-We construct a graph, where each adaptor connects to any valid adapter. Then we use 
-dynamic programming to count all paths between the outlet and the device.
+We use dynamic programming to count the number of ways to connect the charging outlet
+to the device adapter. The idea is that there is exactly 1 way to connect the charging 
+outlet. Then, we iterate over each adapter and add the number of possibilities for 
+adapter x to all adapaters it can be connected to, that is all with a joltage not larger 
+than 3 units. Eventually, we get the number of connection possibilities for the largest
+joltage.
 
 ```{r get-solution-2}
-construct_graph <- function(adapters) {
+count_paths <- function(adapters) {
   joltages <- sort(adapters)
   joltages <- c(0L, joltages, max(joltages) + 3L)
-  edges <- expand.grid(from = joltages, to = joltages) %>% 
-    filter(to - from <= 3L, to - from >= 1L)
-  graph_from_data_frame(edges)
-}
-
-G <- construct_graph(puzzle_data)
-
-count_paths <- function(G) {
-  from <- "0"
-  to <- "152"
-  order <- topo_sort(G, mode = "out")
-  id <- as.integer(order)
-  dp <- set_names(integer64(vcount(G)), 
-                  V(G)$name)
-  dp[from] <- 1L
-  for (u in id) {
-    u_name <- V(G)$name[u]
-    if (dp[u_name] == 0L) {
-      next
-    }
-    for (v in neighbors(G, u, mode = "out")) {
-      dp[V(G)$name[v]] <- dp[V(G)$name[v]] + dp[u_name]
+  dp <- integer64(length(joltages)) %>% 
+    set_names(joltages)
+  dp
+  dp["0"] <- as.integer64(1L)
+  js <- joltages
+  for (j in js) {
+    for (delta in 1:3) {
+      dp[as.character(j + delta)] <- dp[as.character(j + delta)] + dp[as.character(j)]
     }
   }
-  dp[to]
+  dp[as.character(max(joltages))]
 }
 
-count_paths(G)
+count_paths(puzzle_data)
 ```

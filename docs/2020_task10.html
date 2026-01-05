@@ -1853,7 +1853,6 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
-library(igraph)
 library(bit64)</code></pre>
 </div>
 <div id="retrieve-data-from-aoc" class="section level2" number="1.2">
@@ -2015,7 +2014,7 @@ Find a chain that uses all of your adapters to connect the charging outlet to yo
 <div id="solution" class="section level3" number="2.1.2">
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
 <p>We sort the adapters according to their joltage, add the charging outlet to the beginning
-and the device adaptor to the end, form the differences, count them and multiply them to
+and the device adapter to the end, form the differences, count them and multiply them to
 get the answer.</p>
 <pre class="r"><code>get_joltage_kpi &lt;- function(adapters) {
   joltages &lt;- sort(adapters)
@@ -2100,39 +2099,29 @@ You glance back down at your bag and try to remember why you brought so many ada
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
-<p>We construct a graph, where each adaptor connects to any valid adapter. Then we use
-dynamic programming to count all paths between the outlet and the device.</p>
-<pre class="r"><code>construct_graph &lt;- function(adapters) {
+<p>We use dynamic programming to count the number of ways to connect the charging outlet
+to the device adapter. The idea is that there is exactly 1 way to connect the charging
+outlet. Then, we iterate over each adapter and add the number of possibilities for
+adapter x to all adapaters it can be connected to, that is all with a joltage not larger
+than 3 units. Eventually, we get the number of connection possibilities for the largest
+joltage.</p>
+<pre class="r"><code>count_paths &lt;- function(adapters) {
   joltages &lt;- sort(adapters)
   joltages &lt;- c(0L, joltages, max(joltages) + 3L)
-  edges &lt;- expand.grid(from = joltages, to = joltages) %&gt;% 
-    filter(to - from &lt;= 3L, to - from &gt;= 1L)
-  graph_from_data_frame(edges)
-}
-
-G &lt;- construct_graph(puzzle_data)
-
-count_paths &lt;- function(G) {
-  from &lt;- &quot;0&quot;
-  to &lt;- &quot;152&quot;
-  order &lt;- topo_sort(G, mode = &quot;out&quot;)
-  id &lt;- as.integer(order)
-  dp &lt;- set_names(integer64(vcount(G)), 
-                  V(G)$name)
-  dp[from] &lt;- 1L
-  for (u in id) {
-    u_name &lt;- V(G)$name[u]
-    if (dp[u_name] == 0L) {
-      next
-    }
-    for (v in neighbors(G, u, mode = &quot;out&quot;)) {
-      dp[V(G)$name[v]] &lt;- dp[V(G)$name[v]] + dp[u_name]
+  dp &lt;- integer64(length(joltages)) %&gt;% 
+    set_names(joltages)
+  dp
+  dp[&quot;0&quot;] &lt;- as.integer64(1L)
+  js &lt;- joltages
+  for (j in js) {
+    for (delta in 1:3) {
+      dp[as.character(j + delta)] &lt;- dp[as.character(j + delta)] + dp[as.character(j)]
     }
   }
-  dp[to]
+  dp[as.character(max(joltages))]
 }
 
-count_paths(G)</code></pre>
+count_paths(puzzle_data)</code></pre>
 <pre><code>## integer64
 ##            152 
 ## 10578455953408</code></pre>
