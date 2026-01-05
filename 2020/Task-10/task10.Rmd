@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 9
+   task_nr: 10
    year: 2020
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -72,6 +72,8 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
+library(igraph)
+library(bit64)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -94,7 +96,7 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       keep(nzchar)
   }
   text_block %>% 
-    as.numeric()
+    as.integer()
 }
 
 puzzle_data <- local({
@@ -120,42 +122,19 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We sort the preamble and use 2 pointers like in [Day 1 @ 2020](2020_task1.html) to 
-determine whether a number is valid. We exit as soon as we hit the first invalid number.
+We sort the adapters according to their joltage, add the charging outlet to the beginning 
+and the device adaptor to the end, form the differences, count them and multiply them to 
+get the answer.
 
 ```{r get-solution-1}
-is_valid <- function(nrs, target) {
-  nrs <- sort(nrs)
-  i <- 1L
-  j <- length(nrs)
-  while (i < j) {
-    s <- nrs[i] + nrs[j]
-    if (s == target && nrs[i] != nrs[j]) {
-      return(TRUE)
-    } else if (s < target) {
-      i <- i + 1L
-    } else { # s > target
-      j <- j - 1L
-    }
-  }
-  FALSE
+get_joltage_kpi <- function(adapters) {
+  joltages <- sort(adapters)
+  c(0L, joltages, max(joltages) + 3L) %>% 
+    diff() %>% 
+    table() %>% 
+    prod()
 }
-
-find_bad_number <- function(orig_seq, block_length = 25L) {
-  n <- length(orig_seq)
-  i <- 1L
-  while (i < n - block_length) {
-    preamble <- orig_seq[seq(i, length.out = block_length)]
-    target <- orig_seq[i + block_length]
-    if (!is_valid(preamble, target)) {
-      return(target)
-    }
-    i <- i + 1L
-  }
-  NA_real_
-}
-
-(bad <- find_bad_number(puzzle_data))
+get_joltage_kpi(puzzle_data)  
 ```
 
 ## Part 2
@@ -168,30 +147,39 @@ cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
 
 ### Solution
 
-We use a sliding window where we add numbers until the sum is greater than the target sum.
-In this case we subtract values from the left (thus effectively moving the window) 
-until we are smaller or equal than the target and continue until we find a match.
+We construct a graph, where each adaptor connects to any valid adapter. Then we use 
+dynamic programming to count all paths between the outlet and the device.
 
 ```{r get-solution-2}
-get_encryption_weakness <- function(orig_seq, target = bad) {
-  left <- 1L
-  curr_sum <- 0
-  n <- length(orig_seq)
-  
-  for (right in seq_len(n)) {
-    curr_sum <- curr_sum + orig_seq[right]
-    
-    while (curr_sum > target && left <= right) {
-      curr_sum <- curr_sum - orig_seq[left]
-      left <- left + 1L
-    }
-    
-    if (curr_sum == target) {
-      return (sum(range(orig_seq[left:right])))
-    }
-  }
-  NA_real_
+construct_graph <- function(adapters) {
+  joltages <- sort(adapters)
+  joltages <- c(0L, joltages, max(joltages) + 3L)
+  edges <- expand.grid(from = joltages, to = joltages) %>% 
+    filter(to - from <= 3L, to - from >= 1L)
+  graph_from_data_frame(edges)
 }
 
-get_encryption_weakness(puzzle_data, bad)
+G <- construct_graph(puzzle_data)
+
+count_paths <- function(G) {
+  from <- "0"
+  to <- "152"
+  order <- topo_sort(G, mode = "out")
+  id <- as.integer(order)
+  dp <- set_names(integer64(vcount(G)), 
+                  V(G)$name)
+  dp[from] <- 1L
+  for (u in id) {
+    u_name <- V(G)$name[u]
+    if (dp[u_name] == 0L) {
+      next
+    }
+    for (v in neighbors(G, u, mode = "out")) {
+      dp[V(G)$name[v]] <- dp[V(G)$name[v]] + dp[u_name]
+    }
+  }
+  dp[to]
+}
+
+count_paths(G)
 ```

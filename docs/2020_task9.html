@@ -1972,7 +1972,7 @@ The first step of attacking the weakness in the XMAS data is to find the first n
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
 <p>We sort the preamble and use 2 pointers like in <a href="2020_task1.html">Day 1 @ 2020</a> to
 determine whether a number is valid. We exit as soon as we hit the first invalid number.</p>
-<pre class="r"><code>is_valid&lt;- function(nrs, target) {
+<pre class="r"><code>is_valid &lt;- function(nrs, target) {
   nrs &lt;- sort(nrs)
   i &lt;- 1L
   j &lt;- length(nrs)
