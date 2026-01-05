@@ -48,8 +48,9 @@ edit_year <- function(year) {
   
   ## check if tasks for the year are already present => add if not
   if (!any(str_detect(readme, glue("^### *{year}")))) {
+    nr_tasks <- if_else(year >= 2025, 12L, 25L)
     new_lines <- c(glue("### {year}"), "", 
-                   glue("- [ ] Day {1:25}"), 
+                   glue("- [ ] Day {1:nr_tasks}"), 
                    "")
     readme <- edit_file(new_lines, readme, FALSE, str_which(readme, "## ToC") + 2)
   }
