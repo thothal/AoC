@@ -1,0 +1,197 @@
+---
+params:
+   task_nr: 8
+   year: 2020
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_remove_all(fixed("+")) %>% 
+    str_split(" ") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("op", "val")) %>% 
+    as_tibble() %>% 
+    mutate(val = as.integer(val))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We loop through all op codes, execute them accordingly while keeping track of how often 
+we visited each operation already. As soon we hit an operation we executed already we will 
+exit with the value of the accumulator.
+
+```{r get-solution-1}
+parse_op_code <- function(op) {
+  ip <- 1L
+  acc <- 0L
+  op <- op %>% 
+    mutate(cnt = 0L)
+  inf_loop_detected <- FALSE
+  n <- nrow(op)
+  while (!inf_loop_detected && ip <= n) {
+    line <- op[ip, ] %>% 
+      as.list()
+    if (line$cnt > 0L) {
+      inf_loop_detected <- TRUE
+    } else {
+      op[ip, "cnt"] <- op[ip, "cnt"] + 1L
+      if (line$op == "nop") {
+        ip <- ip + 1L
+      } else if (line$op == "acc") {
+        acc <- acc + line$val
+        ip <- ip +1L
+      } else if (line$op == "jmp") {
+        ip <- ip + line$val
+      }
+    }
+  }
+  list(value = acc, status = if_else(inf_loop_detected, 1, 0))
+}
+
+parse_op_code(puzzle_data)$value
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
+```
+
+### Solution
+
+We do a brute-force search, we switch a `jmp/nop` operation, run the op codes and if we 
+detect an infinite loop we reset it and try the next operation. We continue until we find 
+eventually the culprit.
+
+```{r get-solution-2}
+find_bad_op <- function(orig_ops) {
+  ## reverse candidates for the fun of it 
+  ## (well we know the true index is rather at the end ;) )
+  cand <- orig_ops %>% 
+    pull(op) %>% 
+    {which(. != "acc")} %>% 
+    rev()
+  for (cand_id in cand) {
+    test_op <- orig_ops
+    test_op[cand_id, "op"] <- if_else(test_op[cand_id, "op"] == "jmp", "nop", "jmp")
+    res <- parse_op_code(test_op)
+    if (res$status == 0L) {
+      return(res$value)
+    }
+  }
+  NA_integer_
+}
+
+find_bad_op(puzzle_data)
+```
