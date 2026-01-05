@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 2
+   task_nr: 3
    year: 2020
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -72,7 +72,6 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
-library(glue)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -95,11 +94,8 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       keep(nzchar)
   }
   text_block %>% 
-    str_split("\\s|:\\s|-") %>% 
-    do.call(rbind, .) %>% 
-    set_colnames(c("from", "to", "char", "pwd")) %>% 
-    as_tibble() %>% 
-    mutate(across(from:to, as.integer))
+    str_split("") %>% 
+    do.call(rbind, .)
 }
 
 puzzle_data <- local({
@@ -125,20 +121,23 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We remove all characters which are not affected by the policy, count the length of the 
-residual string and check if it falls within the limits given.
+First we need to expand the map such that the slope fit into the map entirely. Then we
+construct the indices and count the number of trees (`#`).
+
 
 ```{r get-solution-1}
-count_valid_passwords <- function(pwds = puzzle_data) {
-  pwds %>% 
-    mutate(is_valid = str_remove_all(pwd, glue("[^{char}]")) %>% 
-             str_length() %>% 
-             between(from, to)) %>% 
-    summarize(n = sum(is_valid)) %>% 
-    pull(n)
+count_trees <- function(map = puzzle_data, slope = c(1L, 3L)) {
+  nr <- nrow(map)
+  nc <- ncol(map)
+  k <- ceiling((nr - 1L) / slope[1L]) + 1L
+  mult <- ceiling((1L + k * slope[2L]) / nc)
+  new_map <- rep(list(map), mult) %>% 
+    do.call(cbind, .)
+  idx <- cbind(seq(1L, by = slope[1L], length.out = k),
+               seq(1L, by = slope[2L], length.out = k))
+  sum(new_map[idx] == "#")
 }
-
-count_valid_passwords(puzzle_data)
+count_trees(puzzle_data)
 ```
 
 ## Part 2
@@ -149,19 +148,20 @@ count_valid_passwords(puzzle_data)
 cat(puzzle[[2]])
 ```
 
-We extract the letters at the given positions and check if exactly one of those matches
-the given character.
+We apply `count_trees` for all the given slopes and multiply the outcomes,
 
 ### Solution
 
 ```{r get-solution-2}
-count_valid_passwords_pos <- function(pwds = puzzle_data) {
-  pwds %>% 
-    mutate(across(from:to, ~ str_sub(pwd, .x, .x), .names = "{.col}_char"),
-           is_valid = xor(char == from_char, char == to_char)) %>% 
-    summarize(n = sum(is_valid)) %>% 
-    pull(n)
+count_trees_all_slopes <- function(map = puzzle_data) {
+  slopes <- list(c(1L, 1L),
+                 c(1L, 3L),
+                 c(1L, 5L),
+                 c(1L, 7L),
+                 c(2L, 1L))
+  map_int(slopes, ~ count_trees(map, .x)) %>% 
+    prod()
 }
 
-count_valid_passwords_pos(puzzle_data)
+count_trees_all_slopes(puzzle_data)
 ```
