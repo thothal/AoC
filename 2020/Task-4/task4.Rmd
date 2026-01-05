@@ -1,0 +1,207 @@
+---
+params:
+   task_nr: 4
+   year: 2020
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  text_block %>% 
+    str_split("\n\n") %>% 
+    extract2(1L) %>% 
+    map(function(entry) {
+      fields <- str_split(entry, "\\s") %>% 
+        extract2(1L)
+      fields <- fields[nzchar(fields)]
+      pairs <- fields %>% 
+        str_split(":")
+      map(pairs, 2L) %>% 
+        set_names(map_chr(pairs, 1L))
+    })
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We loop through all passports and count how often all required fields are present.
+
+```{r get-solution-1}
+count_valid_passports <- function(passports = puzzle_data) {
+  nf <- c("byr", "iyr", "eyr", "hgt", "hcl", "ecl", "pid")
+  map_lgl(passports, ~ all(nf %in% names(.x))) %>% 
+    sum()
+}
+count_valid_passports(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+We supply validator functions and loop through all passport again and apply the 
+validator function, if all checks pass the passport is considered valid.
+
+### Solution
+
+```{r get-solution-2}
+count_validated_passport <- function(passports = puzzle_data) {
+  validators <- list(
+    byr = function(val) {
+      val <- suppressWarnings(as.integer(val))
+      !is.na(val) && between(val, 1920L, 2002L)
+    },
+    iyr = function(val) {
+      val <- suppressWarnings(as.integer(val))
+      !is.na(val) && between(val, 2010L, 2020L)
+    },
+    eyr = function(val) {
+      val <- suppressWarnings(as.integer(val))
+      !is.na(val) && between(val, 2020L, 2030L)
+    },
+    hgt = function(val) {
+      fmt <- str_detect(val, "^\\d+(cm|in)$")
+      if (fmt) {
+        parts <- str_extract_all(val, "(\\d+|cm|in)") %>% 
+          extract2(1L)
+        val <- as.integer(parts[1L])
+        unit <- parts[2L]
+        if (unit == "cm") {
+          between(val, 150L, 193L)
+        } else {
+          between(val, 59L, 76L)
+        }
+      } else {
+        FALSE
+      }
+    },
+    hcl = function(val) {
+      str_detect(val, "^#[0-9a-f]{6}$")
+    },
+    ecl = function(val) {
+      val %in% c("amb", "blu", "brn", "gry", "grn", "hzl", "oth")
+    },
+    pid = function(val) {
+      str_detect(val, "^[0-9]{9}$")
+    },
+    cid = function(val) {
+      TRUE
+    }
+  )
+  nf <- c("byr", "iyr", "eyr", "hgt", "hcl", "ecl", "pid")
+  map_lgl(passports, function(entry) {
+    if (!all(nf %in% names(entry))) {
+      return (FALSE)
+    }
+    imap_lgl(entry, ~ validators[[.y]](.x)) %>% 
+      all()
+  }) %>% 
+    sum()
+}
+
+count_validated_passport(puzzle_data)
+```
