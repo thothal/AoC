@@ -177,8 +177,8 @@ cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
 ### Solution
 
 To implement the line-of-sight we pre-compute for each position the next seat ignoring
-the floor. Then we iterate over each elemt in the matrix and use the pre-computed indices 
-to get the neighbors.
+the floor. Then we iterate over each element in the matrix and use the pre-computed 
+indices to get the neighbors.
 
 ```{r get-solution-2}
 get_neighbors <- function(seats) {
