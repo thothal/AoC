@@ -1,0 +1,209 @@
+---
+params:
+   task_nr: 16
+   year: 2020
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(tidyr)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  markers <- str_which(text_block, "your ticket|nearby tickets")
+  validity <- text_block[1:(markers[1L] - 2L)] %>% 
+    str_split(": | or ") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("field", "range1", "range2")) %>% 
+    as_tibble() %>% 
+    separate_wider_delim(range1:range2, "-", names = c("from", "to"), names_sep = "_") %>% 
+    mutate(across(starts_with("range"), as.integer))
+  my_ticket <- text_block[markers[1L] + 1L] %>% 
+    str_split(",") %>% 
+    extract2(1L) %>% 
+    as.integer()
+  other_tickets <- text_block[(markers[2L] + 1):length(text_block)] %>% 
+    str_split(",") %>% 
+    map(as.integer)
+  list(validity = validity,
+       my_ticket = my_ticket,
+       other_tickets = other_tickets)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We construct a vector with all valid values and extract invalid fields for each ticket.
+
+
+```{r get-solution-1}
+check_tickets <- function(tickets) {
+  valid_numbers <- tickets$validity %>% 
+    rowwise() %>% 
+    mutate(valid = list(c(range1_from:range1_to, range2_from:range2_to))) %>% 
+    pull(valid) %>% 
+    unlist()
+  bad_tickets <- puzzle_data$other_tickets %>% 
+    map_lgl(~ !all(.x %in% valid_numbers))
+  error_rate <- puzzle_data$other_tickets[bad_tickets] %>% 
+    map_int(~ sum(.x[!.x %in% valid_numbers])) %>% 
+    sum()
+  list(valid_tickets =  puzzle_data$other_tickets[!bad_tickets], error_rate = error_rate)
+}
+
+tickets <- check_tickets(puzzle_data)
+tickets$error_rate
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
+```
+
+### Solution
+
+For each ticket we check which fields are theoretically valid. Then, we sort the fields 
+according to the number of theoretically valid fields. We will find a field
+for which there is only one possibility. We remove this possibility from the next field, 
+which will yield again a unique field name. Eventually we can assign each field to its
+position and use these positions to get the checksum based on our own ticket.
+
+```{r get-solution-2}
+get_checksum <- function(valid_tickets, validity, my_ticket) {
+  tickets <- do.call(rbind, tickets$valid_tickets)
+  valid_fields <- vector("list", ncol(tickets)) %>% 
+    set_names(seq_len(ncol(tickets)))
+  for (i in seq_len(ncol(tickets))) {
+    vals <- tickets[, i]
+    valid_fields[[i]] <- validity %>% 
+      rowwise() %>% 
+      mutate(is_valid = all(between(vals, range1_from, range1_to) |
+                              between(vals, range2_from, range2_to))) %>% 
+      filter(is_valid) %>% 
+      pull(field)
+  }
+  valid_fields <- valid_fields[order(lengths(valid_fields))]
+  field_ids <- accumulate(valid_fields, 
+                          function(l, el) {
+                            keep <- setdiff(el, l$drop)
+                            list(drop = c(l$drop, keep), keep = keep)
+                          }, .init = list(drop = character(0L), keep = character(0L))) %>% 
+    map("keep") %>% 
+    unlist()
+  ids <- field_ids[str_detect(field_ids, "departure")] %>% 
+    names() %>% 
+    as.integer()
+  prod(my_ticket[ids]) %>% 
+    as.integer64()
+}
+
+get_checksum(tickets, puzzle_data$validity, puzzle_data$my_ticket)
+```
