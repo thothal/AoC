@@ -128,7 +128,7 @@ cat(puzzle[[1]])
 
 We need to to use the modulo operation to determine the remainder for each schedule. Then,
 by subtracting this from the schedule time we know when each bus will arrive the next 
-time and we can determine the bus whihc will arrive next.
+time and we can determine the bus which will arrive next.
 
 ```{r get-solution-1}
 find_bus <- function(schedule) {
