@@ -1,0 +1,228 @@
+---
+params:
+   task_nr: 17
+   year: 2020
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(ravetools)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We embed the matrix into a 3d array with enough space around to account for the expansion.
+In each iteration we add at most one row/col/slice at either sides. Thus, if the current
+dimensions are `(m, n, k)` the maximum dimensions needed are `(m + 2i, n + 2i, k +2i)`
+where `i` is the number of iterations. 
+
+Once we embedded the starting slice into a 3d array, we use convolution to calculate the
+numbers of active neighbors for each element. To simplify this calculation, we encode the
+data by `0` and `1` for active and inactive cubes respectively.
+
+
+```{r get-solution-1}
+evolve_cubes_3d <- function(state, cycles) {
+  dd <- dim(state)
+  slice <- matrix(0L, dd[1L] + 2* cycles, dd[2L] + 2* cycles)
+  slice[(cycles + 1L):(cycles + dd[1L]), (cycles + 1L):(cycles + dd[2L])] <- 
+    as.integer(state == "#")
+  cube <- array(0L, c(dd, 1L) + 2* cycles)
+  cube[, , cycles + 1L] <- slice
+  kernel <- array(1L, rep(3L, 3L))
+  kernel[2L, 2L, 2L] <- 0L
+  for (i in seq_len(cycles)) {
+    nbs <- convolve_volume(cube, kernel) %>% 
+      round(0L)
+    cube[cube == 1L & (nbs < 2L | nbs > 3L)] <- 0L
+    cube[cube == 0L & nbs == 3L] <- 1L
+  }
+  sum(cube)
+}
+
+evolve_cubes_3d(puzzle_data, 6L)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
+```
+
+### Solution
+
+We still use the same logic as before but in 4d this time. However, since we cannot rely
+on an existing convolution function we need to write an R based function for this, where 
+we will use shifted arrays. 
+
+```{r get-solution-2}
+
+shift4d <- function(x, di = 0L, dj = 0L, dk = 0L, dl = 0L) {
+  dd <- dim(x)
+  stopifnot(length(dd) == 4L)
+  out <- array(0L, dd)
+  srcI <- max(1L, 1L + di):min(dd[1L], dd[1L] + di)
+  srcJ <- max(1L, 1L + dj):min(dd[2L], dd[2L] + dj)
+  srcK <- max(1L, 1L + dk):min(dd[3L], dd[3L] + dk)
+  srcL <- max(1L, 1L + dl):min(dd[4L], dd[4L] + dl)
+  
+  dstI <- max(1L, 1L - di):min(dd[1L], dd[1L] - di)
+  dstJ <- max(1L, 1L - dj):min(dd[2L], dd[2L] - dj)
+  dstK <- max(1L, 1L - dk):min(dd[3L], dd[3L] - dk)
+  dstL <- max(1L, 1L - dl):min(dd[4L], dd[4L] - dl)
+  out[dstI, dstJ, dstK, dstL] <- x[srcI, srcJ, srcK, srcL]
+  out
+}
+
+convolve_hypercube<- function(hypercube) {
+  dd <- dim(hypercube)
+  stopifnot(length(dd) == 4L)
+
+  N <- -1:1
+  res <- array(0L, dd)
+
+  for (di in N) {
+    for (dj in N) {
+      for (dk in N) {
+        for (dl in N) {
+          if (!(di == 0L && dj == 0L && dk == 0L && dl == 0L)) {
+            res <- res + shift4d(hypercube, di, dj, dk, dl)
+          }
+        }
+      }
+    }
+  }
+  res
+}
+
+
+evolve_cubes_4d <- function(state, cycles) {
+  dd <- dim(state)
+  slice <- matrix(0L, dd[1L] + 2 * cycles, dd[2L] + 2 * cycles)
+  slice[(cycles + 1L):(cycles + dd[1L]), (cycles + 1L):(cycles + dd[2L])] <- 
+    as.integer(state == "#")
+  hypercube <- array(0L, c(dd, 1L, 1L) + 2 * cycles)
+  hypercube[, , cycles + 1L, cycles + 1L] <- slice
+  for (i in seq_len(cycles)) {
+    nbs <- convolve_hypercube(hypercube) 
+    hypercube[hypercube == 1L & (nbs < 2L | nbs > 3L)] <- 0L
+    hypercube[hypercube == 0L & nbs == 3L] <- 1L
+  }
+  sum(hypercube)
+}
+
+evolve_cubes_4d(puzzle_data, 6L)
+```
