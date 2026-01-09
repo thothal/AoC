@@ -1,0 +1,435 @@
+---
+params:
+   task_nr: 20
+   year: 2020
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  tile_markers <- str_which(text_block, "Tile")
+  slices <- map2(tile_markers + 1L, c(tail(tile_markers, -1L) - 1L, length(text_block)),
+       ~ text_block[.x:.y] %>% 
+         str_split("") %>% 
+         do.call(rbind, .))
+  ids <- str_extract_all(text_block[tile_markers], "\\d+") %>% 
+    as.integer()
+  names(slices) <- paste0("tile_", ids)
+  slices
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+As for any good jigsaw we first sort the tiles. We calculate the checksum of its borders,
+by treating pixels as binary numbers. `#` maps to 1 and `.` maps to 0 always from left to
+right and from to to bottom. Any rotation or flipping will revert eventually the order of 
+the border. Thus, we also calculate the checksum of the *reverted* border and store the
+minimum of these 2 values to have a canonical hash representation of each tile (based on
+these 4 binary numbers).
+
+Then, we check the number of fitting neighbors for each tile. Corner tiles will only have
+2 fitting neighbors, border tiles will have 3 and inner tiles have 4 matching neighbors.
+Theoretically this needs not to be true, but then the puzzle would not be uniquely 
+solvable.
+
+For the first part we then just have to multiply the ids of the four corner pieces.
+
+
+```{r get-solution-1}
+get_hash <- function(tile) {
+  n <- nrow(tile)
+  base <- 2L ^ (0:(n - 1L))
+  hash <- function(side) {
+    vals <- switch(side,
+            tile[1L, ],
+            tile[, n],
+            tile[n, ],
+            tile[, 1L])
+    min(sum((vals == "#") * base),
+        sum((rev(vals) == "#") * base))
+  }
+  map_int(1:4, hash)
+}
+
+classify_tiles <- function(tiles) {
+  hashes <- map(tiles, get_hash)
+  n <- length(tiles)
+  nm <- names(tiles)
+  matching_edges <- matrix(NA, n, n, dimnames = list(nm, nm))
+  for (i in 2:n) {
+    for (j in 1:(i - 1L)) {
+      matching_edges[cbind(c(i, j), c(j, i))] <- any(hashes[[i]] %in% hashes[[j]])
+    }
+  }
+  tibble(tile_id = nm,
+         nbs = apply(matching_edges, 1L, \(i) nm[which(i)]) %>% 
+           unname(),
+         tile = unname(tiles)) %>% 
+    mutate(type = case_when(
+      lengths(nbs) == 2L ~ "corner",
+      lengths(nbs) == 3L ~ "border",
+      .default = "inner")
+    ) %>% 
+    mutate(id = str_extract(tile_id, "\\d+") %>% as.integer(), .before = 1L) %>% 
+    arrange(lengths(nbs))
+}
+
+sorted_tiles <- classify_tiles(puzzle_data)
+
+sorted_tiles %>% 
+  filter(type == "corner") %>% 
+  pull(id) %>% 
+  prod() %>% 
+  as.integer64()
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
+```
+
+### Solution
+
+We first assemble the jigsaw. This is done by starting with the corner pieces and moving
+down and finding the piece which matches. If at some point none of the precomputed pieces
+would fit, we need to flip the border piece to make it fit.
+
+Once we assembled the jigsaw, we use the monster pattern, let is slide over each permuted
+jigsaw and count how many monsters we find. Eventually, we subtract the number of pixels 
+of all found monsters from the total amount of pixels.
+
+
+```{r get-solution-2}
+permute <- function(tile, 
+                    how = c("id", "rot90", "rot180", "rot270", "flip_h", "flip_v", 
+                            "flip_main_diag", "flip_anti_diag")) {
+  how <- match.arg(how)
+  fns <- list(
+    id             = function(A) A,
+    rot90          = function(A) t(A[nrow(A):1, , drop = FALSE]),
+    rot180         = function(A) A[nrow(A):1, ncol(A):1, drop = FALSE],
+    rot270         = function(A) t(A[, ncol(A):1, drop = FALSE]),
+    flip_v         = function(A) A[nrow(A):1, , drop = FALSE],
+    flip_h         = function(A) A[, ncol(A):1, drop = FALSE],
+    flip_main_diag = function(A) t(A),
+    flip_anti_diag = function(A) t(A)[nrow(A):1, ncol(A):1, drop = FALSE]
+  )
+  fns[[how]](tile)
+}
+
+flip <- function(op, horizontal) {
+  if (horizontal) {
+    switch(op,
+           id             = "flip_h",
+           rot90          = "flip_main_diag",
+           rot180         = "flip_v",
+           rot270         = "flip_anti_diag",
+           flip_h         = "id",
+           flip_v         = "rot180",
+           flip_main_diag = "rot90",
+           flip_anti_diag = "rot270")
+  } else {
+    switch(op,
+           id             = "flip_v",
+           rot90          = "flip_anti_diag",
+           rot180         = "flip_h",
+           rot270         = "flip_main_diag",
+           flip_h         = "rot180",
+           flip_v         = "id",
+           flip_main_diag = "rot270",
+           flip_anti_diag = "rot90")
+  }
+}
+
+get_all_permutations <- function(tile) {
+  how <- c("id", "rot90", "rot180", "rot270", "flip_h", "flip_v", 
+           "flip_main_diag", "flip_anti_diag")
+  map(how, ~ permute(tile, .x)) %>% 
+    set_names(how)
+}
+
+get_rotation<- function(tile_x, tile_y, side) {
+  get_hash <- function(tile, side = c("T", "R", "B", "L")) {
+    n <- nrow(tile)
+    calc_hash <- function(val) sum(2 ^ (0:(n - 1)) * (val == "#"))
+    if (side == "T") {
+      calc_hash(tile[1L, ])
+    } else if (side == "R") {
+      calc_hash(tile[, n])
+    } else if (side == "B") {
+      calc_hash(tile[n, ])
+    } else if (side == "L") {
+      calc_hash(tile[, 1L])
+    }
+  }
+  
+  opposite_side <- c(T = "B", R = "L", B = "T", L = "R")
+  all_perms <- get_all_permutations(tile_y)
+  
+  hash_x <- get_hash(tile_x, side)
+  hashes_y <- map(all_perms, ~ get_hash(.x, opposite_side[side]))
+  names(hashes_y)[match(hash_x, hashes_y)]
+}
+
+assemble_jigsaw <- function(sorted_tiles) {
+  place_tiles <- function(pos, tiles) {
+    for (nm in names(tiles)) {
+      side <- tiles[[nm]]["side"]
+      offset <- switch(
+        side, 
+        T = cbind(-1L, 0L),
+        R = cbind(0L, 1L),
+        B = cbind(1L, 0L),
+        L = cbind(0L, -1L)
+      )
+      placement[pos[1L] + offset[1L], pos[2L] + offset[2L], ] <<- c(nm, tiles[[nm]]["perm"])
+    }
+  }
+  n <- nrow(sorted_tiles)
+  cnts <- sorted_tiles %>% 
+    count(type)
+  I <- cnts %>% 
+    filter(type == "inner") %>% 
+    pull(n)
+  B <- cnts %>% 
+    filter(type == "border") %>% 
+    pull(n)
+  I_factors <- I / seq(1L, ceiling(sqrt(I)))
+  I_factors <- I_factors[round(I_factors, 0L) == I_factors]
+  idx <- cbind(I_factors, 100L / I_factors) %>% 
+    rowSums() %>% 
+    multiply_by(2L) %>% 
+    equals(B)
+  dd <- c(I_factors[idx] + 2L, n / (I_factors[idx] + 2L)) 
+  placement <- array(NA_character_, c(dd, 2L))
+  first_corner <- sorted_tiles %>% 
+    filter(type == "corner") %>% 
+    slice(1L) %>% 
+    pull(tile_id)
+  row <- col <- 1L 
+  placement[row, col, ] <- c(first_corner, "id")
+  while (any(is.na(placement[, , 1]))) {
+    row <- (row %% dd[1L]) + 1L
+    col <- col + (row == 1L)
+    left_nb <- top_nb <- character(0L)
+    if (col != 1L) {
+      left_nb <- placement[row, col - 1L, 1L]
+    }
+    if (row != 1L) {
+      top_nb <- placement[row - 1L, col, 1L]
+    }
+    if (row == 1L || col == 1L) {
+      type <- c("corner", "border")
+    } else {
+      type <- "inner"
+    }
+    cand_id <- sorted_tiles %>% 
+      filter(tile_id %in% c(left_nb, top_nb)) %>% 
+      pull(nbs) %>% 
+      reduce(intersect) 
+    cand <- sorted_tiles %>% 
+      filter(tile_id %in% cand_id,
+             type %in% type,
+             !tile_id %in% c(placement[, , 1L])) %>% 
+      slice(1L)
+    cand_id <- cand %>% 
+      pull(tile_id)
+    cand <- cand  %>% 
+      pull(tile) %>% 
+      extract2(1L)
+    if (col != 1L) {
+      left <- sorted_tiles %>% 
+        filter(tile_id == placement[row, col - 1L, 1L]) %>% 
+        pull(tile) %>% 
+        extract2(1L)
+      rot <- permute(left, placement[row, col - 1L, 2L]) %>% 
+        get_rotation(cand, "R")
+      if (is.na(rot)) {
+        placement[row, col - 1L, 2L] <- flip(placement[row, col - 1L, 2L], TRUE)
+        rot <- permute(left, placement[row, col - 1L, 2L]) %>% 
+          get_rotation(cand, "R")
+      }
+    }
+    if (row != 1L) {
+      top <- sorted_tiles %>% 
+        filter(tile_id == placement[row - 1L, col, 1L]) %>% 
+        pull(tile) %>% 
+        extract2(1L)
+      rot <- permute(top, placement[row - 1L, col, 2L]) %>% 
+        get_rotation(cand, "B")
+      if (is.na(rot)) {
+        placement[row - 1L, col, 2L] <- flip(placement[row - 1L, col, 2L], FALSE)
+        rot <- permute(top, placement[row - 1L, col, 2L]) %>% 
+          get_rotation(cand, "B")
+      }
+    }
+    placement[row, col, ] <- c(cand_id, rot)
+  }
+  tdd <- dim(sorted_tiles$tile[[1]]) - 2L
+  n <- tdd[1L] + 2L
+  m <- tdd[2L] + 2L
+  jigsaw <- array(NA_character_, dd * tdd)
+  for (i in 1:dd[1L]) {
+    for (j in 1:dd[2L]) {
+      tile <- sorted_tiles %>% 
+        filter(tile_id == placement[i, j, 1L]) %>% 
+        pull(tile) %>% 
+        extract2(1L)
+      sub_mat <- permute(tile, placement[i, j, 2L])
+      sub_mat <- sub_mat[-c(1, n), -c(1, m)]
+      jigsaw[seq((i - 1) * tdd[1L] + 1L, length.out = tdd[1L]),
+             seq((j - 1) * tdd[2L] + 1L, length.out = tdd[2L])] <- sub_mat
+    }
+  }
+  jigsaw
+}
+
+count_rough_sea_tiles <- function(jigsaw, monster_pattern) {
+  all_perms <- get_all_permutations(jigsaw)
+  dd <- dim(monster_pattern)
+  chk <- sum(monster_pattern == "#")
+  monster_cnt <- 0L
+  for (jn in names(all_perms)) {
+    monster_found <- FALSE
+    jigsaw <- all_perms[[jn]]
+    for (i in 1:(nrow(jigsaw) - dd[1L] + 1L)) {
+      for (j in 1:(ncol(jigsaw) - dd[2L] + 1L)) {
+        slice <- jigsaw[seq(i, length.out = dd[1L]),
+                        seq(j, length.out = dd[2L])]
+        is_monster <- sum(monster_pattern == slice) == chk
+        
+        if (is_monster) {
+          monster_cnt <- monster_cnt + 1L
+        }
+      }
+    }
+    if (monster_cnt > 0L) {
+      return(sum(jigsaw == "#") - monster_cnt * chk)
+    }
+  }
+}
+
+
+jigsaw <- assemble_jigsaw(sorted_tiles)
+monster <- matrix(
+  c(" ", "#", " ", " ", " ", "#", " ", " ", " ", " ", " ", " ", " ", " ", "#", " ", "#", 
+    " ", " ", "#", " ", " ", " ", "#", " ", " ", " ", " ", " ", " ", " ", " ", "#", " ", 
+    "#", " ", " ", "#", " ", " ", " ", "#", " ", " ", " ", " ", " ", " ", " ", " ", "#", 
+    " ", "#", " ", "#", "#", " ", " ", "#", " "),
+  3L, 20L
+)
+
+count_rough_sea_tiles(jigsaw, monster)
+```
