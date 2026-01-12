@@ -1,0 +1,209 @@
+---
+params:
+   task_nr: 21
+   year: 2020
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  ingredients <- text_block %>% 
+    str_remove_all(" \\(.*\\)") %>% 
+    str_split(" ")
+  allergens <- text_block %>% 
+    str_extract_all("(?<=\\(contains ).*(?=\\))") %>% 
+    str_split(", ?")
+  tibble(ingredients = ingredients,
+         allergens = allergens) %>% 
+    mutate(id = 1:n(), .before = 1L)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We intersect the ingredient lists with all other ingredient lists sharing at least one
+allergen and store them together with the allergens they have in common. Eventually we get 
+a list of allergens with the corresponding candidates. Then, we take the foods with just 
+one allergen, intersect the ingredients to come up with s much smaller list of
+candidate ingredients. Then, we sort this list according to the number of candidates and
+consecutively remove elements which are already assigned to an ingredient. We have to 
+repeat this process until we have a unique mapping between ingredients and allergens.
+
+With this assignment all what is left is to count all other ingredients in the original
+foods.
+
+```{r get-solution-1}
+find_bad_ingredients <- function(food) {
+  ids <- food %>% 
+    pull(id)
+  n <- length(ids)
+  res <- list()
+  for (i in 2:n) {
+    for (j in 1:i) {
+      if (i !=j) {
+        f1 <- food %>% 
+          slice(i) 
+        f2 <- food %>% 
+          slice(j) 
+        alg <- intersect(f1 %>% pull(allergens) %>% extract2(1L), 
+                         f2 %>% pull(allergens) %>% extract2(1L))
+        ing <- intersect(f1 %>% pull(ingredients) %>% extract2(1L), 
+                         f2 %>% pull(ingredients) %>% extract2(1L))
+        if (length(alg) > 0L) {
+          new <- list(ing) %>% 
+            set_names(paste(sort(alg), collapse = "|"))
+          res <- c(res, new)
+        }
+      }
+    }
+  }
+  nms <- names(res) %>% 
+    str_subset("\\|", TRUE) %>% 
+    unique()
+  ints <- map(nms, ~ res[names(res) == .x] %>% reduce(intersect)) %>% 
+    set_names(nms)
+  while (any(lengths(ints) > 1L)) {
+    ints <- ints[order(lengths(ints))]
+    ints <- accumulate(ints, function(x, y) {
+      res <- setdiff(y, x$assigned)
+      list(assigned = c(x$assigned, if(length(res) == 1L) res), result = res)
+    }, .init = list(assigned = character(0L), result = character(0L))) %>% 
+      map("result")
+  }
+  ints %>% 
+    do.call(c, .)
+}
+
+bad_ingredients <- find_bad_ingredients(puzzle_data)
+
+all_ing <- puzzle_data %>% 
+  pull(ingredients) %>% 
+  unlist()
+all_ing[!all_ing %in% bad_ingredients] %>% 
+  length()
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]] %>% str_replace_all(fixed("*"), "\\*"))
+```
+
+### Solution
+
+Since we determined the allgernic ingreidents, we just have to bring them in the required 
+order and paste the values together.
+
+```{r get-solution-2}
+bad_ingredients[order(names(bad_ingredients))] %>% 
+  paste(collapse = ",")
+```
