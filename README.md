@@ -70,7 +70,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 20](https://thothal.github.io/AoC/2020_task20.html)
 - [x] [Day 21](https://thothal.github.io/AoC/2020_task21.html)
 - [ ] Day 22
-- [ ] Day 23
+- [x] [Day 23](https://thothal.github.io/AoC/2020_task23.html)
 - [ ] Day 24
 - [ ] Day 25
 
