@@ -56,6 +56,7 @@ knitr::opts_chunk$set(echo = TRUE)
 * [Day 1](2022_task1.html)
 * [Day 2](2022_task2.html)
 * [Day 3](2022_task3.html)
+* [Day 4](2022_task4.html)
 
 # 2021
 
