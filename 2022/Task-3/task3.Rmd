@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 2
+   task_nr: 3
    year: 2022
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -94,10 +94,9 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       keep(nzchar)
   }
   text_block %>% 
-    str_split(" ") %>% 
-    do.call(rbind, .) %>% 
-    set_colnames(c("you", "me")) %>% 
-    as_tibble()
+    str_split("") %>% 
+    map(~ list(head(.x, length(.x) / 2L), tail(.x, length(.x) / 2L)))
+    
 }
 
 puzzle_data <- local({
@@ -123,39 +122,17 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We calculate the points from the original assignment by joining a table with the outcome 
-for each pair and summing game and sign points.
+We loop over each rucksack, find the duplicated entry, assign its points and sum the 
+points for the final total.
 
 ```{r get-solution-1}
-count_points <- function(strategy) {
-  ## A/X rock
-  ## B/Y paper
-  ## C/Z scissors 
-  pts <- expand.grid(you = LETTERS[1:3], me = LETTERS[24:26], 
-                     stringsAsFactors = FALSE) %>% 
-    as_tibble() %>% 
-    mutate(
-      game_pts = case_when(
-        you == "A" & me == "X" |
-          you == "B" & me == "Y" |
-          you == "C" & me == "Z" ~ 3L,
-        you == "A" & me == "Y" |
-          you == "B" & me == "Z" |
-          you == "C" & me == "X" ~ 6L,
-        .default = 0L),
-      sign_pts = case_when(
-        me == "X" ~ 1L,
-        me == "Y" ~ 2L,
-        me == "Z" ~ 3L
-      ),
-      points = sign_pts + game_pts
-    )
-  strategy %>% 
-    inner_join(
-      pts, c("you", "me")
-    ) %>% 
-    summarize(points = sum(points)) %>% 
-    pull(points)
+count_points <- function(rucksacks) {
+  scores <- 1:52 %>% 
+    set_names(c(letters, LETTERS))
+  map_int(rucksacks, function(compartments) {
+    scores[do.call(intersect, compartments)]
+  }) %>% 
+    sum()
 }
 
 count_points(puzzle_data)
@@ -169,40 +146,20 @@ count_points(puzzle_data)
 cat(puzzle[[2]])
 ```
 
-The game points can be derived directly from the second column. For the sign points we need
-to determine which sign we are playing given the outcome and the sign from the opponent.
+We loop over each group of 3 rucksacks, find the common letter as before and score it.
 
 ### Solution
 
 ```{r get-solution-2}
-count_points2 <- function(strategy) {
-  ## A/X rock
-  ## B/Y paper
-  ## C/Z scissors 
-  pts <- strategy  %>% 
-    mutate(
-      game_pts = case_when(
-        me == "X" ~ 0L,
-        me == "Y" ~ 3L,
-        me == "Z" ~ 6L
-      ),
-      sign_pts = case_when(
-        you == "A" & me == "Y" |
-          you == "B" & me == "X" |
-          you == "C" & me == "Z" ~ 1L,
-        you == "A" & me == "Z" |
-          you == "B" & me == "Y" |
-          you == "C" & me == "X" ~ 2L,
-        you == "A" & me == "X" |
-          you == "B" & me == "Z" |
-          you == "C" & me == "Y" ~ 3L
-      ),
-      points = sign_pts + game_pts
-    )
-  pts %>% 
-    summarize(points = sum(points)) %>% 
-    pull(points)
+get_priorities <- function(rucksacks) {
+  scores <- 1:52 %>% 
+    set_names(c(letters, LETTERS))
+  map_int(seq(1L, length(rucksacks), 3L), function(i) {
+    items <- map(rucksacks[i:(i+2)], unlist)
+    scores[reduce(items, intersect)]
+  }) %>% 
+    sum()
 }
 
-count_points2(puzzle_data)
+get_priorities(puzzle_data)
 ```
