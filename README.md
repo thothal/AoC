@@ -46,33 +46,31 @@ of the assignments where I explain how I came up with the solution (if at all).
 
 ### 2022
 
-### 2020
-
-- [x] [Day 1](https://thothal.github.io/AoC/2020_task1.html)
-- [x] [Day 2](https://thothal.github.io/AoC/2020_task2.html)
-- [x] [Day 3](https://thothal.github.io/AoC/2020_task3.html)
-- [x] [Day 4](https://thothal.github.io/AoC/2020_task4.html)
-- [x] [Day 5](https://thothal.github.io/AoC/2020_task5.html)
-- [x] [Day 6](https://thothal.github.io/AoC/2020_task6.html)
-- [x] [Day 7](https://thothal.github.io/AoC/2020_task7.html)
-- [x] [Day 8](https://thothal.github.io/AoC/2020_task8.html)
-- [x] [Day 9](https://thothal.github.io/AoC/2020_task9.html)
-- [x] [Day 10](https://thothal.github.io/AoC/2020_task10.html)
-- [x] [Day 11](https://thothal.github.io/AoC/2020_task11.html)
-- [x] [Day 12](https://thothal.github.io/AoC/2020_task12.html)
-- [x] [Day 13](https://thothal.github.io/AoC/2020_task13.html)
-- [x] [Day 14](https://thothal.github.io/AoC/2020_task14.html)
-- [x] [Day 15](https://thothal.github.io/AoC/2020_task15.html)
-- [x] [Day 16](https://thothal.github.io/AoC/2020_task16.html)
-- [x] [Day 17](https://thothal.github.io/AoC/2020_task17.html)
-- [x] [Day 18](https://thothal.github.io/AoC/2020_task18.html)
-- [x] [Day 19](https://thothal.github.io/AoC/2020_task19.html)
-- [x] [Day 20](https://thothal.github.io/AoC/2020_task20.html)
-- [x] [Day 21](https://thothal.github.io/AoC/2020_task21.html)
-- [x] [Day 22](https://thothal.github.io/AoC/2020_task22.html)
-- [x] [Day 23](https://thothal.github.io/AoC/2020_task23.html)
-- [x] [Day 24](https://thothal.github.io/AoC/2020_task24.html)
-- [x] [Day 25](https://thothal.github.io/AoC/2020_task25.html)
+- [x] [Day 1](https://thothal.github.io/AoC/2022_task1.html)
+- [ ] Day 2
+- [ ] Day 3
+- [ ] Day 4
+- [ ] Day 5
+- [ ] Day 6
+- [ ] Day 7
+- [ ] Day 8
+- [ ] Day 9
+- [ ] Day 10
+- [ ] Day 11
+- [ ] Day 12
+- [ ] Day 13
+- [ ] Day 14
+- [ ] Day 15
+- [ ] Day 16
+- [ ] Day 17
+- [ ] Day 18
+- [ ] Day 19
+- [ ] Day 20
+- [ ] Day 21
+- [ ] Day 22
+- [ ] Day 23
+- [ ] Day 24
+- [ ] Day 25
 
 ### 2021
 
@@ -101,6 +99,35 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 23](https://thothal.github.io/AoC/2021_task23.html)
 - [x] [Day 24](https://thothal.github.io/AoC/2021_task24.html)
 - [x] [Day 25](https://thothal.github.io/AoC/2021_task25.html)
+
+### 2020
+
+- [x] [Day 1](https://thothal.github.io/AoC/2020_task1.html)
+- [x] [Day 2](https://thothal.github.io/AoC/2020_task2.html)
+- [x] [Day 3](https://thothal.github.io/AoC/2020_task3.html)
+- [x] [Day 4](https://thothal.github.io/AoC/2020_task4.html)
+- [x] [Day 5](https://thothal.github.io/AoC/2020_task5.html)
+- [x] [Day 6](https://thothal.github.io/AoC/2020_task6.html)
+- [x] [Day 7](https://thothal.github.io/AoC/2020_task7.html)
+- [x] [Day 8](https://thothal.github.io/AoC/2020_task8.html)
+- [x] [Day 9](https://thothal.github.io/AoC/2020_task9.html)
+- [x] [Day 10](https://thothal.github.io/AoC/2020_task10.html)
+- [x] [Day 11](https://thothal.github.io/AoC/2020_task11.html)
+- [x] [Day 12](https://thothal.github.io/AoC/2020_task12.html)
+- [x] [Day 13](https://thothal.github.io/AoC/2020_task13.html)
+- [x] [Day 14](https://thothal.github.io/AoC/2020_task14.html)
+- [x] [Day 15](https://thothal.github.io/AoC/2020_task15.html)
+- [x] [Day 16](https://thothal.github.io/AoC/2020_task16.html)
+- [x] [Day 17](https://thothal.github.io/AoC/2020_task17.html)
+- [x] [Day 18](https://thothal.github.io/AoC/2020_task18.html)
+- [x] [Day 19](https://thothal.github.io/AoC/2020_task19.html)
+- [x] [Day 20](https://thothal.github.io/AoC/2020_task20.html)
+- [x] [Day 21](https://thothal.github.io/AoC/2020_task21.html)
+- [x] [Day 22](https://thothal.github.io/AoC/2020_task22.html)
+- [x] [Day 23](https://thothal.github.io/AoC/2020_task23.html)
+- [x] [Day 24](https://thothal.github.io/AoC/2020_task24.html)
+- [x] [Day 25](https://thothal.github.io/AoC/2020_task25.html)
+
 
 ### 2019
 
