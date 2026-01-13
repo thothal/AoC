@@ -114,7 +114,7 @@ edit_year <- function(year) {
   
   cat(index, file = here("index.Rmd"), sep = "\n")
 }
-## get all yeras for which we have a folder
+## get all years for which we have a folder
 
 years <- list.dirs(here(), recursive = FALSE) %>% 
   str_subset("[/\\\\]\\d{4}") %>% 
