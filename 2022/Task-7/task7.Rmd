@@ -1,0 +1,221 @@
+---
+params:
+   task_nr: 7
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We construct a graph (tree) by iterating over all commands and parsing them accordingly. 
+For files we can derive the size directly, for directories we first sort the graph 
+topologically and assign the sum of the childrens' sizes as the size of the directory.
+The sorting ensures that we all children directories have a size before we visit the
+parent.
+
+To get the answer, we simply sum the sizes of directories, whose size is below the
+threshold.
+
+```{r get-solution-1}
+construct_tree <- function(shell) {
+  G <- make_empty_graph(1)
+  parent <- root <- "/"
+  V(G)$name <- root
+  V(G)$label <- root
+  V(G)$type <- "root"
+  n <- length(shell)
+  label_lkp <- integer(0L)
+  ptr <- 2L
+  ## we assume that the first command is "$ cd /"
+  while (ptr <= n) {
+    line <- shell[ptr]
+    if (str_detect(line, "^\\$ ls")) {
+      next_cmd <- str_which(shell[(ptr + 1L):n], "\\$")[1L]
+      if (is.na(next_cmd)) {
+        ## end of shell output
+        next_cmd <- n - ptr + 1L
+      }
+      listing <- shell[seq(ptr + 1L, length.out = next_cmd - 1L)] %>% 
+        str_split("\\s") %>% 
+        do.call(rbind, .)
+      wt <- as.integer(listing[, 1L]) %>% 
+        suppressWarnings()
+      is_dir <- listing[, 1L] == "dir"
+      labels <- listing[, 2L]
+      label_lkp[labels] <- coalesce(label_lkp[labels], 0L) + 1L
+      node_names <- paste(labels, label_lkp[labels], sep = ":")
+      k <- nrow(listing)
+      G <- add_vertices(G, 
+                        k,
+                        type = if_else(is_dir, "dir", "file"),
+                        label = labels,
+                        name = node_names,
+                        size = wt)
+      edges <- rep(parent, 2 * k)
+      edges[1:k * 2L] <- node_names
+      G <- add_edges(G, edges)
+      ptr <- ptr + next_cmd
+    } else if (str_detect(line, "^\\$ cd")) {
+      ## change directory
+      dir_name <- str_extract(line, "\\S+$")
+      if (dir_name == "..") {
+        parent <- neighbors(G, parent, "in")$name
+      } else {
+        ## dir names are not globally unique
+        ## hence, look at all the children and find the one with the correct label
+        childs <- neighbors(G, parent)
+        parent <- childs[childs$label == dir_name]$name
+      }
+      ptr <- ptr + 1L
+    }
+  }
+  dir_nodes <- setdiff(topo_sort(G, "in"),
+                       V(G)[V(G)$type == "file"])
+  for (v in dir_nodes) {
+    wt <- sum(neighbors(G, v)$size)
+    stopifnot(!is.na(wt))
+    V(G)[v]$size <- wt
+  }
+  G
+}
+
+G <- construct_tree(puzzle_data)
+sum(V(G)[V(G)$type != "file" & V(G)$size <= 100000]$size) 
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We need to find the smallest directory size larger than the needed size.
+
+
+```{r get-solution-2}
+find_deletable_dir <- function(G, size, update_size) {
+  unused <- size - V(G)["/"]$size
+  needed <- update_size - unused
+  candidates <- V(G)[V(G)$size > needed]
+  candidates[which.min(candidates$size)]$size
+}
+
+find_deletable_dir(G, 70000000, 30000000)
+```
