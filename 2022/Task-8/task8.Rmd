@@ -1,0 +1,197 @@
+---
+params:
+   task_nr: 8
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+  storage.mode(res) <- "integer"
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+For each edge we take the cumulative maximum height and see whether the current height 
+is greater than this cumulative height. If so, the view is not blocked. Eventually we 
+count all trees visible from any side.
+
+```{r get-solution-1}
+count_visible_trees <- function(forrest) {
+  dd <- dim(forrest)
+  vis <- array(FALSE, dd)
+  vis[, c(1L, dd[2L])] <- TRUE
+  vis[c(1L, dd[1L]), ] <- TRUE
+  for (i in 2:(dd[1L] - 1L)) {
+    row <- forrest[i, ]
+    rrow <- rev(row)
+    from_left <- row > cummax(c(-Inf, head(row, -1L)))
+    from_right <- rrow > cummax(c(-Inf, head(rrow, -1L)))
+    vis[i, ] <- vis[i, ] | from_left
+    vis[i, ] <- vis[i, ] | rev(from_right)
+  }
+  for (i in 2:(dd[2L] - 1L)) {
+    
+    col <- forrest[, i]
+    rcol <- rev(col)
+    from_top <- col > cummax(c(-Inf, head(col, -1L)))
+    from_bottom <- rcol > cummax(c(-Inf, head(rcol, -1L)))
+    vis[, i] <- vis[, i] | from_top
+    vis[, i] <- vis[, i] | rev(from_bottom)
+  }
+ sum(vis)
+}
+
+count_visible_trees(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For each tree we count the number of smaller trees in the line of sight. We need to add
+one in case there is no such tree, because we will always see the tree next to the 
+current position (even if it is taller). If there is at least one tree, we counted it
+already so we must not add this bonus.
+
+
+```{r get-solution-2}
+get_scenic_score <- function(forrest) {
+  dd <- dim(forrest)
+  scenic_score <- array(0L, dd)
+  for (i in 2:(dd[1L] - 1L)) {
+    for (j in 2:(dd[2L] - 1L)) {
+      height <- forrest[i, j]
+      top <- forrest[(i - 1L):1, j]
+      bottom <- forrest[(i + 1L):dd[1L], j]
+      left <- forrest[i, (j - 1L):1]
+      right <- forrest[i, (j + 1L):dd[2L]]
+      n_top <- sum(cumall(height > top)) + (!all(height > top))
+      n_bottom <- sum(cumall(height > bottom)) + (!all(height > bottom))
+      n_left <- sum(cumall(height > left)) + (!all(height > left))
+      n_right <- sum(cumall(height > right)) + (!all(height > right))
+      scenic_score[i, j] <- n_top * n_bottom * n_left * n_right
+    }
+  }
+  max(scenic_score)
+}
+
+get_scenic_score(puzzle_data)
+```
