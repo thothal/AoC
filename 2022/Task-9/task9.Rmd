@@ -125,34 +125,58 @@ cat(puzzle[[1]])
 
 ### Solution
 
+We generate a move lookup table, which returns the delta the tail has to move depending
+on where the tail was and in which direction the head is moving. Though the head can move
+only vertically and horizontally, we also include diagonal movements, as we will need them
+for the second part.
+
+With this lookup table in place, we just need to determine at which position the tail is
+before we move and use this position plus the direction of movement to look up the delta
+to get the new tail position. We continue until all steps are carried out and count unique
+positions of the tail.
+
 ```{r get-solution-1}
-get_pos <- function(pos, dis) {
-  rownames(pos)[apply(pos, 1L, \(r) all(r == dis))]
+get_pos <- function(dis) {
+  dirs <- c("C", "E", "W", "S", "SE", "SW", "N", "NE", "NW")
+  idx <- sum(dis %% 3L * c(3L, 1L)) + 1L
+  dirs[idx]
 }
 
 generate_move_table <- function(tail_pos) {
-  new_head_pos <- tail_pos[tail_pos[, 1L] != 0 | tail_pos[, 2L] != 0, ]
-  res <- matrix(NA_character_, nrow(tail_pos), nrow(new_head_pos),
-                dimnames = list(rownames(tail_pos), rownames(new_head_pos)))
-  for (tp in rownames(tail_pos)) {
-    for (new_hp in rownames(new_head_pos)) {
-      if (tp == "SW" && new_hp == "N") browser()
-      tail <- tail_pos[tp, ]
-      head <- new_head_pos[new_hp, ]
-      dis <- tail - head
-      pos <-  get_pos(tail_pos, dis)
-      if (length(pos) > 0L) {
-        res[tp, new_hp] <- pos
-      } else if (any(dis == 0L)) {
-        res[tp, new_hp] <- get_pos(tail_pos, dis %/% 2L)
-      } else if (any(abs(dis) == 2L)) {
-        tail_dir <- sign(dis)
-        new_tp <- tail + head + tail_dir
-        res[tp, new_hp] <- get_pos(tail_pos, new_tp)
+  d <- nrow(tail_pos)
+  diag <- c("NE", "SE", "SW", "NW")
+  opposite <- c(N = "S", S = "N", E = "W", W = "E")
+  move_lkp <- array(0L, c(d, d - 1L, 2L), 
+                    list(rownames(tail_pos), 
+                         setdiff(rownames(tail_pos), "C"),
+                         NULL))
+  dirs <- rbind(
+    N = c(-1L, 0L),
+    E = c(0L, 1L),
+    S = c(1L, 0L),
+    W = c(0, -1L)
+  )
+  for (d in rownames(tail_pos)) {
+    if (d == "C") {
+      next
+    }
+    x <- str_split(d, "") %>% 
+      unlist()
+    dir <- colSums(dirs[opposite[x], , drop = FALSE])
+    ## straight movements
+    move_lkp[d, opposite[x], ] <- matrix(dir, length(x), 2L, byrow = TRUE)
+    for (di in diag) {
+      ## diagonal movements
+      y <- str_split(di, "") %>% 
+        unlist()
+      if (all(x %in% y)) {
+        next
       }
+      dir <- colSums(dirs[setdiff(y, x), , drop = FALSE])
+      move_lkp[d, di, ] <- dir
     }
   }
-  res
+  move_lkp
 }
 
 move_rope <- function(steps, rope_length = 1L) {
@@ -180,30 +204,28 @@ move_rope <- function(steps, rope_length = 1L) {
     for (s in seq_len(step$n)) {
       prev_knot_pos_old <- head_pos
       prev_knot_pos_new <- head_pos <- head_pos + dirs[step$dir, ]
+      dir <- step$dir
       for (knot in seq_len(nrow(tails_pos))) {
         tail_pos <- tails_pos[knot, ]
-        rel_pos <- get_pos(pos, tail_pos - prev_knot_pos_old)
+        rel_pos <- get_pos(tail_pos - prev_knot_pos_old)
         if (any(abs(tail_pos - prev_knot_pos_new) > 1L)) {
-          if (i == 2) browser()
-          new_pos <- lkp[rel_pos, step$dir]
+          tail_delta <- lkp[rel_pos, dir, ]
           prev_knot_pos_old <- tail_pos
-          tail_pos <- prev_knot_pos_new + pos[new_pos, ]  
+          prev_knot_pos_new <- tail_pos <- tail_pos + tail_delta
+          dir <- get_pos(tail_delta)
+          tails_pos[knot, ] <- tail_pos
         } else {
-          prev_knot_pos_old <- tail_pos
+          break
         }
-        prev_knot_pos_new <- tail_pos
-        tails_pos[knot, ] <- tail_pos
       }
       all_tail_pos <- rbind(all_tail_pos, tails_pos[nrow(tails_pos), ])
     }
     
-    print(tails_pos)
   }
-  
   all_tail_pos[!duplicated(all_tail_pos), , drop = FALSE] %>% 
     nrow()
 }
-move_rope(puzzle_data) # 4898 too high
+move_rope(puzzle_data) 
 
 ```
 
@@ -217,32 +239,9 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For each tree we count the number of smaller trees in the line of sight. We need to add
-one in case there is no such tree, because we will always see the tree next to the 
-current position (even if it is taller). If there is at least one tree, we counted it
-already so we must not add this bonus.
-
+To implement the movement of longer ropes, we just have to move each knot one after the 
+other. Now knots can also move diagonally, which we need to consider to get the direction
+for the next knot.
 
 ```{r get-solution-2}
-get_scenic_score <- function(forrest) {
-  dd <- dim(forrest)
-  scenic_score <- array(0L, dd)
-  for (i in 2:(dd[1L] - 1L)) {
-    for (j in 2:(dd[2L] - 1L)) {
-      height <- forrest[i, j]
-      top <- forrest[(i - 1L):1, j]
-      bottom <- forrest[(i + 1L):dd[1L], j]
-      left <- forrest[i, (j - 1L):1]
-      right <- forrest[i, (j + 1L):dd[2L]]
-      n_top <- sum(cumall(height > top)) + (!all(height > top))
-      n_bottom <- sum(cumall(height > bottom)) + (!all(height > bottom))
-      n_left <- sum(cumall(height > left)) + (!all(height > left))
-      n_right <- sum(cumall(height > right)) + (!all(height > right))
-      scenic_score[i, j] <- n_top * n_bottom * n_left * n_right
-    }
-  }
-  max(scenic_score)
-}
-
-get_scenic_score(puzzle_data)
-```
+move_rope(puzzle_data, 9L)
