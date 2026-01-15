@@ -1947,8 +1947,10 @@ This path reaches the goal in <code><em>31</em></code> steps, the fewest possibl
 <div id="solution" class="section level3" number="2.1.2">
 <h3><span class="header-section-number">2.1.2</span> Solution</h3>
 <p>This is a simple application for the Breadth-First-Search algorithm.</p>
-<pre class="r"><code>find_shortest_path &lt;- function(map, start = attr(map, &quot;start&quot;), prune = Inf) {
-  dest &lt;- attr(map, &quot;dest&quot;)
+<pre class="r"><code>find_shortest_path &lt;- function(map, 
+                               start = attr(map, &quot;start&quot;), 
+                               dest =  attr(map, &quot;dest&quot;),
+                               uphill = TRUE) {
   visited &lt;- array(FALSE, dim(map))
   queue &lt;- matrix(NA_integer_, length(map), 3L)
   queue_ptr &lt;- queue_len &lt;- 1L
@@ -1967,16 +1969,17 @@ This path reaches the goal in <code><em>31</em></code> steps, the fewest possibl
     queue_ptr &lt;- queue_ptr + 1L
     pos &lt;- node[, 1:2, drop = FALSE]
     cur_lev &lt;- map[pos]
-    if (all(pos == dest)) {
+    if (anyDuplicated(rbind(dest, pos))) {
       return(node[, 3L])  
-    }
-    if (node[, 3L] &gt;= prune) {
-      return(Inf)
     }
     nbs &lt;- t(t(dirs) + c(pos))
     nbs &lt;- nbs[nbs[, 1L] &gt;= 1L &amp; nbs[, 1L] &lt;= nr &amp;
                  nbs[, 2L] &gt;= 1L &amp; nbs[, 2L] &lt;= nc, , drop = FALSE]
-    valid_nbs &lt;- nbs[map[nbs] &lt;= cur_lev + 1L &amp; !visited[nbs], , drop = FALSE]
+    if (uphill) {
+      valid_nbs &lt;- nbs[map[nbs] &lt;= cur_lev + 1L &amp; !visited[nbs], , drop = FALSE]
+    } else {
+      valid_nbs &lt;- nbs[map[nbs] &gt;= cur_lev - 1L &amp; !visited[nbs], , drop = FALSE]
+    }
     n_nbs &lt;- nrow(valid_nbs)
     if (n_nbs &gt; 0L) {
       visited[valid_nbs] &lt;- TRUE
@@ -2033,19 +2036,12 @@ This path reaches the goal in only <code><em>29</em></code> steps, the fewest po
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
-<p>We apply the BFS to all possible starting points and find the shortest. To save some time
-we use a pruning factor to skip explorations which are longer than the currently best
-solution.</p>
-<p><em>N.B.</em> Yet a faster algorithm would be to walk backwards from the destination and
-continue walking until we reached all <code>a</code> positions.</p>
+<p>We apply the BFS from the destination field as start and set all <code>a</code> fields as potential
+destinations. As soon as we reach the first field we found the shortest path due to the
+nature of the BFS.</p>
 <pre class="r"><code>find_most_scenic_path &lt;- function(map) {
   starts &lt;- which(map == 1L, arr.ind = TRUE)
-  min_dist &lt;- 504L
-  for (i in seq_len(nrow(starts))) {
-    dist &lt;- find_shortest_path(map, starts[i, , drop = FALSE], min_dist)
-    min_dist &lt;- min(dist, min_dist)
-  }
-  min_dist
+  find_shortest_path(puzzle_data, attr(puzzle_data, &quot;dest&quot;), starts, FALSE)
 }
 
 find_most_scenic_path(puzzle_data)</code></pre>
