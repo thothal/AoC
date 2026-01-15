@@ -1,0 +1,222 @@
+---
+params:
+   task_nr: 11
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(glue)
+library(bit64)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  parse_monkey <- function(monkey_block) {
+    items <- str_remove_all(monkey_block[2L], "Starting items: |\\s+") %>% 
+      str_split(",") %>% 
+      unlist() %>% 
+      as.integer()
+    fn_boilerplate <- paste("function(old) {{",
+                            "   {code}",
+                            "   return (new)",
+                            "}}", sep = "\n")
+    code <- str_remove(monkey_block[3L], "\\s*Operation: ")
+    op <- glue(fn_boilerplate) %>% 
+      parse(text = .) %>% 
+      eval()
+    args <- str_extract_all(monkey_block[4:6], "\\d+") %>% 
+      unlist() %>% 
+      as.integer()
+    fn_boilerplate <- paste(
+      "function(wl) {{",
+      "   if_else(wl %% {args[[1L]]} == 0L, {args[[2L]]}, {args[[3L]]})",
+      "}}", sep = "\n")
+    test <- glue(fn_boilerplate) %>% 
+      parse(text = .) %>% 
+      eval()
+    list(
+      items = items,
+      op = op,
+      test = test,
+      mod = args[1L]
+    )
+  }
+  monkey_markers <- str_which(text_block, "Monkey")
+  map(monkey_markers, ~ parse_monkey(text_block[.x:(.x + 5L)]))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The first part is rather straight forward, pass the items as indicated and count how often
+a monkey inspects an element to find the largest numbers. We enlarge the item vector and
+assign rather than copy in an attempt to be reasonable fast.
+
+
+```{r get-solution-1}
+play_keep_away <- function(monkeys, rounds, relief = function(x) floor(x / 3)) {
+  nr_items <- map_int(monkeys, ~ length(.x$items)) %>% 
+    sum()
+  for (m in seq_along(monkeys)) {
+    ## add required fields and enlarge item vectors to avoid copying
+    k <- length(monkeys[[m]]$items)
+    monkeys[[m]]$nr_inspections <- as.integer64(0L)
+    monkeys[[m]]$nr_items <- k
+    monkeys[[m]]$items <- c(monkeys[[m]]$items, rep(NA_integer_, nr_items - k))
+  }
+  for (rnd in seq_len(rounds)) {
+    for (m in seq_along(monkeys)) {
+      monkey <- monkeys[[m]]
+      if (monkey$nr_items == 0L) {
+        next
+      }
+      
+      items <- relief(monkey$op(monkey$items[seq_len(monkey$nr_items)]))
+      targets <- monkey$test(items)
+      for (nr in unique(targets)) {
+        mv <- items[targets == nr]
+        k <- length(mv)
+        nr <- as.integer(nr) + 1L
+        cur <- monkeys[[nr]]$nr_items
+        monkeys[[nr]]$items[(cur + 1L):(cur + k)] <- mv
+        monkeys[[nr]]$nr_items <- cur + k
+      }
+      monkeys[[m]]$items[] <- NA_integer_
+      monkeys[[m]]$nr_items <- 0L
+      monkeys[[m]]$nr_inspections <- monkeys[[m]]$nr_inspections + length(items)
+    }
+  }
+  map(monkeys, "nr_inspections") %>% 
+    do.call(c, .) %>% 
+    sort(decreasing = TRUE) %>% 
+    extract(1:2) %>% 
+    prod()
+}
+
+play_keep_away(puzzle_data, 20L)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We cannot use the same algorithm because the worry level would explode. However, we can 
+use a relief function which forms the LCM from all modulo operands, and uses this as a new
+modulo operator for a global relief function. As all operands are prime numbers, we do not
+lose any information by restricting the worry level to be in this range.
+
+```{r get-solution-2}
+lcm <- map_int(puzzle_data, "mod") %>% 
+  prod()
+play_keep_away(puzzle_data, 10000, \(x) x %% lcm)
+```
