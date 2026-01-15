@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 12
+   task_nr: 13
    year: 2022
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -93,18 +93,12 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       extract2(1L) %>% 
       keep(nzchar)
   }
-  res <- text_block %>% 
-    str_split("") %>% 
-    do.call(rbind, .)
-  start <- which(res == "S", arr.ind = TRUE)
-  end <- which(res == "E", arr.ind = TRUE)
-  res[start] <- "a"
-  res[end] <- "z"
-  map <- match(res, letters)
-  dim(map) <- dim(res)
-  attr(map, "start") <- start
-  attr(map, "dest") <- end
-  map
+  text_block <- text_block[vapply(text_block, nzchar, logical(1L))]
+  nested <- text_block %>% 
+    str_replace_all("[\\[\\]]",  \(r) if_else(r == "[", "list(", ")"))
+  map((seq_len(length(nested) / 2L) - 1L) * 2L + 1L, 
+      ~ list(left = eval(parse(text = nested[[.x]])),
+             right = eval(parse(text = nested[[.x + 1L]]))))
 }
 
 puzzle_data <- local({
@@ -130,54 +124,42 @@ cat(puzzle[[1]])
 
 ### Solution
 
-This is a simple application for the Breadth-First-Search algorithm.
-
+We write a recursive function, which compares the elements. If both elements are numbers,
+we can compare them directly. If one the elements is a list and the other is a number, we
+need to embed it into a list. Then, we iterate through the list (unsing the smaller size 
+as upper limit for the loop) and exit early if we have a clear decision. If all
+comparisons are undefined (equal elements), we use the length of the list as tie breaker.
 
 ```{r get-solution-1}
-find_shortest_path <- function(map, 
-                               start = attr(map, "start"), 
-                               dest =  attr(map, "dest"),
-                               uphill = TRUE) {
-  visited <- array(FALSE, dim(map))
-  queue <- matrix(NA_integer_, length(map), 3L)
-  queue_ptr <- queue_len <- 1L
-  queue[queue_ptr, ] <- c(start, 0L)
-  visited[start] <- TRUE
-  dirs <- rbind(
-    "^" = c(-1L, 0L),
-    ">" = c(0L, 1L),
-    "v" = c(1L, 0L),
-    "<" = c(0L, -1L)
-  )
-  nr <- nrow(map)
-  nc <- ncol(map)
-  while (queue_ptr <= queue_len) {
-    node <- queue[queue_ptr, , drop = FALSE]
-    queue_ptr <- queue_ptr + 1L
-    pos <- node[, 1:2, drop = FALSE]
-    cur_lev <- map[pos]
-    if (anyDuplicated(rbind(dest, pos))) {
-      return(node[, 3L])  
-    }
-    nbs <- t(t(dirs) + c(pos))
-    nbs <- nbs[nbs[, 1L] >= 1L & nbs[, 1L] <= nr &
-                 nbs[, 2L] >= 1L & nbs[, 2L] <= nc, , drop = FALSE]
-    if (uphill) {
-      valid_nbs <- nbs[map[nbs] <= cur_lev + 1L & !visited[nbs], , drop = FALSE]
-    } else {
-      valid_nbs <- nbs[map[nbs] >= cur_lev - 1L & !visited[nbs], , drop = FALSE]
-    }
-    n_nbs <- nrow(valid_nbs)
-    if (n_nbs > 0L) {
-      visited[valid_nbs] <- TRUE
-      queue[(queue_len + 1L):(queue_len + n_nbs), ] <- cbind(valid_nbs, node[3L] + 1L)
-      queue_len <- queue_len + n_nbs
+compare_pair <- function(left, right) {
+  is_number_left <- !is.list(left)
+  is_number_right <- !is.list(right)
+  if (is_number_left && is_number_right) {
+    return(sign(right - left))
+  }
+  if (is_number_left && !is_number_right) {
+    left <- list(left)
+  } else if (!is_number_left && is_number_right) {
+    right <- list(right)
+  }
+  
+  for (i in seq_len(min(length(left), length(right)))) {
+    res <- Recall(left[[i]], right[[i]])
+    if (res != 0L) {
+      return(res)
     }
   }
-  Inf
+  ## no decision yet => make comparison based on length of left & right
+  return(sign(length(right) - length(left)))
 }
 
-find_shortest_path(puzzle_data)
+get_correct_indices <- function(pairs) {
+  idx <- map_int(pairs, ~ do.call(compare_pair, .x)) %>% 
+    equals(1L)
+  sum(which(idx))
+}
+
+get_correct_indices(puzzle_data)
 ```
 
 ## Part 2
@@ -190,15 +172,55 @@ cat(puzzle[[2]])
 
 ### Solution
 
-We apply the BFS from the destination field as start and set all `a` fields as potential 
-destinations. As soon as we reach the first field we found the shortest path due to the
-nature of the BFS.
+For the second part, we implement a merge sort based on the comparison function defined
+before. and look for the indices of the marker elements.
 
 ```{r get-solution-2}
-find_most_scenic_path <- function(map) {
-  starts <- which(map == 1L, arr.ind = TRUE)
-  find_shortest_path(puzzle_data, attr(puzzle_data, "dest"), starts, FALSE)
+merge_sort <- function(x) {
+  n <- length(x)
+  if (n <= 1L) {
+    return(x)
+  }
+
+  mid <- n %/% 2
+  left  <- merge_sort(x[1:mid])
+  right <- merge_sort(x[(mid + 1):n])
+  merge(left, right)
 }
 
-find_most_scenic_path(puzzle_data)
+merge <- function(left, right) {
+  res <- list()
+  i <- j <- 1L
+
+  while (i <= length(left) && j <= length(right)) {
+    if (compare_pair(left[[i]], right[[j]]) == 1L) {
+      res[[length(res) + 1L]] <- left[[i]]
+      i <- i + 1L
+    } else {
+      res[[length(res) + 1L]] <- right[[j]]
+      j <- j + 1L
+    }
+  }
+
+  if (i <= length(left)) {
+    res <- c(res, left[i:length(left)])
+  }
+  if (j <= length(right)) {
+    res <- c(res, right[j:length(right)])
+  }
+  res
+}
+
+get_decoder_value <- function(elements) {
+  m1 <- list(list(2))
+  m2 <- list(list(6))
+  elements <- unlist(elements, FALSE, FALSE)
+  sorted <- merge_sort(c(list(m1), list(m2), elements))
+  pos1 <- which(vapply(sorted, identical, logical(1L), m1))
+  pos2 <- which(vapply(sorted, identical, logical(1L), m2))
+  pos1 * pos2
+}
+
+get_decoder_value(puzzle_data)
+
 ```
