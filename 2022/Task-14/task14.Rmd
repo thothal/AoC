@@ -1,0 +1,264 @@
+---
+params:
+   task_nr: 14
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split(" -> ") %>% 
+    map(function(coords) {
+      res <- str_extract_all(coords, "\\d+") %>% 
+          do.call(rbind, .)
+      storage.mode(res) <- "integer"
+      res
+    })
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+First we create a map of the cave and then we simulate the sand dropping. At each step
+a sand grain tries to fall `SOUTH` if this is free, followed by `SOUTH WEST` and 
+`SOUTH EAST`. If neither of these directions is empty it come to rest and in this
+moment we place it on the map. We continue this process until the first grain of sand
+reaches the abyss line.
+
+```{r get-solution-1}
+print.cave <- function(x, add_source = TRUE, ...) {
+  cave <- x
+  if (add_source) {
+    src <- matrix(".", 1L, ncol(x))
+    src[1, attr(x, "start")[2]] <- "+"
+    cave <- rbind(src, cave)
+  }
+  apply(cave, 1L, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat("\n")
+  invisible(x)
+}
+
+create_cave <- function(scan) {
+  dims <- do.call(rbind, scan) %>% 
+    apply(2L, range, simplify = FALSE)
+  offset_x <- dims[[1]][1]
+  ## +3L to add a column to either side
+  cave <- matrix(".", dims[[2L]][2L] + 1L, dims[[1L]][2L] - offset_x + 3L)
+  for (coord in scan) {
+    for (j in seq_len(nrow(coord) - 1L)) {
+      start <- coord[j, ]
+      end <- coord[j + 1L, ]
+      idx <- expand.grid(row = start[2L]:end[2L],
+                         col = start[1L]:end[1L] - offset_x + 2L) %>% 
+        as.matrix()
+      cave[idx] <- "#"
+    }
+  }
+  structure(cave, 
+            start = cbind(0L, 500L - offset_x + 2L),
+            abyss_line = nrow(cave) - 1L,
+            class = "cave")
+}
+
+drop_sand <- function(cave, stop_condition = c("abyss", "source")) {
+  stop_condition <- match.arg(stop_condition)
+  abyss <- attr(cave, "abyss_line")
+  done <- FALSE
+  dirs <- rbind(
+    S  = c(1L, 0L),
+    SW = c(1L, -1L),
+    SE = c(1L, 1L)
+  )
+  nr <- nrow(cave)
+  nc <- ncol(cave)
+  at_rest <- TRUE
+  drops <- 0L
+  source <- attr(cave, "start")
+  while (!done) {
+    if (at_rest) {
+      pos <- source
+      at_rest <- FALSE
+    }
+    nbs <- t(t(dirs) + c(pos))
+    nbs <- nbs[nbs[, 1L] >= 1L & nbs[, 1L] <= nr &
+        nbs[, 2L] >= 1L & nbs[, 2L] <= nc, , drop = FALSE]
+    nbs <- nbs[cave[nbs] == ".", , drop = FALSE]
+    nd <- nrow(nbs)
+    if (nd == 0L) {
+      drops <- drops + 1L
+      cave[pos] <- "o"
+      if (stop_condition == "source") {
+        done <- pos[1L] == 1L
+      }
+      at_rest <- TRUE
+    } else {
+      pos <- nbs[1L, , drop = FALSE]
+      if (stop_condition == "abyss") {
+        done <- pos[, 1L] == abyss
+      }
+    }
+  }
+  drops
+}
+
+cave <- create_cave(puzzle_data)
+drop_sand(cave)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we have to add a solid line below the current abyss and change the 
+stop condition to stop once we fill the spot below the source. Furthermore, we have to 
+add new columns to the left and the right of the current map to allow for enough space
+for piling up the sand.
+
+```{r get-solution-2, cache = TRUE}
+ammend_cave <- function(cave) {
+  nr <- nrow(cave)
+  nc <- ncol(cave)
+  start_col <- attr(cave, "start")[2L]
+  new_cave <- rbind(
+    rep(".", nc),
+    cave, 
+    rep("#", nc))
+  first_rock <- apply(cave, 1L, function(row) {
+    idx <- which(row == "#")
+    if (length(idx) > 0) {
+      idx <- min(idx)
+    } else {
+      NA_integer_
+    }
+  })
+  n_left_cols <- max(nr:0 + 2L - c(start_col, first_rock), na.rm = TRUE)
+  n_right_cols <- 2L *  start_col - 1L + n_left_cols - nc
+  left_cols <- matrix(".", nr + 2L, n_left_cols)
+  right_cols <- matrix(".", nr + 2L, n_right_cols)
+  right_cols[nr + 2L, ] <- left_cols[nr + 2L, ] <- "#"
+  
+  new_cave <- cbind(left_cols, new_cave, right_cols)
+  props <- attributes(cave)
+  props$dim <- dim(new_cave)
+  props$start <- props$start + cbind(0L, n_left_cols)
+  attributes(new_cave) <- props
+  new_cave
+}
+
+cave_solid <- ammend_cave(cave)
+drop_sand(cave_solid, "source")
+```
