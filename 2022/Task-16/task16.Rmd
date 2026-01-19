@@ -1,0 +1,358 @@
+---
+params:
+   task_nr: 16
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_extract_all("[A-Z]{2}|\\d+") %>% 
+    map(~ list(edges = tibble(from = .x[[1L]], to = tail(.x, -2L)),
+               vertices = tibble(id = .x[[1L]], valve = as.integer(.x[[2L]]))))
+  edges <- map(res, "edges") %>% 
+         list_rbind() %>% 
+    mutate(tmp = pmax(from, to),
+           from = pmin(from, to),
+           to = tmp,
+           tmp = NULL) %>% 
+    distinct()
+  
+  vertices <- map(res, "vertices") %>% 
+         list_rbind()
+  
+  list(edges = edges,
+       vertices = vertices)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+First we construct a graph from the tunnel layout.
+
+```{r get-solution-1}
+create_graph <- function(vertices, edges) {
+  G <- graph_from_data_frame(edges, FALSE, vertices)
+  V(G)$shape <- if_else(V(G)$name == "AA", "square", "circle")
+  V(G)$color <- case_when(
+    V(G)$name == "AA" ~"forestgreen",
+    V(G)$valve == 0L ~ "firebrick", 
+    TRUE ~ "beige")
+  V(G)$size <- 10
+  V(G)$label.color <- if_else(V(G)$valve == 0L | V(G)$name == "AA", "white", "black")
+  G
+}
+
+
+
+contract_graph <- function(G, start = "AA") {
+  keep <- V(G)[V(G)$valve != 0 | V(G)$name == start]
+  keep_names <- names(keep)
+  d <- distances(
+    G,
+    v = keep,
+    to = keep,
+    mode = "out"
+  )
+  
+  edges <- c()
+  weights <- c()
+  
+  for (i in seq_along(keep_names)) {
+    for (j in seq_along(keep_names)) {
+      if (i != j && is.finite(d[i, j])) {
+        edges <- c(edges, keep_names[i], keep_names[j])
+        weights <- c(weights, d[i, j])
+      }
+    }
+  }
+  
+  # neuen Graphen bauen
+  G2 <- make_graph(
+    edges,
+    directed = FALSE
+  )
+  
+  E(G2)$weight <- weights
+  V(G2)$valve <- V(G)$valve[match(V(G2)$name, V(G)$name)]
+  V(G2)$shape <- V(G)$shape[match(V(G2)$name, V(G)$name)]
+  V(G2)$color <- V(G)$color[match(V(G2)$name, V(G)$name)]
+  V(G2)$label.color <-  V(G)$label.color[match(V(G2)$name, V(G)$name)]
+  V(G2)$size <- 10
+  V(G2)$type <- "node"
+  V(G2)[V(G2)$name == start]$type <- "start"
+  G2
+}
+
+popcount <- function(n) {
+  bits <- as.integer(intToBits(n))
+  sum(bits)
+}
+
+find_valve_strategy <- function(vertices, edges, budget) {
+  G <- create_graph(puzzle_data$vertices, puzzle_data$edges) %>% 
+    contract_graph()
+  start <- V(G)[V(G)$type == "start"]$name
+  N <- vcount(G) - 1L
+  B0 <- budget
+  dist <- distances(G)
+  w <- V(G)[V(G)$name != start]$valve %>% 
+    set_names(V(G)[V(G)$name != start]$name)
+  dp <- vector("list", 2 ^ N)
+  cost <- vector("list", 2 ^ N)
+  el <- 0L %>% 
+    set_names(start)
+  dp[[1L]] <- el
+  cost[[1L]] <- el
+  nodes <- V(G)$name %>% 
+    setdiff(start)
+  for (mask in 0:(2L ^ N - 1L)) {
+    ## iterate over all possible selections, mask is a bit mask if bit i is 1
+    ## then node nodes[i] is visited in this iteration
+    idx <- mask + 1L
+    if (is.null(dp[[idx]])) {
+      ## no state yet
+      next
+    }
+    
+    n_visited <- popcount(mask) ## number of selected nodes
+    
+    for (v in names(dp[[idx]])) {
+      for (u in 1:N) {
+        nb_mask <- bitwShiftL(1L, u - 1L)
+        if (bitwAnd(mask, nb_mask) != 0L) {
+          ## neighbor is already visited
+          next
+        }
+        new_mask <- bitwOr(mask, nb_mask)
+        new_idx <- new_mask + 1L
+        new_cost <- cost[[idx]][v] + dist[v, nodes[u]]
+        new_k <- n_visited + 1L
+        B_remain <- B0 - new_cost - new_k
+        
+        if (B_remain < 0L) {
+          next
+        }
+        #print(list(mask = mask, v = v, u = u))
+        #if (mask == 2 && v == "GQ" && u == 1) browser()
+        new_gain <- dp[[idx]][v] + B_remain * w[nodes[u]]
+        
+        if (is.null(dp[[new_idx]]) || coalesce(dp[[new_idx]][nodes[u]], 0L) < new_gain) {
+          dp[[new_idx]][nodes[u]] <- new_gain
+          cost[[new_idx]][nodes[u]] <- new_cost
+        }
+      }
+    }
+  }
+   max(unlist(dp))
+}
+
+find_valve_strategy(puzzle_data$vertices, puzzle_data$edges, 30L) 
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we observe that around each sender there is a diamond shaped area 
+where there is no beacon. Let $r$ be the radius of such a diamond (i.e. the  
+manhatten distance from beacon to sender), then all points on the border satisfy the
+equation
+$$
+|x-s_x| + |y-s_y| = r
+$$
+A free spot must be *outside* this region. As there is only *one* free spot, it
+must be on the line with radius $r + 1$, thus we need to solve:
+$$
+|x-s_x| + |y-s_y| = r + 1
+$$
+By eliminating the absolute values, we can rewrite the condition as the following four 
+equations:
+$$
+\begin{align}
+x - s_x + y - s_y &= r +1\\
+x+ y &= \underbrace{(s_x + s_y) + (r+1)}_{=:A^+}\\
+x - s_x - (y - s_y) &= r +1\\
+x- y &= \underbrace{(s_x - s_y) + (r+1)}_{=:B^+}\\
+-(x - s_x) + y - s_y &= r +1\\
+x- y &= \underbrace{(s_x - s_y) - (r+1)}_{=:B^-}\\
+-(x - s_x) - (y - s_y) &= r +1\\
+x+ y &= \underbrace{(s_x + s_y) - (r+1)}_{=:A^-}
+\end{align}
+$$
+That is, we calculate $A^+$, $A^-$, $B^+$ and $B^-$ for each sensor and intersect each A
+line with each B line determined by these constants for each sensor pair $S_i$ and $S_j$ 
+with $i\neq j$. If we find an integer point that lies outside the range of all sensors, 
+we have found the solution.
+
+```{r get-solution-2}
+get_tuning_freqeuncy <- function(sensors, limit = c(0L, 4000000L)) {
+  sensors <- sensors %>% 
+    mutate(
+      x,
+      y,
+      r = abs(x - b_x) + abs(y - b_y) + 1L,
+      A0 = x + y + r,
+      A1 = x + y - r,
+      B0 = x - y + r,
+      B1 = x - y - r,
+      .keep = "none") %>% 
+    mutate(id = 1:n(), .before = 1L)
+  intersections <- inner_join(sensors, sensors, join_by(id < id)) %>% 
+    rowwise() %>% 
+    mutate(
+      A = list(c(A0.x, A1.x)),
+      B = list(c(B0.y, B1.y)),
+      id.x, 
+      id.y,
+      .keep = "none"
+    ) %>% 
+    mutate(AB = list(expand.grid(A = A, B = B)),
+           .keep = "unused") %>% 
+    unnest(AB)
+  
+  intersections <- intersections %>%
+    mutate(
+      x = (A + B) / 2,
+      y = (A - B) / 2
+    ) %>% 
+    filter(x == floor(x), y == floor(y)) %>% 
+    mutate(x = as.integer(x),
+           y = as.integer(y)) %>% 
+    filter(between(x, limit[1L], limit[2L]),
+           between(y, limit[1L], limit[2L]))
+  
+  is_covered <- function(x0, y0) {
+    sensors %>% 
+      mutate(dist = abs(x - x0) + abs(y - y0),
+             is_covered = dist <= r - 1L) %>% 
+      summarize(is_covered = any(is_covered)) %>% 
+      pull(is_covered)
+  }
+  
+  intersections %>% 
+    rowwise() %>% 
+    mutate(is_covered = is_covered(x, y)) %>% 
+    filter(!is_covered) %>% 
+    distinct(x, y) %>% 
+    summarize(tuning_freqeuncy = as.integer64(x) * 4000000L + as.integer64(y)) %>% 
+    pull(tuning_freqeuncy)
+}
+
+get_tuning_freqeuncy(puzzle_data)
+```
