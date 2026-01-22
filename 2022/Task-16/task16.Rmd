@@ -1,0 +1,405 @@
+---
+params:
+   task_nr: 16
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  res <- text_block %>% 
+    str_extract_all("[A-Z]{2}|\\d+") %>% 
+    map(~ list(edges = tibble(from = .x[[1L]], to = tail(.x, -2L)),
+               vertices = tibble(id = .x[[1L]], valve = as.integer(.x[[2L]]))))
+  edges <- map(res, "edges") %>% 
+         list_rbind() %>% 
+    mutate(tmp = pmax(from, to),
+           from = pmin(from, to),
+           to = tmp,
+           tmp = NULL) %>% 
+    distinct()
+  
+  vertices <- map(res, "vertices") %>% 
+         list_rbind()
+  
+  list(edges = edges,
+       vertices = vertices)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+First we construct a graph `G` from the tunnel layout. We see, that there are valves, which
+do not release any pressure. We construct a new complete graph `G2` based on `G`, where
+we remove valves with pressure release of zero and add a weight to the edges corresponding
+to the path length between the nodes.
+
+Thus, we have a complete graph as input, where the edges correspond to the time needed to 
+move from one node to the other. Then, we can use dynamic programming to find an optimal 
+route. The idea is the following:
+
+1. Let $N$ denote the number of non starting nodes. We then keep track of the currrent 
+state in list `dp` of length $2 ^ N$. Each entry corresponds to the subset of visited 
+nodes, where we use a bitmask for easier indexing. For instance, assume that $N=4$ then
+$9 = 1001_2$ would indicate that we visited the first and the fourth node, but not the
+second nor the third.
+1. Each state is represented by a named vector of reached nodes (the names) with their
+current gain (the value). We set the initial state to `c(starting_node = 0)` indicating
+that we just reached the start and have no gain yet. Likewise we also store the costs
+to reach each node in list `costs`.
+1. We loop over all the states and update them in the following way:
+   1. If we did not reach the state yet, skip it.
+   1. If we reached the state in a previous iteration, construct all possible extensions.
+   That is take all nodes visited in the current state, look at all nodes not visited yet
+   for the given state. As we are using bitmasks, this can be cone by looking at the `ith`
+   bit: if it is set, this node was already visited and we skip, otherwise it is a valid
+   candidate.
+   1. For each valid neighbor calculate the costs to reach it. If the costs do not exceed
+   the budget, calculate the new gain. The gain is the pressure release multiplied by 
+   the remaining budget (which is in fact the remaining time) plus the gain reached so 
+   far (as stored in `dp`).
+   1. If the new gain is higher than the previously stored gain, update the gain in `dp`
+   accordingly.
+1. The result is the maximum gain.
+
+```{r get-solution-1, cache = TRUE}
+create_graph <- function(vertices, edges) {
+  G <- graph_from_data_frame(edges, FALSE, vertices)
+  V(G)$shape <- if_else(V(G)$name == "AA", "square", "circle")
+  V(G)$color <- case_when(
+    V(G)$name == "AA" ~"forestgreen",
+    V(G)$valve == 0L ~ "firebrick", 
+    TRUE ~ "beige")
+  V(G)$size <- 10
+  V(G)$label.color <- if_else(V(G)$valve == 0L | V(G)$name == "AA", "white", "black")
+  G
+}
+
+contract_graph <- function(G, start = "AA") {
+  keep <- V(G)[V(G)$valve != 0 | V(G)$name == start]
+  keep_names <- names(keep)
+  d <- distances(
+    G,
+    v = keep,
+    to = keep,
+    mode = "out"
+  )
+  
+  edges <- c()
+  weights <- c()
+  n <- length(keep_names)
+  for (i in 2:n) {
+    for (j in 1:i) {
+      if (i != j && is.finite(d[i, j])) {
+        edges <- c(edges, keep_names[i], keep_names[j])
+        weights <- c(weights, d[i, j])
+      }
+    }
+  }
+  G2 <- make_graph(
+    edges,
+    directed = FALSE
+  )
+  
+  E(G2)$weight <- weights
+  V(G2)$valve <- V(G)$valve[match(V(G2)$name, V(G)$name)]
+  V(G2)$shape <- V(G)$shape[match(V(G2)$name, V(G)$name)]
+  V(G2)$color <- V(G)$color[match(V(G2)$name, V(G)$name)]
+  V(G2)$label.color <-  V(G)$label.color[match(V(G2)$name, V(G)$name)]
+  V(G2)$size <- 10
+  V(G2)$type <- "node"
+  V(G2)[V(G2)$name == start]$type <- "start"
+  G2
+}
+
+popcount <- function(n) {
+  bits <- as.integer(intToBits(n))
+  sum(bits)
+}
+
+find_valve_strategy <- function(vertices, edges, budget) {
+  G <- create_graph(puzzle_data$vertices, puzzle_data$edges) %>% 
+    contract_graph()
+  start <- V(G)[V(G)$type == "start"]$name
+  nodes <- setdiff(V(G)$name, start)
+  w <- V(G)$valve[match(nodes, V(G)$name)]
+  names(w) <- nodes
+  dist <- distances(G)
+  
+  N <- length(nodes)
+  B0 <- budget
+
+  dp <- vector("list", 2 ^ N)
+  cost <- vector("list", 2 ^ N)
+  el <- 0L %>% 
+    set_names(start)
+  dp[[1L]] <- el
+  cost[[1L]] <- el
+  
+  for (mask in 0:(2L ^ N - 1L)) {
+    ## iterate over all possible selections, mask is a bit mask if bit i is 1
+    ## then node nodes[i] is visited in this iteration
+    idx <- mask + 1L
+    if (is.null(dp[[idx]])) {
+      ## no state yet
+      next
+    }
+    
+    n_visited <- popcount(mask) ## number of selected nodes
+    
+    for (v in names(dp[[idx]])) {
+      for (u in 1:N) {
+        nb_mask <- bitwShiftL(1L, u - 1L)
+        if (bitwAnd(mask, nb_mask) != 0L) {
+          ## neighbor is already visited
+          next
+        }
+        new_mask <- bitwOr(mask, nb_mask)
+        new_idx <- new_mask + 1L
+        new_cost <- cost[[idx]][v] + dist[v, nodes[u]]
+        new_k <- n_visited + 1L
+        B_remain <- B0 - new_cost - new_k
+        
+        if (B_remain < 0L) {
+          next
+        }
+        new_gain <- dp[[idx]][v] + B_remain * w[nodes[u]]
+        
+        if (is.null(dp[[new_idx]]) || coalesce(dp[[new_idx]][nodes[u]], 0L) < new_gain) {
+          dp[[new_idx]][nodes[u]] <- new_gain
+          cost[[new_idx]][nodes[u]] <- new_cost
+        }
+      }
+    }
+  }
+  max(unlist(dp))
+}
+find_valve_strategy(puzzle_data$vertices, puzzle_data$edges, 30L) 
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we keep the same principle as for part 1 with some additions:
+
+1. For both players opening valves we keep an extra `cost` list.
+1. Instead of naming the gain / costs with the node names, we name it with a compound key,
+consisting of the node of the player and the elephant separated by `|` respectively. For
+instance the cost with name `AT|ST` means that the player is currently at node `AT` while
+the elephant is at node `ST`.
+1. At each iteration we first iterate over all nodes for the player, updating all costs 
+accordingly and then do the same for the elephant.
+1. Eventually, we still return the maximum gain over all states.
+
+```{r get-solution-2, cache = TRUE}
+find_valve_strategy_elephant <- function(vertices, edges, budget) {
+  G <- create_graph(vertices, edges) %>% 
+    contract_graph()
+  start <- V(G)[V(G)$type == "start"]$name
+  
+  nodes <- setdiff(V(G)$name, start)  
+  N <- length(nodes)
+  
+  w <- V(G)$valve[match(nodes, V(G)$name)]
+  names(w) <- nodes
+  
+  dist <- distances(G)
+  
+  dp <- vector("list", 2L ^ N)
+  cost1 <- vector("list", 2L ^ N)
+  cost2 <- vector("list", 2L ^ N)
+  
+  key0 <- paste(start, start, sep = "|")
+  
+  dp[[1L]] <- set_names(0L, key0)
+  cost1[[1L]] <- set_names(0L, key0)
+  cost2[[1L]] <- set_names(0L, key0)
+  
+  for (mask in 0:(2 ^ N - 1L)) {
+    idx <- mask + 1L
+    if (is.null(dp[[idx]])) {
+      next
+    }
+    
+    visited_count <- popcount(mask)
+    
+    for (key in names(dp[[idx]])) {
+      
+      parts <- str_split(key, "\\|")[[1L]]
+      pos1 <- parts[1L]
+      pos2 <- parts[2L]
+      
+      gain_prev <- dp[[idx]][key]
+      t1_prev <- cost1[[idx]][key]
+      t2_prev <- cost2[[idx]][key]
+      
+      for (u_idx in 1:N) {
+        nb_mask <- bitwShiftL(1L, u_idx - 1L)
+        if (bitwAnd(mask, nb_mask) != 0L) {
+          next
+        }
+        
+        u <- nodes[u_idx]
+        
+        # --- Option A: I am opening valve u
+        t1_new <- t1_prev + dist[pos1, u] + 1L
+        if (t1_new <= budget) {
+          
+          new_mask <- bitwOr(mask, nb_mask)
+          new_idx <- new_mask + 1L
+          
+          rem1 <- budget - t1_new
+          gain1 <- gain_prev + rem1 * w[u]
+          
+          new_key <- paste(u, pos2, sep = "|")
+          
+          if (is.null(dp[[new_idx]]) ||
+              is.na(dp[[new_idx]][new_key]) ||
+              dp[[new_idx]][new_key] < gain1) {
+            dp[[new_idx]][new_key] <- gain1
+            cost1[[new_idx]][new_key] <- t1_new
+            cost2[[new_idx]][new_key] <- t2_prev
+          }
+        }
+        
+        # --- Option B: elephant is opening valve u
+        t2_new <- t2_prev + dist[pos2, u] + 1L
+        if (t2_new <= budget) {
+          new_mask <- bitwOr(mask, nb_mask)
+          new_idx <- new_mask + 1L
+          
+          rem2 <- budget - t2_new
+          gain2 <- gain_prev + rem2 * w[u]
+          
+          new_key <- paste(pos1, u, sep = "|")
+          
+          if (is.null(dp[[new_idx]]) ||
+              is.na(dp[[new_idx]][new_key]) ||
+              dp[[new_idx]][new_key] < gain2) {
+            dp[[new_idx]][new_key] <- gain2
+            cost1[[new_idx]][new_key] <- t1_prev
+            cost2[[new_idx]][new_key] <- t2_new
+          }
+        }
+      }
+    }
+  }
+  max(unlist(dp))
+}
+
+find_valve_strategy_elephant(puzzle_data$vertices, puzzle_data$edges, 26L) 
+```
