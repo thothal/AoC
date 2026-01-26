@@ -1,0 +1,363 @@
+---
+params:
+   task_nr: 17
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(bit64)
+library(digest)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("") %>% 
+    extract2(1L)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+For the first part we use a direct simulation. An upper bound for the height of the cave
+is sum of all rock heights multiplied by the number of rounds and divided by 5. This would 
+be the largest required cave size, if all pieces land on top of each other. 
+
+Then we define rocks by logical matrices which we want to place in the cave (yet another
+logical matrix). To determine the starting point we just have to get the smallest row 
+index where there is at least one piece. We use a two-column index matrix with the 
+positions of the current rock in the cave (given its starting point determined by the 
+height calculated earlier). We move this index matrix horizontally and vertically and 
+check collisions by subsetting the cave with this index matrix and looking for rocks both
+in the cave at the current rock. Once the rock come to rest, we place it in the cave using 
+logical 
+
+
+```{r get-solution-1}
+print.cave <- function(x, rock_idx = NULL, rock = NULL, ...) {
+  cave <- if_else(c(x), "#", ".")
+  dim(cave) <- dim(x)
+  if (!is.null(rock_idx)) {
+    rock_idx <- rock_idx[c(rock), , drop = FALSE]
+    cave[rock_idx] <- "@"  
+  }
+  bottom <- rep(c("+", "-", "+"), c(1L, ncol(x), 1L))
+  cave <- cbind("|", cave, "|") %>% 
+    rbind(bottom)
+  apply(cave, 1L, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    cat("\n")
+  invisible(x)
+}
+
+simulate_rock_tetris <- function(jet, nr_rounds) {
+  rocks <- list(
+    matrix(TRUE, 1L, 4L),
+    matrix(c(FALSE, TRUE, FALSE, TRUE, TRUE, TRUE, FALSE, TRUE, FALSE), 3L, 3L),
+    matrix(c(FALSE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE), 3L, 3L),
+    matrix(TRUE, 4L, 1L),
+    matrix(TRUE, 2L, 2L)
+  )
+  ## each round we drop a rock of height 1 - 4
+  ## each 5 rounds we have dropped all rocks with a total of 13 height
+  ## that is a conservative estimation of the maximum height is 
+  ## ceiling(13 * nr_rounds / 5) + 3L 
+  bottom <- ceiling(13L * nr_rounds / 5L) + 3L
+  cave <- matrix(FALSE, bottom, 7L)
+  class(cave) <- "cave"
+  dirs <- rbind(
+    ">" = c(0L, 1L),
+    "<" = c(0L, -1L)
+  )
+  cur_rock <- 1L
+  get_idx <- function(pos, rock) {
+    r_idx <- row(rock) - nrow(rock)
+    c_idx <- col(rock) - 1L
+    cbind(pos[1L] + c(r_idx),
+          pos[2L] + c(c_idx))
+  }
+  jet_pos <- 1L
+  for (rnd in seq_len(nr_rounds)) {
+    rock <- rocks[[cur_rock]]
+    rows_n <- rowSums(cave)
+    if (all(rows_n == 0L)) {
+      height <- bottom
+    } else {
+      height <- which(rows_n > 0L) %>% 
+        min() %>% 
+        subtract(1L)
+    }
+    corner_pos <- cbind(height - 3L, 3L)
+    at_rest <- FALSE
+    while (!at_rest) {
+      ## 1. Move horizontally
+      cur_rock_pos <- get_idx(corner_pos, rock)
+      next_rock_pos <- sweep(cur_rock_pos, 2L, dirs[jet[jet_pos], , drop = FALSE], `+`)
+      if (all(next_rock_pos[, 2L] >= 1L & next_rock_pos[, 2L] <= ncol(cave))) {
+        ## rock is in bounds
+        if (!any(cave[next_rock_pos] & rock)) {
+          ## new position is free
+          cur_rock_pos <- next_rock_pos
+          corner_pos <- corner_pos + dirs[jet[jet_pos], , drop = FALSE]
+        }
+      }
+      ## 2. move vertically
+      next_rock_pos <- sweep(cur_rock_pos, 2L, cbind(1L, 0L), `+`)
+      at_rest <- TRUE
+      if (all(next_rock_pos[, 1L] <= nrow(cave))) {
+        ## rock is in bounds
+        if (!any(cave[next_rock_pos] & rock)) {
+          ## new position is free
+          cur_rock_pos <- next_rock_pos
+          corner_pos <- corner_pos + cbind(1L, 0L)
+          at_rest <- FALSE
+        }
+      }
+      jet_pos <- (jet_pos %% length(jet)) + 1L
+    }
+    cave[cur_rock_pos] <- cave[cur_rock_pos] | rock
+    cur_rock <- (cur_rock %% length(rocks)) + 1L
+  }
+  rows_n <- rowSums(cave)
+  last_row <- which(rows_n > 0L) %>% 
+        min()
+  bottom - last_row + 1L
+}
+
+simulate_rock_tetris(puzzle_data, 2022L)
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part brute-force is out-of question, so we need to find recurring patterns.
+At each iteration we look at the top 4 rows and store them together with the next rock and
+jet. If at any stage we get a state whihc we have seen before, i.e. same surface same next 
+rock and sam enext jet we can fast forward by calculating the cycle length and gain.
+
+```{r get-solution-2}
+calculate_height <- function(jet, nr_rounds) {
+  rocks <- list(
+    matrix(TRUE, 1L, 4L),
+    matrix(c(FALSE, TRUE, FALSE, TRUE, TRUE, TRUE, FALSE, TRUE, FALSE), 3L, 3L),
+    matrix(c(FALSE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE), 3L, 3L),
+    matrix(TRUE, 4L, 1L),
+    matrix(TRUE, 2L, 2L)
+  )
+  hash <- new.env(parent = emptyenv())
+  ## each round we drop a rock of height 1 - 4
+  ## each 5 rounds we have dropped all rocks with a total of 13 height
+  ## that is a conservative estimation of the maximum height is 
+  ## ceiling(13 * nr_rounds / 5) + 3L 
+  
+  bottom <- ceiling(13L * 10000L / 5L) + 3L
+  cave <- matrix(FALSE, bottom, 7L)
+  class(cave) <- "cave"
+  dirs <- rbind(
+    ">" = c(0L, 1L),
+    "<" = c(0L, -1L)
+  )
+  cur_rock <- 1L
+  get_idx <- function(pos, rock) {
+    r_idx <- row(rock) - nrow(rock)
+    c_idx <- col(rock) - 1L
+    cbind(pos[1L] + c(r_idx),
+          pos[2L] + c(c_idx))
+  }
+  jet_pos <- 1L
+  added_height <- 0L
+  rnd <- 1L
+  surface_size <- 4L
+  while (rnd <= nr_rounds) {
+    rock <- rocks[[cur_rock]]
+    rows_n <- rowSums(cave)
+    if (all(rows_n == 0L)) {
+      height <- bottom
+    } else {
+      height <- which(rows_n > 0L) %>% 
+        min() %>% 
+        subtract(1L)
+    }
+    corner_pos <- cbind(height - 3L, 3L)
+    at_rest <- FALSE
+    horizontal <- vertical <- 0L
+    while (!at_rest) {
+      ## 1. Move horizontally
+      cur_rock_pos <- get_idx(corner_pos, rock)
+      next_rock_pos <- sweep(cur_rock_pos, 2L, dirs[jet[jet_pos], , drop = FALSE], `+`)
+      if (all(next_rock_pos[, 2L] >= 1L & next_rock_pos[, 2L] <= ncol(cave))) {
+        ## rock is in bounds
+        if (!any(cave[next_rock_pos] & rock)) {
+          ## new position is free
+          cur_rock_pos <- next_rock_pos
+          corner_pos <- corner_pos + dirs[jet[jet_pos], , drop = FALSE]
+          horizontal <- horizontal + (jet[jet_pos] == ">")
+        }
+      }
+      ## 2. move vertically
+      next_rock_pos <- sweep(cur_rock_pos, 2L, cbind(1L, 0L), `+`)
+      at_rest <- TRUE
+      if (all(next_rock_pos[, 1L] <= nrow(cave))) {
+        ## rock is in bounds
+        if (!any(cave[next_rock_pos] & rock)) {
+          ## new position is free
+          cur_rock_pos <- next_rock_pos
+          corner_pos <- corner_pos + cbind(1L, 0L)
+          at_rest <- FALSE
+          vertical <- vertical + 1L 
+        }
+      }
+      jet_pos <- (jet_pos %% length(jet)) + 1L
+    }
+    cave[cur_rock_pos] <- cave[cur_rock_pos] | rock
+    rows_n <- rowSums(cave)
+    last_row <- which(rows_n > 0L) %>% 
+      min()
+    cur_rock <- (cur_rock %% length(rocks)) + 1L
+    rnd <- rnd + 1L
+    if (last_row < bottom - surface_size) {
+      top_rows <- cave[last_row:(last_row + surface_size), ]
+      key <- digest(list(top_rows, cur_rock, jet_pos))
+      prev <- hash[[key]]
+      if (!is.null(prev)) {
+        rnd_prev <- prev$rnd
+        h_prev <- prev$height
+        cur_h <- bottom - last_row + 1L + added_height
+        cycle_len  <- rnd - rnd_prev 
+        cycle_gain <- (cur_h - h_prev)
+        remain  <- nr_rounds - rnd
+        if (cycle_len > 0L && remain >= cycle_len) {
+          cycles <- remain %/% cycle_len
+          added_height <- added_height + cycles * cycle_gain
+          rnd <- rnd + cycles * cycle_len
+          ## empty hash
+          hash <- new.env(parent = emptyenv())
+        }
+      } else {
+        hash[[key]] <- list(rnd = rnd, height = bottom - last_row + 1L + added_height)
+      }
+    }
+
+  }
+  rows_n <- rowSums(cave)
+  last_row <- which(rows_n > 0L) %>% 
+    min()
+  height <- bottom - last_row + 1L
+  as.integer64(height + added_height)
+}
+
+calculate_height(puzzle_data, 1000000000000)
+
+```
