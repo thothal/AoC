@@ -134,7 +134,8 @@ positions of the current rock in the cave (given its starting point determined b
 height calculated earlier). We move this index matrix horizontally and vertically and 
 check collisions by subsetting the cave with this index matrix and looking for rocks both
 in the cave at the current rock. Once the rock come to rest, we place it in the cave using 
-logical 
+logical entries. To determine the final height, we look again at the first row containing
+at least one `TRUE` value and subtract this from the total number of rows.
 
 
 ```{r get-solution-1}
@@ -244,8 +245,8 @@ cat(puzzle[[2]])
 
 For the second part brute-force is out-of question, so we need to find recurring patterns.
 At each iteration we look at the top 4 rows and store them together with the next rock and
-jet. If at any stage we get a state whihc we have seen before, i.e. same surface same next 
-rock and sam enext jet we can fast forward by calculating the cycle length and gain.
+jet. If at any stage we get a state which we have seen before, i.e. same surface same next 
+rock and same next jet we can fast forward by calculating the cycle length and gain.
 
 ```{r get-solution-2}
 calculate_height <- function(jet, nr_rounds) {
@@ -257,11 +258,7 @@ calculate_height <- function(jet, nr_rounds) {
     matrix(TRUE, 2L, 2L)
   )
   hash <- new.env(parent = emptyenv())
-  ## each round we drop a rock of height 1 - 4
-  ## each 5 rounds we have dropped all rocks with a total of 13 height
-  ## that is a conservative estimation of the maximum height is 
-  ## ceiling(13 * nr_rounds / 5) + 3L 
-  
+  ## set max rows as before assuming 10k rounds of active placing
   bottom <- ceiling(13L * 10000L / 5L) + 3L
   cave <- matrix(FALSE, bottom, 7L)
   class(cave) <- "cave"
