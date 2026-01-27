@@ -1,0 +1,294 @@
+---
+params:
+   task_nr: 19
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_extract_all("\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("id", "ore_cost_ore", "clay_cost_ore", "obsidian_cost_ore", 
+                   "obsidian_cost_clay", "geode_cost_ore", "geode_cost_obsidian")) %>% 
+    as_tibble() %>% 
+    mutate(across(everything(), as.integer)) %>% 
+    mutate(costs = list(
+      list(ore = c(ore = ore_cost_ore, clay = 0L, obsidian = 0L),
+                        clay = c(ore = clay_cost_ore, clay = 0L, obsidian = 0L),
+                        obsidian = c(ore = obsidian_cost_ore, clay = obsidian_cost_clay,
+                                     obsidian = 0L),
+                        geode = c(ore = geode_cost_ore, clay = 0L, 
+                                  obsidian = geode_cost_obsidian))
+      ),
+      .by = id) %>% 
+    pull(costs)
+           
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+```{r get-solution-1}
+find_best_blueprint <- function(bps) {
+  solve_blueprint <- function(bp, bp_nr) {
+    cat("Solving Blueprint <", bp_nr, ">...\n", sep = "")
+    time_limit <- 24L
+    robots <- c(ore = 1L, clay = 0L, obsidian = 0L, geode = 0L)
+    resources <- c(ore = 0L, clay = 0L, obsidian = 0L, geode = 0L)
+    max_geode <- 0L
+    memo <- new.env(parent = emptyenv())
+    max_cost <- do.call(rbind, bp) %>% 
+      apply(2L, max)
+    max_cost["geode"] <- Inf
+    get_upper_bound <- function(time, robots, resources) {
+      resources["geode"] + # amount of geode we have so far
+        robots["geode"] * time + # amount of geode the existing robots will produce
+        time * (time - 1L) / 2L # max output if we could build a geode robot eahc turn
+    }
+    
+    cap_resources <- function(resources, time, max_cost) {
+      capped <- pmin(resources[names(max_cost)], max_cost * time)
+      c(capped, resources["geode"])
+    }
+    rec <- 0L
+    
+    dfs <- function(time, robots, resources) {
+            rec <<- rec + 1L
+      if (rec  %% 10000L == 0L) {
+        cat("Recursion:", rec, "\tMemo Size:", length(ls(memo)), 
+            "\tBest:", max_geode, "\r", sep = "")
+      }
+      if (time == 0L) {
+        max_geode <<- max(max_geode, resources["geode"])
+        return(resources["geode"])
+      }
+      if (get_upper_bound(time, robots, resources) <= max_geode) {
+        return(0L)
+      }
+      
+      capped_resources <- cap_resources(resources, time, max_cost)
+      key <- paste(time, paste(robots, collapse = ","), 
+                   paste(capped_resources, collapse = ","),
+                   sep = "|")
+      if (exists(key, memo, inherits = FALSE)) {
+        return(memo[[key]])
+      }
+      max_local <- 0L
+      produced <- resources + robots
+      robot_types <- rev(names(robots))
+      for (robot_type in robot_types) {
+        if (robot_type != "geode" && robots[robot_type] >= max_cost[robot_type]) {
+          next
+        }
+        robot_cost <- bp[[robot_type]]
+        if (all(resources[-4L] >= robot_cost)) {
+          new_resources <- produced - c(robot_cost, 0L)
+          new_robots <- robots
+          new_robots[robot_type] <- new_robots[robot_type] + 1L
+          if (robot_type == "geode") {
+            max_local <- max(max_local, Recall(time - 1L, new_robots, new_resources))
+            memo[[key]] <<- max_local
+            return(max_local)
+          }
+          max_local <- max(
+            max_local,
+            Recall(time - 1L, new_robots, new_resources)
+          )
+        }  
+      }
+      max_local <- max(
+        max_local,
+        Recall(time - 1L, robots, produced)
+      )
+      memo[[key]] <<- max_local
+      return(max_local)
+    }
+    res <- dfs_cpp(time_limit, robots, resources, max_cost, bp) #dfs(time_limit, robots, resources)
+    cat("\nBest Solution:", max_geode, "\n")
+    res
+  }
+  imap_int(bps, solve_blueprint) %>% 
+    max()
+}
+
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we fall back to a graph. We first construct the cube with the 
+appropriate padding. Then, we label all neighbors of the solid blocks as `surface`. Then,
+we look at the induced subgraph, where we remove all `solid` nodes. This will split the
+original cube into components. For each component we check whether there is at least
+one `padding` node, which indicates that the component has a connection to the exterior.
+
+With this classification, we subset all `surface` nodes, which are also on the outside and
+count the number of `solid` neighbors per `surface` node and sum these figures,
+which represents the number of surfaces.
+
+```{r get-solution-2}
+flag_surface_nodes <- function(G) {
+  ttype <- as.character(V(G)$type)
+  allowed <- ttype != "solid"
+  H <- induced_subgraph(G, vids = V(G)[allowed])
+  ttype_H <- as.character(V(H)$type)
+  comp <- components(H)
+  has_pad_by_comp <- tapply(ttype_H == "padding", comp$membership, any)
+  has_pad_H <- has_pad_by_comp[as.character(comp$membership)]
+  orig_vids <- as.integer(V(G)[allowed])
+  flag <- rep(FALSE, vcount(G))
+  surface_mask_H <- ttype_H == "surface"
+  flag[orig_vids[surface_mask_H]] <- has_pad_H[surface_mask_H]
+  flag
+}
+
+construct_cube <- function(coords) {
+  coords <- coords + 1L
+  max_d <- apply(coords, 2L, max) + 2L
+  G <- make_lattice(max_d)
+  n <- vcount(G)
+  i <- seq_len(n) - 1L
+  x <- i %% max_d[1L]
+  y <- (i %/% max_d[1L]) %% max_d[2L]
+  z <- i %/% (max_d[1L] * max_d[2L])
+  V(G)$name <- sprintf("%d/%d/%d", x, y, z)
+  is_pad <- (x == 0L | x == (max_d[1L] - 1L) |
+               y == 0L | y == (max_d[2L] - 1L) |
+               z == 0L | z == (max_d[3L] - 1L))
+  V(G)$type <- "empty"
+  V(G)$type[is_pad]<- "padding"
+  solids <- apply(coords, 1L, paste, collapse = "/") 
+  V(G)[solids]$type <- "solid"
+  nbs <- neighborhood(G, nodes = solids) %>% 
+    reduce(union) %>% 
+    setdiff(V(G)[solids])
+  V(G)[nbs]$type <- "surface"
+  V(G)$is_outer <- flag_surface_nodes(G)
+  G
+}
+
+G <- construct_cube(puzzle_data)
+
+sum(
+  sapply(V(G)[V(G)$is_outer], function(v) {
+    sum(V(G)[neighbors(G, v)]$type == "solid")
+  })
+)
+
+```
