@@ -2259,7 +2259,8 @@ positions of the current rock in the cave (given its starting point determined b
 height calculated earlier). We move this index matrix horizontally and vertically and
 check collisions by subsetting the cave with this index matrix and looking for rocks both
 in the cave at the current rock. Once the rock come to rest, we place it in the cave using
-logical</p>
+logical entries. To determine the final height, we look again at the first row containing
+at least one <code>TRUE</code> value and subtract this from the total number of rows.</p>
 <pre class="r"><code>print.cave &lt;- function(x, rock_idx = NULL, rock = NULL, ...) {
   cave &lt;- if_else(c(x), &quot;#&quot;, &quot;.&quot;)
   dim(cave) &lt;- dim(x)
@@ -2377,8 +2378,8 @@ In the example above, the tower would be <code><em>1514285714288</em></code> uni
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
 <p>For the second part brute-force is out-of question, so we need to find recurring patterns.
 At each iteration we look at the top 4 rows and store them together with the next rock and
-jet. If at any stage we get a state whihc we have seen before, i.e. same surface same next
-rock and sam enext jet we can fast forward by calculating the cycle length and gain.</p>
+jet. If at any stage we get a state which we have seen before, i.e. same surface same next
+rock and same next jet we can fast forward by calculating the cycle length and gain.</p>
 <pre class="r"><code>calculate_height &lt;- function(jet, nr_rounds) {
   rocks &lt;- list(
     matrix(TRUE, 1L, 4L),
@@ -2388,11 +2389,7 @@ rock and sam enext jet we can fast forward by calculating the cycle length and g
     matrix(TRUE, 2L, 2L)
   )
   hash &lt;- new.env(parent = emptyenv())
-  ## each round we drop a rock of height 1 - 4
-  ## each 5 rounds we have dropped all rocks with a total of 13 height
-  ## that is a conservative estimation of the maximum height is 
-  ## ceiling(13 * nr_rounds / 5) + 3L 
-  
+  ## set max rows as before assuming 10k rounds of active placing
   bottom &lt;- ceiling(13L * 10000L / 5L) + 3L
   cave &lt;- matrix(FALSE, bottom, 7L)
   class(cave) &lt;- &quot;cave&quot;
