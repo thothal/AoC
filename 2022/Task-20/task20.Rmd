@@ -72,6 +72,7 @@ library(dplyr)
 library(purrr)
 library(stringr)
 library(R6)
+library(bit64)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -122,22 +123,15 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We use a linked list as a data structure. Forst all numbers are mapped to their original
-position in the array `lkp`. Then, `circle[i]` stores the number index of the number 
-following `lkp[i]`. Consider for instance the following sequence:
-$$
-5, 1, -3
-$$
-Then we set `lkp[1] = 5, lkp[2] = 1` and `lkp[3] = -3`. `circle[1]` stores the element 
-index **after** `lkp[1]` which is `2`, i.e. `circle[1] = 2, circle[2] = 3, circle[3] = 1`.
-Moving any element requires than the following operations:
+We use a double linked list as a data structure, which makes moving numbers a rather cheap
+operation. For moving we use the modulo of the list length to avoid moving the iterator 
+more than needed. We impleamnt the double linked list as an `R6` class for the fun of it.
+In order to move the element in their original order, we use a `flag` for each element 
+whether it was moved already and we take the position of the first matching unmoved 
+elment.
 
-1. Determine the index `k` in `lkp` of this element (*N.B.* since we are looping over all 
-elements in `lkp` anyway this is trivially the iteration counter).
-1. Following the circle to get it's new successor via nesting circle lookups as needed. 
-For instance, if we want to move it 3 positions we look up `circle[circle[circle[k]]]`.
-1. Then we need to re-assign the pointers: `circle[k] = circle[circle[circle[k]]]` and
-`circle
+Eventually, we use the developped `advance` and  `retreat` iterator operations, to move
+to the needed element and extract it.
 
 
 ```{r get-solution-1}
@@ -148,7 +142,8 @@ DoubleLinkedList <- R6Class(
     val = NULL,
     prv = integer(0L),
     nxt = integer(0L),
-    head = integer(0L)
+    head = integer(0L),
+    moved = logical(0L)
   )
 )
 
@@ -162,6 +157,7 @@ DoubleLinkedList$set(
     private$prv <- c(n, 1:(n - 1L))
     private$nxt <- c(2:n, 1L)
     private$head <- 1L
+    private$moved <- rep(FALSE, n)
   }
 )
 
@@ -184,12 +180,13 @@ DoubleLinkedList$set(
   "public",
   "move",
   function(value) {
-    i <- which(private$val == value)
+    i <- which(private$val == value & !private$moved)[[1L]]
+    private$moved[i] <- TRUE
     shift <- value
     if (shift == 0L) {
       return(self)
     }
-    k <- abs(as.integer(shift)) %% (private$n - 1L)
+    k <- abs(shift) %% (private$n - 1L)
     if (k == 0L) {
       return(invisible(self))
     }
@@ -206,6 +203,33 @@ DoubleLinkedList$set(
     invisible(self)
   }
 )
+
+DoubleLinkedList$set(
+  "public",
+  "offset",
+  function(n, value = NULL) {
+    if (is.null(value)) {
+      start <- private$head
+    } else {
+      start <- which(private$val == value)[[1L]]
+    }
+    if (n < 0L) {
+      idx <- private$retreat(start, abs(n))
+    } else {
+      idx <- private$advance(start, n)
+    }
+    private$val[idx]
+  }
+)
+
+DoubleLinkedList$set(
+  "public",
+  "reset",
+  function() {
+    private$moved <- rep(FALSE, private$n)  
+  }
+)
+
 
 DoubleLinkedList$set(
   "private",
@@ -243,8 +267,8 @@ DoubleLinkedList$set(
     b <- private$nxt[i]
     private$nxt[a] <- b
     private$prv[b] <- a
-    if (env$head == i) {
-      env$head <- b 
+    if (private$head == i) {
+      private$head <- b 
     }
     list(a = a, b = b)
   }
@@ -262,20 +286,26 @@ DoubleLinkedList$set(
   }
 )
 
-
+double_linked_list <- function(x) {
+  DoubleLinkedList$new(x)
+}
 
 
 mix_numbers <- function(x, nr_rounds) {
-  nrs <- build_dll(x)
+  nrs <- double_linked_list(x)
   for (j in seq_len(nr_rounds)) {
-    i <- (j - 1) %% length(x) + 1L
-    nrs <- move_by_value(nrs, x[i])
+    for (i in seq_along(x)) {
+      nrs$move(x[i])
+    }
+    nrs$reset()
   }
-  as_vector(nrs)
+  map(1000L * 1:3, ~ nrs$offset(.x, 0L)) %>% 
+    unlist() %>% 
+    sum() %>% 
+    as.integer64()
 }
 
-mix_numbers(ex, 3)
-
+mix_numbers(puzzle_data, 1L)
 ```
 
 ## Part 2
@@ -288,89 +318,11 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the second part we can use the same fast `C++` algorithm, with a larger round number.
+For the second part we multiply the input by the key provided. Although this makes the 
+numbers really large it has no impact on our algorithm, since we took the modulus for the
+moving operator anyways, so these elements are not shifted more than needed.
 
 ```{r get-solution-2, cache = TRUE}
-multiply_geode_amounts <- function(bps) {
-  imap_int(bps[1:3], ~ solve_blueprint(32L, .x)) %>% 
-    prod()
-}
-
-multiply_geode_amounts(puzzle_data)
-```
-
-# R Legacy Solution
-
-```{r legacy-code, eval = FALSE}
-solve_blueprint <- function(bp, time_limit) {
-  robots <- c(ore = 1L, clay = 0L, obsidian = 0L, geode = 0L)
-  resources <- c(ore = 0L, clay = 0L, obsidian = 0L, geode = 0L)
-  max_geode <- 0L
-  memo <- new.env(parent = emptyenv())
-  max_cost <- do.call(rbind, bp) %>% 
-    apply(2L, max)
-  max_cost["geode"] <- Inf
-  get_upper_bound <- function(time, robots, resources) {
-    resources["geode"] + # amount of geode we have so far
-      robots["geode"] * time + # amount of geode the existing robots will produce
-      time * (time - 1L) / 2L # max output if we could build a geode robot eahc turn
-  }
-  
-  cap_resources <- function(resources, time, max_cost) {
-    capped <- pmin(resources[names(max_cost)], max_cost * time)
-    c(capped, resources["geode"])
-  }
-  rec <- 0L
-  
-  dfs <- function(time, robots, resources) {
-    if (time == 0L) {
-      max_geode <<- max(max_geode, resources["geode"])
-      return(resources["geode"])
-    }
-    if (get_upper_bound(time, robots, resources) <= max_geode) {
-      return(0L)
-    }
-    
-    capped_resources <- cap_resources(resources, time, max_cost)
-    key <- paste(time, paste(robots, collapse = ","), 
-                 paste(capped_resources, collapse = ","),
-                 sep = "|")
-    if (exists(key, memo, inherits = FALSE)) {
-      return(memo[[key]])
-    }
-    max_local <- 0L
-    produced <- resources + robots
-    robot_types <- rev(names(robots))
-    for (robot_type in robot_types) {
-      if (robot_type != "geode" && robots[robot_type] >= max_cost[robot_type]) {
-        next
-      }
-      robot_cost <- bp[[robot_type]]
-      if (all(resources[-4L] >= robot_cost)) {
-        new_resources <- produced - c(robot_cost, 0L)
-        new_robots <- robots
-        new_robots[robot_type] <- new_robots[robot_type] + 1L
-        if (robot_type == "geode") {
-          max_local <- max(max_local, Recall(time - 1L, new_robots, new_resources))
-          memo[[key]] <<- max_local
-          return(max_local)
-        }
-        max_local <- max(
-          max_local,
-          Recall(time - 1L, new_robots, new_resources)
-        )
-      }  
-    }
-    max_local <- max(
-      max_local,
-      Recall(time - 1L, robots, produced)
-    )
-    memo[[key]] <<- max_local
-    return(max_local)
-  }
-  res <- dfs(time_limit, robots, resources)
-  res
-}
-
+mix_numbers(puzzle_data * 811589153, 10L)
 ```
 
