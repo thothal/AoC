@@ -179,8 +179,6 @@ calculate_value <- function(G) {
 
 G <- construct_graph(puzzle_data) %>% 
   calculate_value()
-G2 <- construct_graph(ex) %>% 
-  calculate_value()
 V(G)["root"]$value %>% 
   as.integer64()
 ```
@@ -202,34 +200,74 @@ value, which we will use to calculate the desired value of the last node in the 
 
 ```{r get-solution-2, cache = TRUE}
 find_start_value <- function(G, source = "humn") {
+  source <- V(G)[source]
   V(G)["root"]$operation <- "=="
   end <- V(G)["root"]
-  done <- FALSE
-  browser()
-  while (!done) {
+  get_inverse <- function(left, right, result, target, op) {
+    if (op == "+") {
+      ## res = left + right
+      ## target == left  => target = res - right
+      ## target == right => target = res - left
+      if (target$name == left$name) {
+        result$value - right$value
+      } else {
+        result$value - left$value
+      }
+    } else if (op == "-") {
+      ## res = left - right 
+      ## target == left  => target = res + right
+      ## target == right => target = left - res
+      if (target$name == left$name) {
+        result$value + right$value
+      } else {
+        left$value - result$value
+      }
+    } else if (op == "*") {
+      ## res = left * right 
+      ## target == left  => target = res / right
+      ## target == right => target = res / left
+      if (target$name == left$name) {
+        result$value / right$value
+      } else {
+        result$value / left$value
+      }
+    } else if (op == "/") {
+      ## res = left / right 
+      ## target == left  => target = res * right
+      ## target == right => target = left / res
+      if (target$name == left$name) {
+        result$value * right$value
+      } else {
+        left$value / result$value
+      }
+    } else if (op == "==") {
+      ## res = left == right
+      ## target == left => target = right
+      ## target == right => target = left
+      if (target$name == left$name) {
+        right$value
+      } else {
+        left$value
+      }
+    }
+  }
+  while (end$name != source$name) {
     path <- shortest_paths(G, source, end)$vpath[[1L]]
     new_end <- path[length(path) - 1L]
     incoming <- incident(G, end, "in")
-    goal <- incoming %>% 
-      tail_of(G, .) %>% 
-      setdiff(new_end)
-    goal <- goal$value
+    ancestors <- incoming %>% 
+      tail_of(G, .)
     op <- end$operation
-    if (is.na(op)) {
-      
-    } else if (op == "==") {
-      V(G)[new_end]$value <- goal
-      end <- V(G)[new_end]
-    } else if (op == "+") {
-      
-    } else if (op == "-") {
-    } else if (op == "/") {
-      
-    } else if (op == "*") {
-    }
+    left <- ancestors[incoming$ops == "left"]
+    right <- ancestors[incoming$ops == "right"]
+    val <- get_inverse(left, right, end, new_end, op)
+    V(G)[new_end]$value <- val
+    end <- V(G)[new_end]
   }
+  V(G)[source]$value
 }
 
-find_start_value(G2)
+find_start_value(G) %>% 
+  as.integer64()
 ```
 
