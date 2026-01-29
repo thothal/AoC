@@ -1,0 +1,225 @@
+---
+params:
+   task_nr: 22
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  maze_marker <- text_block %>% 
+    str_detect("[.#]")
+  lines <- text_block[maze_marker] %>% 
+    str_split("")
+  fill <- max(lengths(lines))
+  maze <- map(lines, ~ c(.x, rep(" ", fill))[1:fill]) %>% 
+    do.call(rbind, .)
+  maze[maze == " "] <- NA_character_
+  instructions <- text_block[!maze_marker] %>% 
+    str_extract_all("\\d+|[LR]") %>% 
+    extract2(1L)
+  list(maze = maze, instructions = instructions)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use a straight forward implementation of the algorithm. If we hit an `NA` field we have
+to wrap around to the first non `NA` file on the other side. 
+
+```{r get-solution-1}
+wrap_flat <- function(dir, maze, pos) {
+  if (dir %% 2L == 0L) {
+    slice <- maze[, pos[2L]]
+  } else {
+    slice <- maze[pos[1L], ]
+  }
+  ground <- which(!is.na(slice))
+  if (dir <= 2L) {
+    wrap <- ground[1L]
+  } else {
+    wrap <- ground[length(ground)]
+  }
+  if (dir %% 2L == 0L) {
+    list(pos = cbind(wrap, pos[2L]), dir = dir)
+  } else {
+    list(pos = cbind(pos[1L], wrap), dir = dir)
+  }
+}
+
+walk_maze <- function(maze, steps, wrap_fn) {
+  dirs <- rbind(
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L),
+    "<" = c(0L, -1L),
+    "^" = c(-1L, 0L)
+  )
+  rot <- c(L = -1L, R = 1L)
+  dir <- 1L
+  pos <- cbind(1, which(!is.na(maze[1, ]))[[1L]])
+  dd <- dim(maze)
+  for (step in steps) {
+    n <- as.integer(step) %>% 
+      suppressWarnings()
+    if (is.na(n)) {
+      ## rotation
+      dir <- (dir - 1L + rot[step]) %% 4L + 1L
+    } else {
+      cur_dir <- dirs[dir, ] 
+      for (i in seq_len(n)) {
+        new_pos <- pos + cur_dir
+        new_pos[, 1L] <- (new_pos[, 1L] - 1L) %% dd[1L] + 1L
+        new_pos[, 2L] <- (new_pos[, 2L] - 1L) %% dd[2L] + 1L
+        if (is.na(maze[new_pos])) {
+          wrap <- wrap_fn(dir, maze, pos)
+          new_pos <- wrap$pos
+          if (maze[new_pos] != "#") {
+            dir <- wrap$dir
+          }
+        }
+        if (maze[new_pos] == "#") {
+          break
+        }
+        pos <- new_pos
+      }
+    }
+  }
+  1000L * pos[1L] + 4L * pos[2L] + dir - 1
+}
+walk_maze(puzzle_data$maze, puzzle_data$instructions, wrap_flat) 
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We need to define a more sophisticated wrap function and can otherwise use the same 
+algorithm as before.
+
+```{r get-solution-2}
+wrap_cube <- function(dir, maze, pos) {
+  surface_id <- case_when(
+    pos[1L] <=  50L & pos[2L] <= 100L ~ 1L,
+    pos[1L] <=  50L & pos[2L] >  100L ~ 2L,
+    pos[1L] >   50L & pos[1L] <= 100L ~ 3L,
+    pos[1L] >  100L & pos[1L] <= 150L ~ 4L,
+    pos[1L] >  150L & pos[2L] <=  50L ~ 5L,
+    pos[1L] >  150L & pos[2L] >   50L ~ 6L
+  )
+}
+
+walk_maze(puzzle_data$maze, puzzle_data$instructions, wrap_flat) 
+```
+
