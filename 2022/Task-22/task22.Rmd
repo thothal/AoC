@@ -170,22 +170,24 @@ walk_maze <- function(maze, steps, wrap_fn) {
       ## rotation
       dir <- (dir - 1L + rot[step]) %% 4L + 1L
     } else {
-      cur_dir <- dirs[dir, ] 
+      cur_dir <- dirs[dir, ]
       for (i in seq_len(n)) {
         new_pos <- pos + cur_dir
-        new_pos[, 1L] <- (new_pos[, 1L] - 1L) %% dd[1L] + 1L
-        new_pos[, 2L] <- (new_pos[, 2L] - 1L) %% dd[2L] + 1L
-        if (is.na(maze[new_pos])) {
+        if (new_pos[, 1L] < 1L || new_pos[, 1L] > dd[1L] ||
+            new_pos[, 2L] < 1L || new_pos[, 2L] > dd[2L] ||
+            is.na(maze[new_pos])) {
           wrap <- wrap_fn(dir, maze, pos)
           new_pos <- wrap$pos
           if (maze[new_pos] != "#") {
             dir <- wrap$dir
+            cur_dir <- dirs[dir, ]
           }
         }
         if (maze[new_pos] == "#") {
           break
         }
         pos <- new_pos
+        maze[pos] <- rownames(dirs[dir, , drop = FALSE])
       }
     }
   }
@@ -206,20 +208,105 @@ cat(puzzle[[2]])
 ### Solution
 
 We need to define a more sophisticated wrap function and can otherwise use the same 
-algorithm as before.
+algorithm as before. The idea is that we need to know how the direction changes and
+whether the surface is flipped (in which case we need to calculate the respective
+coordinates  from the right / bottom border). Thus, we developed a mini 
+Domain Specific Language to describe the transitions from one surface to another. The 
+syntax is `from_id:from_dir -> to_id:to_dir [flip]`. The algorithm also needs to know
+how me numbered the surfaces given the unfolded cube, which we provide via a matrix.
+
 
 ```{r get-solution-2}
-wrap_cube <- function(dir, maze, pos) {
-  surface_id <- case_when(
-    pos[1L] <=  50L & pos[2L] <= 100L ~ 1L,
-    pos[1L] <=  50L & pos[2L] >  100L ~ 2L,
-    pos[1L] >   50L & pos[1L] <= 100L ~ 3L,
-    pos[1L] >  100L & pos[1L] <= 150L ~ 4L,
-    pos[1L] >  150L & pos[2L] <=  50L ~ 5L,
-    pos[1L] >  150L & pos[2L] >   50L ~ 6L
+parse_cube_edges <- function(dsl) {
+  dirs <- c(">" = 1L, "v" = 2L, "<" = 3L, "^" = 4L)
+  mtch <- str_match_all(dsl, "([0-9]+):([>v<^]) *-> *([0-9]+):([>v<^])( flip)?") %>% 
+    extract2(1L)
+  tibble(
+    from = as.integer(mtch[, 2L]),
+    from_dir = dirs[mtch[, 3L]],
+    to = as.integer(mtch[, 4L]),
+    to_dir = dirs[mtch[, 5L]],
+    flip = !is.na(mtch[, 6L])
   )
 }
 
-walk_maze(puzzle_data$maze, puzzle_data$instructions, wrap_flat) 
+parse_surfaces <- function(mat) {
+   as_tibble(which(!is.na(mat), arr.ind = TRUE) - 1L) %>% 
+    mutate(id = mat[!is.na(mat)]) %>% 
+    arrange(id)
+}
+
+wrap_cube <- function(dir, maze, pos) {
+  idx <- (pos - 1L) %/% 50L
+  surfaces <- parse_surfaces(
+    matrix(
+      c(
+        NA, 2,  1, 
+        NA, 3,  NA,
+        5,  4,  NA,
+        6,  NA, NA
+      ),
+      ncol = 3L, byrow = TRUE)
+  )
+  edges <- parse_cube_edges("
+    1:^ -> 6:^
+    1:> -> 4:< flip
+    1:v -> 3:<
+    
+    2:^ -> 6:>
+    2:< -> 5:> flip
+    
+    3:> -> 1:^
+    3:< -> 5:v
+    
+    4:> -> 1:< flip
+    4:v -> 6:<
+    
+    5:^ -> 3:>
+    5:< -> 2:> flip
+    
+    6:> -> 4:^
+    6:v -> 1:v
+    6:< -> 2:v"
+  )
+  surface_id <- surfaces %>% 
+    filter(row == idx[1L], col == idx[2L]) %>% 
+    pull(id)
+  turn <- edges %>% 
+    filter(from == surface_id, from_dir == dir)
+  new_surface_id <- turn %>% 
+    pull(to)
+  new_surface <- surfaces %>% 
+    filter(id == new_surface_id)
+  new_dir <- turn %>% 
+    pull(to_dir)
+  is_flip <- turn %>% 
+    pull(flip)
+  rel_pos <- pos - (idx * 50L + 1L) + 1L
+  lims <- c(
+    b = (new_surface$row + 1L) * 50L,
+    t = new_surface$row * 50L + 1L,
+    l = new_surface$col * 50L + 1L,
+    r = (new_surface$col + 1L) * 50L
+  )
+  axis <- 2L - (dir %% 2L)
+  if (is_flip) {
+    vertical <- lims["b"] - rel_pos[axis] + 1L
+    horizontal <- lims["r"] - rel_pos[axis] + 1L
+  } else {
+    vertical <- lims["t"] + rel_pos[axis] - 1L
+    horizontal <- lims["l"] + rel_pos[axis] - 1L
+  }
+  new_pos <- switch(
+    new_dir,
+    "1" = cbind(vertical, lims["l"]),
+    "2" = cbind(lims["t"], horizontal),
+    "3" = cbind(vertical, lims["r"]),
+    "4" = cbind(lims["b"], horizontal)
+  )
+  list(pos = new_pos, dir = new_dir)
+}
+
+walk_maze(puzzle_data$maze, puzzle_data$instructions, wrap_cube) 
 ```
 
