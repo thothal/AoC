@@ -1,0 +1,357 @@
+---
+params:
+   task_nr: 23
+   year: 2022
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(ravetools)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L) %>% 
+      keep(nzchar)
+  }
+  text_block %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+For the first part we use 3d convolution to determine the number of neighbor in each step.
+
+```{r get-solution-1}
+get_blocked_targets <- function(proposal) {
+  shifts <- list(
+    N = function(M) {
+      res <- !is.na(M) & M == "N" 
+      rbind(res[-1L, ], FALSE)
+    },
+    S = function(M) {
+      res <- !is.na(M) & M == "S" 
+      rbind(FALSE, res[-nrow(res), ])
+    },
+    W = function(M) {
+      res <- !is.na(M) & M == "W"
+      cbind(res[, -1L], FALSE)
+    },
+    E = function(M) {
+      res <- !is.na(M) & M == "E"
+      cbind(FALSE, res[, -ncol(M)])
+    }
+  )
+  collisions <- map(shifts, ~ .x(proposal)) %>% 
+      reduce(`+`) %>% 
+      is_greater_than(1L)
+  if (!any(collisions)) {
+    return(integer(0L))
+  }
+  nr <- nrow(proposal)
+  nc <- ncol(proposal)
+  
+  has_proposal <- !is.na(proposal)
+  
+  target_r <- target_c <- matrix(NA, nr, nc)
+  
+  target_r[has_proposal & proposal == "N"] <- 
+    row(proposal)[has_proposal & proposal == "N"] - 1L
+  target_c[has_proposal & proposal == "N"] <- 
+    col(proposal)[has_proposal & proposal == "N"]
+  
+  target_r[has_proposal & proposal == "S"] <- 
+    row(proposal)[has_proposal & proposal == "S"] + 1L
+  target_c[has_proposal & proposal == "S"] <- 
+    col(proposal)[has_proposal & proposal == "S"]
+  
+  target_r[has_proposal & proposal == "E"] <- 
+    row(proposal)[has_proposal & proposal == "E"]
+  target_c[has_proposal & proposal == "E"] <- 
+    col(proposal)[has_proposal & proposal == "E"] + 1L
+  
+  target_r[has_proposal & proposal == "W"] <- 
+    row(proposal)[has_proposal & proposal == "W"]
+  target_c[has_proposal & proposal == "W"] <- 
+    col(proposal)[has_proposal & proposal == "W"] - 1L
+  
+
+  idx <- cbind(c(target_r), c(target_c))
+  idx <- idx[idx[, 1L] >= 1L & idx[, 1L] <= nr &
+               idx[, 2L] >= 1L & idx[, 2L] <= nc, , drop = FALSE]
+  collisions <- which(collisions, arr.ind = TRUE)
+  blocked <- apply(collisions, 1L, \(r) idx[, 1L] == r[1L] & idx[, 2L] == r[2L]) %>% 
+    rowSums(na.rm = TRUE)
+  which(blocked == 1L)
+}
+
+embed_map <- function(elves_map, padding) {
+  dd <- dim(elves_map)
+  top_pad <- matrix(0L, nrow = padding, ncol = dd[2L])
+  left_pad <- matrix(0L, nrow = padding * 2L + dd[1L], ncol = padding)
+  cbind(
+    left_pad,
+    rbind(
+      top_pad,
+      elves_map,
+      top_pad
+    ),
+    left_pad
+  )
+}
+
+move_elves <- function(elves_map, nr_rounds, padding = nr_rounds) {
+  ## embed the map to have enough space
+  elves_map[] <- if_else(c(elves_map) == "#", 1L, 0L)
+  storage.mode(elves_map) <- "integer"
+  elves_map <- embed_map(elves_map, padding)
+  dd <- dim(elves_map)
+  ## define kernels for efficient neighbor counting
+  dirs <- expand.grid(x = -1:1, y = -1:1) %>% 
+    filter(x != 0 | y != 0) %>% 
+    as.matrix() %>% 
+    set_rownames(c("NW", "W", "SW", "N", "S", "NE", "E", "SE"))
+  look_to <- function(x) {
+    lkp <- t(t(dirs) + c(2L, 2L))
+    kernel <- matrix(0L, 3L, 3L)
+    kernel[lkp[x, , drop = FALSE]] <- 1L
+    kernel[3:1, 3:1] ## need to flip to use convolve as the sum of neighbors
+  }
+  kernels <- map(
+    list(N = c("N", "NE", "NW"),
+         S = c("S", "SE", "SW"),
+         W = c("W", "NW", "SW"),
+         E = c("E", "NE", "SE")), 
+    look_to)
+  count_kernel <- matrix(1L, 3L, 3L)
+  count_kernel[2L, 2L] <- 0L
+  proposal <- array(NA_character_, dd)
+  for (rnd in seq_len(nr_rounds)) {
+    if (any(elves_map[, 1L] == 1L |
+            elves_map[, ncol(elves_map)] == 1L |
+            elves_map[1L, ] == 1L |
+            elves_map[nrow(elves_map), ] == 1L)) {
+      elves_map <- embed_map(elves_map, padding)
+      dd <- dim(elves_map)
+      proposal <- array(NA_character_, dd)
+    }
+    nr_nbs <- convolve_volume(elves_map, count_kernel)[, , 1L] %>% 
+      round()
+    storage.mode(nr_nbs) <- "integer"
+    active_elves <- (elves_map == 1L) & (nr_nbs > 0L)
+    if (!any(active_elves)) {
+      break
+    }
+   
+    for (n in names(kernels)) {
+      nb_count <- convolve_volume(elves_map, kernels[[n]])[, , 1L] %>% 
+        round()
+      storage.mode(nb_count) <- "integer"
+      proposal[is.na(proposal) & active_elves & nb_count == 0L] <- n
+      if (all(!is.na(proposal[active_elves]))) {
+        break
+      }
+    }
+    if (all(is.na(proposal))) {
+      break
+    }
+    blocked_idx <- get_blocked_targets(proposal)
+    proposal[blocked_idx] <- NA_character_
+    move_idx <- which(!is.na(proposal), arr.ind = TRUE)
+    elves_map[move_idx] <- 0L
+    elves_map[move_idx + dirs[proposal[move_idx], , drop = FALSE]] <- 1L
+    kernels <- c(kernels[-1L], kernels[1L])
+    proposal[] <- NA_character_
+  }  
+  rows <- apply(elves_map, 1L, \(r) any(r == 1L)) %>% 
+    which() %>% 
+    range()
+  cols <- apply(elves_map, 2L, \(r) any(r == 1L)) %>% 
+    which() %>% 
+    range()
+  rect <- elves_map[rows[1L]:rows[2L], cols[1L]:cols[2L]]
+  list(sum = sum(1 - rect), rnd = rnd)
+}
+
+
+move_elves(puzzle_data, 10L)$sum
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+Theoretically, we could use the same idea for the second part by setting a large enough 
+round number. However, as the convolution works on the whole area this becomes quickly 
+very resource intensive:
+
+```{r get-solution-bad-2, eval = FALSE}
+move_elves(puzzle_data, 1e5, 100L)
+```
+
+Thus, we need to implement a solution which works on the elves instead of the field to 
+use less resources. This is, however, still slow in `R`, thus we implement the proposal
+generator in `C++`.  The algorithm is rather straight forward and uses a `unorderd_set`
+to store unique positions. We pack the two coordinates into a large `unsigned long long`
+for efficiency.
+
+```{Rcpp cpp-algorithm, file = "elves.cpp", cache = TRUE}
+```
+
+
+```{r get-solution-2}
+move <- function(elves, proposals) {
+  dirs <- rbind(
+      N = c(-1L, 0L),
+      E = c(0L, 1L),
+      S = c(1L, 0L),
+      W = c(0L, -1L)
+  )
+  new_pos <- elves + dirs[match(proposals, rownames(dirs)), ]
+  bad_pos <- duplicated(new_pos) | duplicated(new_pos, fromLast = TRUE) | 
+    is.na(new_pos[, 1L])
+  new_pos[bad_pos, ] <- elves[bad_pos, ]
+  attr(new_pos, "did_move") <- !all(bad_pos)
+  new_pos
+}
+
+move_elves_to_stop <- function(elves_map) {
+  elves_map[] <- if_else(c(elves_map) == "#", 1L, 0L)
+  storage.mode(elves_map) <- "integer"
+  rnd <- 1L
+  dirs <- expand.grid(x = -1:1, y = -1:1) %>% 
+    filter(x != 0 | y != 0) %>% 
+    as.matrix() %>% 
+    set_rownames(c("NW", "W", "SW", "N", "S", "NE", "E", "SE"))
+  look_to <- map(
+    list(N = c("N", "NE", "NW"),
+         S = c("S", "SE", "SW"),
+         W = c("W", "NW", "SW"),
+         E = c("E", "NE", "SE")), 
+    ~ dirs[.x, ]
+  )
+  elves <- which(elves_map == 1L, arr.ind = TRUE)
+  attr(elves, "did_move") <- TRUE
+  proposals <- get_proposals(elves, look_to)
+  while (any(!is.na(proposals)) & attr(elves, "did_move")) {
+    elves <- move(elves, proposals)
+    look_to <- c(look_to[-1L], look_to[1L])
+    proposals <- get_proposals(elves, look_to)
+    rnd <- rnd + 1L
+  }
+  rnd
+}
+
+move_elves_to_stop(puzzle_data)
+```
+
