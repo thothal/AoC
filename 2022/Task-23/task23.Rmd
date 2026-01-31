@@ -44,6 +44,9 @@ editor_options:
 }
 ```
 
+```{js cpp-highlighter, file = "Prism_CPP.js", echo = FALSE}
+```
+
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
                       dev.args = list(bg = "transparent"))
@@ -121,6 +124,7 @@ cat(puzzle[[1]])
 
 ### Solution
 
+For the first part we use 3d convolution to determine the number of neighbor in each step.
 
 ```{r get-solution-1}
 get_blocked_targets <- function(proposal) {
@@ -185,44 +189,6 @@ get_blocked_targets <- function(proposal) {
   which(blocked == 1L)
 }
 
-get_blocked_targets <- function(proposal) {
-  nr <- nrow(proposal)
-  nc <- ncol(proposal)
-
-  # Nur Positionen, die Vorschläge haben
-  idx <- which(!is.na(proposal))
-  if (!length(idx)) return(integer(0L))
-
-  # Ursprungskoordinaten
-  r <- ((idx - 1L) %% nr) + 1L
-  c <- ((idx - 1L) %/% nr) + 1L  
-  p <- proposal[idx]
-
-  # Zielkoordinaten vorbereiten
-  tr <- r
-  tc <- c
-
-  # Richtungscodes als Char
-  sel <- p == "N"; tr[sel] <- tr[sel] - 1L
-  sel <- p == "S"; tr[sel] <- tr[sel] + 1L
-  sel <- p == "W"; tc[sel] <- tc[sel] - 1L
-  sel <- p == "E"; tc[sel] <- tc[sel] + 1L
-
-  # Nur gültige Ziele behalten
-  valid <- (tr >= 1L & tr <= nr & tc >= 1L & tc <= nc)
-  if (!any(valid)) return(integer(0L))
-
-  # lineare Zielindizes
-  tlin <- (tc[valid] - 1L) * nr + tr[valid]
-
-  # Kollision: Ziele, die mehrfach vorkommen
-  cnt <- tabulate(tlin, nbins = nr * nc)
-  bad_targets <- cnt[tlin] > 1L
-
-  # Ursprungsindizes der blockierten Elfen zurückgeben
-  idx[valid][bad_targets]
-}
-
 embed_map <- function(elves_map, padding) {
   dd <- dim(elves_map)
   top_pad <- matrix(0L, nrow = padding, ncol = dd[2L])
@@ -265,14 +231,13 @@ move_elves <- function(elves_map, nr_rounds, padding = nr_rounds) {
   count_kernel[2L, 2L] <- 0L
   proposal <- array(NA_character_, dd)
   for (rnd in seq_len(nr_rounds)) {
-    cat("Round ", rnd, "\r", sep = "")
     if (any(elves_map[, 1L] == 1L |
             elves_map[, ncol(elves_map)] == 1L |
             elves_map[1L, ] == 1L |
             elves_map[nrow(elves_map), ] == 1L)) {
       elves_map <- embed_map(elves_map, padding)
       dd <- dim(elves_map)
-       proposal <- array(NA_character_, dd)
+      proposal <- array(NA_character_, dd)
     }
     nr_nbs <- convolve_volume(elves_map, count_kernel)[, , 1L] %>% 
       round()
@@ -309,19 +274,11 @@ move_elves <- function(elves_map, nr_rounds, padding = nr_rounds) {
     which() %>% 
     range()
   rect <- elves_map[rows[1L]:rows[2L], cols[1L]:cols[2L]]
-  cat("\n")
   list(sum = sum(1 - rect), rnd = rnd)
 }
 
 
-library(tictoc)
-tic("TT Version")
 move_elves(puzzle_data, 10L)$sum
-toc()
-
-tic("CP Version")
-move_elves_sparse(puzzle_data, Inf)
-toc()
 ```
 
 ## Part 2
@@ -334,8 +291,67 @@ cat(puzzle[[2]])
 
 ### Solution
 
+Theoretically, we could use the same idea for the second part by setting a large enough 
+round number. However, as the convolution works on the whole area this becomes quickly 
+very resource intensive:
+
+```{r get-solution-bad-2, eval = FALSE}
+move_elves(puzzle_data, 1e5, 100L)
+```
+
+Thus, we need to implement a solution which works on the elves instead of the field to 
+use less resources. This is, however, still slow in `R`, thus we implement the proposal
+generator in `C++`.  The algorithm is rather straight forward and uses a `unorderd_set`
+to store unique positions. We pack the two coordinates into a large `unsigned long long`
+for efficiency.
+
+```{Rcpp cpp-algorithm, file = "elves.cpp", cache = TRUE}
+```
+
 
 ```{r get-solution-2}
-move_elves(puzzle_data, 1e5, 100L)
+move <- function(elves, proposals) {
+  dirs <- rbind(
+      N = c(-1L, 0L),
+      E = c(0L, 1L),
+      S = c(1L, 0L),
+      W = c(0L, -1L)
+  )
+  new_pos <- elves + dirs[match(proposals, rownames(dirs)), ]
+  bad_pos <- duplicated(new_pos) | duplicated(new_pos, fromLast = TRUE) | 
+    is.na(new_pos[, 1L])
+  new_pos[bad_pos, ] <- elves[bad_pos, ]
+  attr(new_pos, "did_move") <- !all(bad_pos)
+  new_pos
+}
+
+move_elves_to_stop <- function(elves_map) {
+  elves_map[] <- if_else(c(elves_map) == "#", 1L, 0L)
+  storage.mode(elves_map) <- "integer"
+  rnd <- 1L
+  dirs <- expand.grid(x = -1:1, y = -1:1) %>% 
+    filter(x != 0 | y != 0) %>% 
+    as.matrix() %>% 
+    set_rownames(c("NW", "W", "SW", "N", "S", "NE", "E", "SE"))
+  look_to <- map(
+    list(N = c("N", "NE", "NW"),
+         S = c("S", "SE", "SW"),
+         W = c("W", "NW", "SW"),
+         E = c("E", "NE", "SE")), 
+    ~ dirs[.x, ]
+  )
+  elves <- which(elves_map == 1L, arr.ind = TRUE)
+  attr(elves, "did_move") <- TRUE
+  proposals <- get_proposals(elves, look_to)
+  while (any(!is.na(proposals)) & attr(elves, "did_move")) {
+    elves <- move(elves, proposals)
+    look_to <- c(look_to[-1L], look_to[1L])
+    proposals <- get_proposals(elves, look_to)
+    rnd <- rnd + 1L
+  }
+  rnd
+}
+
+move_elves_to_stop(puzzle_data)
 ```
 
