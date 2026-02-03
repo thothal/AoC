@@ -1,0 +1,291 @@
+---
+params:
+   task_nr: 5
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  seeds <- text_block[[1L]] %>% 
+    str_extract_all("\\d+") %>% 
+    extract2(1L) %>% 
+    as.numeric() 
+  text_block <- text_block[-(1:2)]
+  text_block <- text_block[nzchar(text_block)]
+  map_markers <- str_which(text_block, "map")
+  parse_map <- function(map_block) {
+    map_name <- map_block %>% 
+      str_remove(" map:") %>% 
+      str_split("-to-") %>% 
+      extract2(1L)
+    str_extract_all(map_block[-1L], "\\d+") %>% 
+      do.call(rbind, .) %>% 
+      set_colnames(c("dest", "src", "len")) %>% 
+      as_tibble() %>% 
+      mutate(across(everything(), as.numeric)) %>% 
+      mutate(from = map_name[1L],
+             to = map_name[2L],
+             .before = 1L) #%>% 
+      #arrange(src)
+  }
+  maps <- map2(map_markers, 
+       c(tail(map_markers, -1L) - 1L, length(text_block)),
+       ~ parse_map(text_block[.x:.y]))
+  names(maps) <- map_chr(maps, ~ .x$from[[1L]])
+  list(seeds = seeds, maps = maps)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+For the first part we recursively apply the rules in the maps until we map to `location`.
+Then we return the minimum of those locations.
+
+```{r get-solution-1}
+apply_maps <- function(seeds, maps) {
+  apply <- function(id, map) {
+    next_map_name <- map$to[[1L]]
+    row <- map %>% 
+      filter(id >= src & id <= src + len - 1L)
+    if (nrow(row) == 0L) {
+      new_id <- id
+    } else if (nrow(row) == 1L) {
+      new_id <- row$dest + id - row$src
+    } else {
+      browser()
+    }
+    if (next_map_name != "location") {
+      Recall(new_id, maps[[next_map_name]])
+    } else {
+      new_id
+    }
+  }
+  locations <- map(seeds, ~ apply(.x, maps$seed))
+  reduce(locations, min)
+}
+
+apply_maps(puzzle_data$seeds, puzzle_data$maps)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we use the following idea:
+
+1. Represent each seed range by an open interval `[start, start + len)` and add it to a 
+list of "pending" intervals, i.e. those intervals which could not be mapped yet.
+1. Start with the first range in the map and cut the rule with each of the pending 
+intervals. This will produce mapped sub-intervals (i.e. when the rule applies to the interval)
+and (yet) unmapped sub-intervals (intervals where the rule did not yet apply.).
+1. All unmapped sub-intervals are kept for the next rule. Repeat this process until all 
+rules were applied. Still pending intervals are kept as is, as they map to itself.
+1. We get a several sub-intervals, which we merge to be more efficient. 
+Those intervals are then sent to the next map layer.
+1. Eventually we come up with a list of intervals, where we take the minimum lower bound.
+
+```{r get-solution-2}
+apply_maps_ranges <- function(seed, maps) {
+  ## intervals are of the form [lwr, upr) (i.e. upr is not part of the interval)
+  seed_ranges <- map(0:(length(seed) / 2L - 1L), 
+                     ~ c(lwr = seed[2L * .x + 1L],
+                         upr = seed[2L * .x + 1L] + seed[2L * .x + 2L])
+                       )
+  cut_interval <- function(interval, rule) {
+    ## when cutting 2 intervals we have at most 3 parts:
+    ## 1. left / right: this is not covered by this rule keep it as is
+    ## 2. overlap: add the offset for the mapped values
+    lwr <- interval[["lwr"]]
+    upr <- interval[["upr"]]
+    rule_lwr <- rule$src
+    rule_upr <- rule$src + rule$len
+    offset <- rule$dest - rule$src
+    if (upr <= rule_lwr || lwr >= rule_upr) {
+      ## no overlap: >= because intervals aer open on the right
+      return(list(unmapped = list(interval), mapped = list()))
+    }
+    unmapped <- mapped <- list()
+    ## left part
+    if (lwr < rule_lwr) {
+      unmapped <- c(unmapped, list(c(lwr = lwr, upr = rule_lwr)))
+    }
+    ## overlap
+    overlap_lwr <- max(lwr, rule_lwr)
+    overlap_upr <- min(upr, rule_upr)
+    mapped <- c(mapped, list(c(lwr = overlap_lwr + offset, upr = overlap_upr + offset)))
+    ## right part
+    if (upr > rule_upr) {
+      unmapped <- c(unmapped, list(c(lwr = rule_upr, upr = upr)))
+    }
+    list(unmapped = unmapped, mapped = mapped)
+  }
+  
+  merge_intervals <- function(intervals) {
+    if (length(intervals) == 1L) {
+      return(intervals)
+    }
+    ## sort intervals according to lwr
+    lwr <- map_dbl(intervals, ~.x[["lwr"]])
+    intervals <- intervals[order(lwr)]
+    merged <- list(intervals[[1L]])
+    for (k in 2:length(intervals)) {
+      last <- merged[[length(merged)]]
+      cur <- intervals[[k]]
+      if (cur[["lwr"]] <= last[["upr"]]) {
+        ## if the new interval overlaps with the last (sorted!) merge it
+        last[["upr"]] <- max(last[["upr"]], cur[["upr"]])
+        merged[[length(merged)]] <- last
+      } else {
+        ## otherwise add it as is
+        merged <- c(merged, list(cur))
+      }
+    }
+    merged
+  }
+  apply <- function(rng, map) {
+    mapped <- list()
+    pending <- rng
+    for (r in seq_len(nrow(map))) {
+      ## we loop through all rules, cut it with all unmapped ("pending") 
+      ## intervals and get mapped and unmapped intervals
+      ## try remaining rules on unmapped intervals until all rules were applied
+      ## then push all intervals (after merging for efficiency) to the next map
+      rule <- map %>% 
+        slice(r) %>% 
+        as.list()
+      new_pending <- list()
+      for (interval in pending) {
+        pieces <- cut_interval(interval, 
+                               rule)
+        mapped <- c(mapped, pieces$mapped)
+        new_pending <- c(new_pending, pieces$unmapped)
+      }
+      pending <- new_pending
+    }
+    out <- c(mapped, pending) %>% 
+      merge_intervals()
+    next_map_name <- map$to[[1L]]
+    if (next_map_name != "location") {
+      Recall(out, maps[[next_map_name]])
+    } else {
+      map_dbl(out, "lwr") %>% 
+        min()
+    }
+  }
+  map_dbl(seed_ranges, ~ apply(list(.x), maps$seed)) %>% 
+    min()
+}
+apply_maps_ranges(puzzle_data$seeds, puzzle_data$maps)
+```
