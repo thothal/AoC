@@ -1,0 +1,192 @@
+---
+params:
+   task_nr: 6
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  res <- text_block %>% 
+    str_extract_all("\\d+") %>% 
+    do.call(rbind, .) %>% 
+    t() %>% 
+    set_colnames(c("time", "dist"))
+  storage.mode(res) <- "integer"
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+Let $t$ be the amount of time we hold down the button, $T$ the length of the race and $r$ 
+the record. The distance our boat will glide is given by
+
+$$
+d = (T - t)\cdot t
+$$
+We want to go further than `r`, which  yields
+$$
+(T - t)\cdot t > r
+$$
+This is a qudaratic equation:
+$$
+t^2 - T\cdot t + r = 0
+$$
+which has the solutions
+$$
+t_{1,2} = \frac{T}{2} \pm \sqrt{\frac{T^2}{4} - r}
+$$
+
+Assume WLOG $t_1 = \min(t_1, t_2)$ and $t_2 = \max(t_1,t_2)$, then the desired number of
+winning solutions is given by
+$$
+n = \lfloor t_2 \rfloor - \lceil t_1 \rceil
+$$
+*N.B.* If $t_{1}\in\mathbb{N}$ set $t_1 = t_1 + 1$ and if $t_{2}\in\mathbb{N}$ set 
+$t_2 = t_2 - 1$ to avoid counting a draw as a win.
+
+```{r get-solution-1}
+solve_race <- function(races) {
+  D <- sqrt(races[, "time"] ^ 2 / 4 - races[, "dist"])
+  t1 <- races[, "time"] / 2 - D
+  t2 <- races[, "time"] / 2 + D
+  lwr <- pmin(t1, t2)
+  upr <- pmax(t1, t2)
+  exact <- abs(lwr - round(lwr, 0L)) <= sqrt(.Machine$double.eps)
+  lwr[exact] <- lwr[exact] + 1
+  exact <- abs(upr - round(upr, 0L)) <= sqrt(.Machine$double.eps)
+  upr[exact] <- upr[exact] - 1
+  prod(floor(upr) - ceiling(lwr) + 1L)
+}
+
+solve_race(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+With the closed formula in place, we just need to plug in the much larger number to solve
+the puzzle.
+
+```{r get-solution-2}
+solve_single_race <- function(races) {
+  race <- apply(races, 2L, paste, collapse = "")
+  storage.mode(race) <- "numeric"
+  race <- matrix(race, nrow = 1L, dimnames = list(NULL, colnames(races)))
+  solve_race(race)
+}
+solve_single_race(puzzle_data)
+```
