@@ -1,0 +1,223 @@
+---
+params:
+   task_nr: 7
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(forcats)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  text_block[nzchar(text_block)] %>% 
+    str_split("\\s+") %>% 
+    map(function(hand) {
+      cards <- str_split(hand[[1L]], "") %>% 
+        extract2(1L) %>% 
+        factor(c("A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"))
+      bet <- as.integer(hand[[2L]])
+      list(cards = cards, bet = bet)
+    })
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We first determine the type of the hand and assign a type value with `1` being the 
+strongest hand and `7` being the weakest. Then we use th intrinsic factor ordering to
+determine the order of cards for tie breakers. Eventually, we sort the hands 
+deceasingly according to this order relation and sum their bets multiplied by their rank.
+
+
+```{r get-solution-1}
+rank_hand <- function(cards) {
+  hist <- cards %>% 
+    table() %>% 
+    c() %>% 
+    unname() %>% 
+    sort()
+  
+  hist <- hist[hist > 0L] ## remove empty counts (factor counts keep zero counts)
+  key_hist <- paste(hist, collapse = "-")
+  rules <- list(
+    "5"         = 1L,
+    "1-4"       = 2L,
+    "2-3"       = 3L,
+    "1-1-3"     = 4L,
+    "1-2-2"     = 5L,
+    "1-1-1-2"   = 6L,
+    "1-1-1-1-1" = 7L
+  )
+  type <- rules[[key_hist]]
+  c(type, xtfrm(cards)) %>% 
+    set_names("type", sprintf("c%02d", 1:5))
+}
+
+rank_hands <- function(hands, rank_fn) {
+  args <- map(hands, ~ rank_fn(.x$cards)) %>% 
+    do.call(rbind, .) %>% 
+    as.data.frame() %>% 
+    as.list()
+  args$decreasing <- TRUE
+  ord <- do.call(order, args)
+  sum(map_int(hands[ord], "bet") * seq_along(hands))
+}
+
+rank_hands(puzzle_data, rank_hand)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part, we build a lookup table, which determines how we can improve our hand
+given the current distribution of cards as well as the number of jokers. All what is left,
+is to down weigh the importance of the joker. The we cna use the same algorithm as before 
+with this new ranking function.
+
+```{r get-solution-2}
+rank_hand_with_joker <- function(cards) {
+  cards <- fct_relevel(cards, "J", after = Inf)
+  hist <- cards %>% 
+    table() %>% 
+    c() %>% 
+    sort()
+  nr_j <- coalesce(hist["J"], 0L)
+  hist <- hist[hist > 0L] %>% 
+    unname()
+  key_hist <- paste(hist, collapse = "-")
+  ## rules describes how we can improve our hand (given by the distribution) 
+  ## depending on the number of jokers we have
+  ## e.g. 1-2-2: 
+  ## * no joker => remains 2 pairs
+  ## * 1 joker => becomes a full house
+  ## * 2 jokers => becomes 4-of-a-kind
+  rules <- list(
+    "1-1-1-1-1" = c("0" = 7L, "1" = 6L),
+    "1-1-1-2"   = c("0" = 6L, "1" = 4L, "2" = 4L),
+    "1-2-2"     = c("0" = 5L, "1" = 3L, "2" = 2L),
+    "1-1-3"     = c("0" = 4L, "1" = 2L, "3" = 2L),
+    "2-3"       = c("0" = 3L, "2" = 1L, "3" = 1L),
+    "1-4"       = c("0" = 2L, "1" = 1L, "4" = 1L),
+    "5"         = c("0" = 1L, "5" = 1L)
+  )
+  
+  type <- rules[[key_hist]][[as.character(nr_j)]]
+  c(type, xtfrm(cards)) %>% 
+    set_names("type", sprintf("c%02d", 1:5))
+}
+
+
+rank_hands(puzzle_data, rank_hand_with_joker)
+
+```
