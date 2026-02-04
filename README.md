@@ -51,7 +51,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 5](https://thothal.github.io/AoC/2023_task5.html)
 - [x] [Day 6](https://thothal.github.io/AoC/2023_task6.html)
 - [x] [Day 7](https://thothal.github.io/AoC/2023_task7.html)
-- [ ] Day 8
+- [x] [Day 8](https://thothal.github.io/AoC/2023_task8.html)
 - [ ] Day 9
 - [ ] Day 10
 - [ ] Day 11
