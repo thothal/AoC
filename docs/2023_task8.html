@@ -6,7 +6,7 @@
     <meta name="generator" content="pandoc" />
 
     
-        <meta name="date" content="2026-02-04" />
+        <meta name="date" content="2026-02-05" />
     
     <title>Task 8   </title>
 
@@ -1821,7 +1821,7 @@ margin-left: 0 !important;
                 - <a href="mailto:thorn.thaler@thothal.at" class="email">thorn.thaler@thothal.at</a>&lt;
           <br>
       </p>
-         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2026-02-04</p>
+         <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2026-02-05</p>
            
 
    
@@ -2033,6 +2033,9 @@ Simultaneously start on every node that ends with <code>A</code>. <em>How many s
 </div>
 <div id="solution-1" class="section level3" number="2.2.2">
 <h3><span class="header-section-number">2.2.2</span> Solution</h3>
+<p>For teh second part, we start at each start simultaneously, until we reach a dstination
+node. We count teh steps until this event. Once we found the destination node for each
+start, we calculate the least sommon multiplier of all the steps to get the final result.</p>
 <pre class="r"><code>navigate_wasteland_ghosts &lt;- function(edges, dirs) {
   nodes &lt;- ls(edges)
   goals &lt;- nodes[str_sub(nodes, -1L) == &quot;Z&quot;]
@@ -2059,7 +2062,6 @@ Simultaneously start on every node that ends with <code>A</code>. <em>How many s
     reduce(LCM) %&gt;%
     print(digits = 9L)
 }
-
 
 navigate_wasteland_ghosts(puzzle_data$edges, puzzle_data$dirs)</code></pre>
 <pre><code>## [1] 22103062509257</code></pre>
