@@ -1,6 +1,6 @@
 ---
 params:
-   task_nr: 8
+   task_nr: 9
    year: 2023
 title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
 author: 
@@ -72,7 +72,6 @@ library(magrittr)
 library(dplyr)
 library(purrr)
 library(stringr)
-library(numbers)
 ```
 
 ## Retrieve Data from `r tt("AoC")`
@@ -93,17 +92,9 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       str_split("\n") %>% 
       extract2(1L)
   }
-  text_block <- text_block[nzchar(text_block)]
-  dirs <- text_block[1L] %>% 
-    str_split("") %>% 
-    extract2(1L)
-  edges <- text_block[-1L] %>% 
-    str_remove_all("\\(|\\)") %>% 
-    str_split(" = |, ")
-  nms <- map_chr(edges, 1L)
-  edges <- map(edges, ~ list(L = .x[[2L]], R = .x[[3L]])) %>% 
-    set_names(nms)
-  list(dirs = dirs, edges = edges)
+  text_block[nzchar(text_block)] %>% 
+    str_extract_all("-?\\d+") %>% 
+    map(as.integer)
 }
 
 puzzle_data <- local({
@@ -129,27 +120,28 @@ cat(puzzle[[1]])
 
 ### Solution
 
-We use an environment for storing left and right neighbor for fast traversal. We then 
-simply  follow the route until the goal.
-
+We use `diff` until all values are equal to zero. Eventually we take the `cumsum` of the
+last values of each `diff` to get the extrapolated values.
 
 ```{r get-solution-1}
-navigate_wasteland <- function(edges, dirs) {
-  pos <- "AAA"
-  goal <- "ZZZ"
-  ptr <- 1L
-  cnt <- 0L
-  while (pos != goal) {
-    cnt <- cnt + 1L
-    next_dir <- dirs[ptr]
-    pos <- edges[[pos]][[next_dir]]
-    ptr <- ptr %% length(dirs) + 1L
+extrapolate_values <- function(sequences) {
+  extrapolate <- function(sequence) {
+    diffs <- vector("list", length(sequence) - 1L)
+    ptr <- 1L
+    diffs[[ptr]] <- sequence
+    while(any(diffs[[ptr]] != 0L)) {
+      diffs[[ptr + 1L]] <- diff(diffs[[ptr]])
+      ptr <- ptr + 1L
+    }
+    preds <- diffs[1:ptr] %>% 
+      map_int(~ .x[length(.x)]) %>% 
+      cumsum()
+    preds[length(preds)]
   }
-  cnt
+  map_int(sequences, extrapolate) %>% 
+    sum()
 }
-
-navigate_wasteland(puzzle_data$edges, puzzle_data$dirs)
-
+extrapolate_values(puzzle_data)
 ```
 
 ## Part 2
@@ -162,37 +154,25 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For teh second part, we start at each start simultaneously, until we reach a dstination 
-node. We count teh steps until this event. Once we found the destination node for each 
-start, we calculate the least sommon multiplier of all the steps to get the final result.
+This is very similar to the first puzzle, but this time we reduce the list by 
+consequently subtracting the predictions.
 
 ```{r get-solution-2}
-navigate_wasteland_ghosts <- function(edges, dirs) {
-  nodes <- ls(edges)
-  goals <- nodes[str_sub(nodes, -1L) == "Z"]
-  pos <- nodes[str_sub(nodes, -1L) == "A"]
-  path_len <- rep(0L, length(pos))
-  is_active <- rep(TRUE, length(pos))
-  ptr <- 1L
-  while (any(is_active)) {
-    next_dir <- dirs[ptr]
-    for (i in seq_along(pos)) {
-      if (!is_active[i]) {
-        next
-      }
-      nb <- edges[[pos[[i]]]][[next_dir]]
-      pos[[i]] <- nb
-      path_len[[i]] <- path_len[[i]] + 1L
-      if (nb %in% goals) {
-        is_active[i] <- FALSE
-      }
+extrapolate_values <- function(sequences) {
+  extrapolate <- function(sequence) {
+    diffs <- vector("list", length(sequence) - 1L)
+    ptr <- 1L
+    diffs[[ptr]] <- sequence
+    while(any(diffs[[ptr]] != 0L)) {
+      diffs[[ptr + 1L]] <- diff(diffs[[ptr]])
+      ptr <- ptr + 1L
     }
-    ptr <- ptr %% length(dirs) + 1L
+    diffs[(ptr - 1L):1L] %>% 
+      map_int(~ .x[1L]) %>% 
+      reduce(\(y, x) x - y, .init = 0L)
   }
-  path_len %>% 
-    reduce(LCM) %>%
-    print(digits = 9L)
+  map_int(sequences, extrapolate) %>% 
+    sum()
 }
-
-navigate_wasteland_ghosts(puzzle_data$edges, puzzle_data$dirs)
+extrapolate_values(puzzle_data)
 ```
