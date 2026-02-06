@@ -1,0 +1,330 @@
+---
+params:
+   task_nr: 10
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  text_block[nzchar(text_block)] %>% 
+   str_split("") %>% 
+    do.call(rbind, .)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We follow the path in the first valid direction and count its length. The tile furthest
+away is at half the length.
+
+```{r get-solution-1}
+does_fit <- function(piece, nb_1, nb_2) {
+  if (piece == "|") {
+    nb_1 %in% c("|", "7", "F") &&
+      nb_2 %in% c("|", "L", "J")
+  } else if (piece == "-") {
+    nb_1 %in% c("-", "F", "L") &&
+      nb_2 %in% c("-", "J", "7")
+  } else if (piece == "L") {
+    nb_1 %in% c("|", "F", "7") &&
+      nb_2 %in% c("-", "J", "7")
+  } else if (piece == "J") {
+    nb_1 %in% c("|", "F", "7") &&
+      nb_2 %in% c("-", "L", "F")
+  } else if (piece == "7") {
+    nb_1 %in% c("|", "J", "L") &&
+      nb_2 %in% c("-", "L", "F")
+  } else if (piece == "F") {
+    nb_1 %in% c("|", "J", "L") &&
+      nb_2 %in% c("-", "J", "7")
+  }
+}
+
+wander_pipes <- function(pipes) {
+  start <- pos <- which(pipes == "S", arr.ind = TRUE)
+  dirs <- rbind(
+    "^" = c(-1L, 0L),
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L),
+    "<" = c(0L, -1L)
+  )
+  turns <- list(
+    "|" = c("v" = "v", "^" = "^"),
+    "-" = c(">" = ">", "<" = "<"),
+    "L" = c("v" = ">", "<" = "^"),
+    "J" = c("v" = "<", ">" = "^"),
+    "7" = c("^" = "<", ">" = "v"),
+    "F" = c("^" = ">", "<" = "v")
+  )
+  path <- array(0L, dim(pipes))
+  wander <- function(pos, dir) {
+    dis <- 1L
+    while (!all(pos == c(start))) {
+      path[pos] <<- 1L
+      sym <- pipes[pos]
+      dir <- turns[[sym]][dir]
+      pos <- pos + dirs[dir, ]
+      dis <- dis + 1L
+    }
+    dis
+  }
+  nbs <- t(t(dirs) + c(start))
+  start_dir <- case_when(
+    pipes[nbs["^", , drop = FALSE]] %in% c("|", "7", "F") ~ "^",
+    pipes[nbs[">", , drop = FALSE]] %in% c("-", "7", "J") ~ ">",
+    pipes[nbs["v", , drop = FALSE]] %in% c("|", "L", "J") ~ "v",
+    pipes[nbs["<", , drop = FALSE]] %in% c("-", "L", "F") ~ "<"
+  )
+  res <- wander(nbs[start_dir, , drop = FALSE], start_dir)
+  ## replace start tile by correct piece
+  first_tile <- pipes[nbs[start_dir, , drop = FALSE]]
+  connectors <- matrix(
+    c(NA_character_, "L", "|", "J", "L", NA_character_, "F", "-",
+      "|", "F", NA_character_, "7", "J", "-", "7", NA_character_),
+    4L, 4L,
+    dimnames = list(c("^", ">", "v", "<"),
+                    c("^", ">", "v", "<"))
+  )
+  for (dir in setdiff(rownames(dirs), start_dir)) {
+    piece <- connectors[start_dir, dir]
+    if (piece == "|") {
+      nb_1 <- pipes[nbs["^", , drop = FALSE]]
+      nb_2 <- pipes[nbs["v", , drop = FALSE]]
+    } else if (piece == "-") {
+      nb_1 <- pipes[nbs["<", , drop = FALSE]]
+      nb_2 <- pipes[nbs[">", , drop = FALSE]]
+    } else if (piece == "L") {
+      nb_1 <- pipes[nbs["^", , drop = FALSE]]
+      nb_2 <- pipes[nbs[">", , drop = FALSE]]
+    } else if (piece == "J") {
+      nb_1 <- pipes[nbs["^", , drop = FALSE]]
+      nb_2 <- pipes[nbs["<", , drop = FALSE]]
+    } else if (piece == "7") {
+      nb_1 <- pipes[nbs["v", , drop = FALSE]]
+      nb_2 <- pipes[nbs["<", , drop = FALSE]]
+    } else if (piece == "F") {
+      nb_1 <- pipes[nbs["v", , drop = FALSE]]
+      nb_2 <- pipes[nbs[">", , drop = FALSE]]
+    }
+    if (does_fit(piece, nb_1, nb_2)) {
+      break
+    }
+  }
+  path[start] <- match(piece, c("|", "-", "L", "J", "7", "F")) + 1L
+  list(dist = res / 2L, path = path)  
+}
+res <- wander_pipes(puzzle_data)
+res$dist
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To solve the second part, we upscale the original pipe layout, where we place properly 
+shaped walls in place of the original pipes. Then all we need to do is to floodfill from
+the border and count unflooded cells.
+
+```{r get-solution-2}
+clip <- function(x) {
+  UseMethod("clip")
+}
+
+clip.pipes <- function(x) {
+  apply(x, 1L, paste, collapse = "") %>% 
+    paste(collapse = "\n") %>% 
+    clipr::write_clip()
+  invisible(x)
+}
+flood_pipes <- function(pipes, path) {
+  embed <- array(".", 3L * dim(pipes))
+  nr <- nrow(embed)
+  nc <- ncol(embed)
+  tiles <- list(
+    "|" = matrix(c(".", ".", ".", "#", "#", "#", ".", ".", "."), 3L, 3L),
+    "-" = matrix(c(".", "#", ".", ".", "#", ".", ".", "#", "."), 3L, 3L),
+    "L" = matrix(c(".", ".", ".", "#", "#", ".", ".", "#", "."), 3L, 3L),
+    "J" = matrix(c(".", "#", ".", "#", "#", ".", ".", ".", "."), 3L, 3L),
+    "7" = matrix(c(".", "#", ".", ".", "#", "#", ".", ".", "."), 3L, 3L),
+    "F" = matrix(c(".", ".", ".", ".", "#", "#", ".", "#", "."), 3L, 3L)
+  )
+  ## first embed the matrix in a larger matrix 
+  ## where each tile is represented by a 3x3 tile
+  idx <- which(path != 0, arr.ind = TRUE)
+  for (i in seq_len(nrow(idx))) {
+    pos <- idx[i, , drop = FALSE]
+    sym <- pipes[pos]
+    if (sym == "S") {
+      sym <- names(tiles)[[path[pos] - 1L]]
+    }
+    mid <- 3L * pos - 1L
+    dx <- expand.grid(
+      row = (mid[, 1L] - 1L):(mid[, 1L] + 1L),
+      col = (mid[, 2L] - 1L):(mid[, 2L] + 1L)
+    ) %>% 
+      as.matrix()
+    embed[dx] <- tiles[[sym]]
+  }
+  ## then flood all empty tiles from the outside
+  dirs <- rbind(
+    "^" = c(-1L, 0L),
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L),
+    "<" = c(0L, -1L)
+  )
+  flood_tiles <- which(embed == ".", arr.ind = TRUE)
+  flood_tiles <- flood_tiles[flood_tiles[, 1L] == 1L |
+                               flood_tiles[, 1L] == nr |
+                               flood_tiles[, 2L] == 1L |
+                               flood_tiles[, 2L] == nc, , drop = FALSE]
+  while (nrow(flood_tiles) > 0L) {
+    embed[flood_tiles] <- "#"
+    nbs <- map(1:4, \(i) {
+      dir <- dirs[i, ]
+      t(t(flood_tiles) + dir)
+    }) %>% 
+      do.call(rbind, .)
+    nbs <- nbs[!duplicated(nbs), , drop = FALSE]
+    nbs <- nbs[nbs[, 1L] >= 1L &
+                 nbs[, 1L] <= nr &
+                 nbs[, 2L] >= 1L &
+                 nbs[, 2L] <= nc, , drop = FALSE]
+    flood_tiles <- nbs[embed[nbs] == ".", , drop = FALSE]
+  }
+  ## finally map the embedded matrix back to its original size
+  pipes[] <- NA_character_
+  nr <- nrow(pipes)
+  nc <- ncol(pipes)
+  empty <- rep(".", 9L)
+  for (r in 1:nr) {
+    for (c in 1:nc) {
+      pos <- cbind(r, c)
+      mid <- 3L * pos - 1L
+      dx <- expand.grid(
+        row = (mid[, 1L] - 1L):(mid[, 1L] + 1L),
+        col = (mid[, 2L] - 1L):(mid[, 2L] + 1L)
+      ) %>% 
+        as.matrix()
+      if (identical(embed[dx], empty)) {
+        pipes[pos] <- "."
+      } else {
+        pipes[pos] <- "#"
+      }
+    }
+  }
+  sum(pipes == ".")
+}
+flood_pipes(puzzle_data, res$path)
+```
