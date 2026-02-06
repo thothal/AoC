@@ -238,16 +238,6 @@ shaped walls in place of the original pipes. Then all we need to do is to floodf
 the border and count unflooded cells.
 
 ```{r get-solution-2}
-clip <- function(x) {
-  UseMethod("clip")
-}
-
-clip.pipes <- function(x) {
-  apply(x, 1L, paste, collapse = "") %>% 
-    paste(collapse = "\n") %>% 
-    clipr::write_clip()
-  invisible(x)
-}
 flood_pipes <- function(pipes, path) {
   embed <- array(".", 3L * dim(pipes))
   nr <- nrow(embed)
