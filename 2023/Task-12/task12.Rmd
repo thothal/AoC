@@ -1,0 +1,288 @@
+---
+params:
+   task_nr: 12
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  rpts <- text_block[nzchar(text_block)] %>% 
+   str_split(" ")
+  map(rpts, function(line) {
+    chk <- str_split(line[[2L]], ",") %>% 
+      extract2(1L) %>% 
+      as.integer()
+    rpt <- str_split(line[[1L]], "") %>% 
+      extract2(1L)
+    list(rpt = rpt, chk = chk)
+  })
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+```{r get-solution-1}
+count_fixes <- function(rpts) {
+  
+  is_valid <- function(rpt, chk) {
+    n <- length(rpt)
+    has_q <- rpt == "?"
+    if (any(has_q)) {
+      last <- which(has_q) %>% 
+        max()
+      rpt <- rpt[(last + 1L):length(rpt)]  
+    }
+    partial <- any(has_q)
+    rl <- rle(rpt)
+    ids <- which(rl$values == "#")
+    nb  <- length(ids)
+    
+    ## more # blocks than allowed
+    if (nb > length(chk)) {
+      return(FALSE)
+    }
+    if (!partial && nb != length(chk)) {
+      return(FALSE)
+    }
+    chk <- tail(chk, nb)
+    for (i in seq_len(nb)) {
+      len <- rl$lengths[ids[i]]
+      want <- chk[i]
+      
+      if (i > 1L || !partial) {
+        ## finished blocks must match exactly
+        if (len != want) {
+          return(FALSE)
+        }
+      } else {
+        ## last block & partial may be smaller but not larger
+        if (len > want) {
+          return(FALSE)
+        }
+      }
+    }
+    TRUE
+  }
+  
+  count <- function(rpt, chk, pos = length(rpt)) {
+    i <<- i + 1L
+    if (pos <= 0L) {
+      return(list(res = 1L))
+    }
+    
+    # Skip already fixed positions
+    while (pos >= 1L && rpt[pos] %in% c(".", "#")) {
+      pos <- pos - 1L
+    }
+    
+    if (pos <= 0L) {
+      return(list(res = 1L))
+    }
+    
+    rpt1 <- rpt2 <- rpt
+    
+    rpt1[pos] <- "#"
+    rpt2[pos] <- "."
+    
+    total <- 0L
+    
+    if (is_valid(rpt1, chk)) {
+      total <- total + Recall(rpt1, chk, pos - 1L)$res
+    }
+    
+    if (is_valid(rpt2, chk)) {
+      total <- total + Recall(rpt2, chk, pos - 1L)$res
+    }
+    list(res = total, i = i)
+  }
+  count_fixes_fast <- function(rpt, chk) {
+    n  <- length(rpt)
+    nb <- length(chk)
+    
+    memo <- new.env()
+    
+    dfs <- function(pos, b, run) {
+      key <- paste(pos, b, run, sep = ",")
+      if (!is.null(memo[[key]])) return(memo[[key]])
+      
+      if (pos > n) {
+        # Am Ende: alle Blöcke müssen exakt passen
+        ok <- (b == nb && run == 0)
+        memo[[key]] <- as.integer(ok)
+        return(memo[[key]])
+      }
+      
+      res <- 0L
+      c <- rpt[pos]
+      
+      try_place_dot <- c != "#"      # nur wenn '.' möglich
+      try_place_hash <- c != "."     # nur wenn '#' möglich
+      
+      # ---- Fall '.' ----
+      if (try_place_dot) {
+        if (run > 0) {
+          # Block enden → Länge muss passen
+          if (b < nb && run == chk[b + 1]) {
+            res <- res + dfs(pos + 1, b + 1, 0)
+          }
+        } else {
+          # kein offener Block
+          res <- res + dfs(pos + 1, b, 0)
+        }
+      }
+      
+      # ---- Fall '#' ----
+      if (try_place_hash) {
+        if (b < nb && run + 1 <= chk[b + 1]) {
+          res <- res + dfs(pos + 1, b, run + 1)
+        }
+      }
+      
+      memo[[key]] <- res
+      res
+    }
+    
+    dfs(1, 0, 0)
+  }
+  i <- 0
+  imap_int(rpts, function(.x, .y) {
+    cat("Checking spring ", .y, "\t", sep = "")
+    i <<- 0
+    res <- count_fixes_fast(.x$rpt, .x$chk)
+    cat("(", res$i, ")\n", sep = "")
+    res$res
+  }) %>% 
+    sum()
+}
+
+count_fixes(puzzle_data)
+
+p2 <- map(puzzle_data, function(p) {
+  list(rpt = c(rep(c(p$rpt, "?"), 4L), p$rpt),
+       chk = rep(p$chk, 5L))
+})
+
+count_fixes(p2)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+All we need to do is to provide a larger expansion factor to the algorithm of part 1.
+
+```{r get-solution-2}
+calculate_distance(puzzle_data, 1000000L)
+```
