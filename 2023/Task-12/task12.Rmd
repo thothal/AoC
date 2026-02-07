@@ -127,8 +127,11 @@ cat(puzzle[[1]])
 
 ### Solution
 
-```{r get-solution-1}
-count_fixes <- function(rpts) {
+For the first part we implement a brute force algorithm (with some pruning though), where
+we generate each replacement and count valid solutions.
+
+```{r get-solution-1, cache = TRUE}
+count_fixes_brute_force <- function(rpts) {
   
   is_valid <- function(rpt, chk) {
     n <- length(rpt)
@@ -171,9 +174,8 @@ count_fixes <- function(rpts) {
   }
   
   count <- function(rpt, chk, pos = length(rpt)) {
-    i <<- i + 1L
     if (pos <= 0L) {
-      return(list(res = 1L))
+      return(1L)
     }
     
     # Skip already fixed positions
@@ -182,7 +184,7 @@ count_fixes <- function(rpts) {
     }
     
     if (pos <= 0L) {
-      return(list(res = 1L))
+      return(1L)
     }
     
     rpt1 <- rpt2 <- rpt
@@ -193,82 +195,19 @@ count_fixes <- function(rpts) {
     total <- 0L
     
     if (is_valid(rpt1, chk)) {
-      total <- total + Recall(rpt1, chk, pos - 1L)$res
+      total <- total + Recall(rpt1, chk, pos - 1L)
     }
     
     if (is_valid(rpt2, chk)) {
-      total <- total + Recall(rpt2, chk, pos - 1L)$res
+      total <- total + Recall(rpt2, chk, pos - 1L)
     }
-    list(res = total, i = i)
+    total
   }
-  count_fixes_fast <- function(rpt, chk) {
-    n  <- length(rpt)
-    nb <- length(chk)
-    
-    memo <- new.env()
-    
-    dfs <- function(pos, b, run) {
-      key <- paste(pos, b, run, sep = ",")
-      if (!is.null(memo[[key]])) return(memo[[key]])
-      
-      if (pos > n) {
-        # Am Ende: alle Blöcke müssen exakt passen
-        ok <- (b == nb && run == 0)
-        memo[[key]] <- as.integer(ok)
-        return(memo[[key]])
-      }
-      
-      res <- 0L
-      c <- rpt[pos]
-      
-      try_place_dot <- c != "#"      # nur wenn '.' möglich
-      try_place_hash <- c != "."     # nur wenn '#' möglich
-      
-      # ---- Fall '.' ----
-      if (try_place_dot) {
-        if (run > 0) {
-          # Block enden → Länge muss passen
-          if (b < nb && run == chk[b + 1]) {
-            res <- res + dfs(pos + 1, b + 1, 0)
-          }
-        } else {
-          # kein offener Block
-          res <- res + dfs(pos + 1, b, 0)
-        }
-      }
-      
-      # ---- Fall '#' ----
-      if (try_place_hash) {
-        if (b < nb && run + 1 <= chk[b + 1]) {
-          res <- res + dfs(pos + 1, b, run + 1)
-        }
-      }
-      
-      memo[[key]] <- res
-      res
-    }
-    
-    dfs(1, 0, 0)
-  }
-  i <- 0
-  imap_int(rpts, function(.x, .y) {
-    cat("Checking spring ", .y, "\t", sep = "")
-    i <<- 0
-    res <- count_fixes_fast(.x$rpt, .x$chk)
-    cat("(", res$i, ")\n", sep = "")
-    res$res
-  }) %>% 
+  map_int(rpts, ~ count(.x$rpt, .x$chk)) %>% 
     sum()
 }
 
-count_fixes(puzzle_data)
-
-p2 <- map(puzzle_data, function(p) {
-  list(rpt = c(rep(c(p$rpt, "?"), 4L), p$rpt),
-       chk = rep(p$chk, 5L))
-})
-
-count_fixes(p2)
+count_fixes_brute_force(puzzle_data)
 ```
 
 ## Part 2
@@ -281,8 +220,96 @@ cat(puzzle[[2]])
 
 ### Solution
 
-All we need to do is to provide a larger expansion factor to the algorithm of part 1.
+For the second part, brute force is out of question and we should use a smarter algorithm.
+Hence, we fall back to dynamic programming, where a state `(i, j, run)` is given by:
 
-```{r get-solution-2}
-calculate_distance(puzzle_data, 1000000L)
+* `i`: actual position in the string (from the beginning).
+* `j`: number of blocks already satisfying the checksum.
+* `run`: length of the current block.
+
+At each position we do the following:
+
+1. If the character is `.` or `?` we can replace it by a `.` and we need to check the 
+following points:
+  * If `run > 0` the actual block ends and it must fit **exactly** the current check sum,
+    i.e. `run == chk[j]`. Then we set `j++` and `run = 0`.
+  * If `run == 0` then we simply continue.
+1. If the character is `.` or `#` we can replace it by a `#` and we need to check the 
+following points:
+  * We are enlarging the current block (`run++`), which is only possibly if 
+    `run <= chk[j]` and `j < length(chk)` (the last condition means that there is at least
+    still one "open" block).
+    
+We stop the algorithm if `i == length(pattern) + 1L` and check if the current block (if we 
+are currently building one) is matching the last checksum and that all checksums were 
+"used". If this is the case we can return 1 and 0 otherwise.
+
+Additionally, we use memoisation to avoid recalculating known states.
+
+```{r get-solution-2, cache = TRUE}
+new_puzzle_data <- map(puzzle_data, function(grp) {
+  list(
+    rpt = c(rep(c(grp$rpt, "?"), 4L), grp$rpt),
+    chk = rep(grp$chk, 5L)
+  )
+})
+
+count_fixes_dp <- function(puzzle_data) {
+  solve <- function(pattern, chk) {
+    memo <- new.env(parent = emptyenv())
+    N <- length(pattern)
+    K <- length(chk)
+    dp <- function(i, j, run) {
+      key <- paste(i, j, run, sep = "_")
+      if (exists(key, memo, inherits = FALSE)) {
+        return(memo[[key]])
+      }
+      if (i == N + 1L) {
+        ## we processed the last character in the pattern
+        if (run > 0L) {
+          ## if there is still an open block, check it
+          if (run == chk[j]) {
+            ## last block properly filled
+            j <- j + 1L
+          } else {
+            ## last block is not filled
+            memo[[key]] <<- 0
+            return(0)
+          }
+        }
+        ## j == K + 1L we filled all blocks
+        res <- if_else(j == K + 1L, 1L, 0L)
+        memo[[key]] <<- res
+        return(res)
+      }
+      res <- 0
+      sym <- pattern[i]
+      ## option "."
+      if (sym %in% c(".", "?")) {
+        if (run == 0L) {
+          ## we are not in a block currently => simply proceed with the next character
+          res <- res + Recall(i + 1L, j, 0L)
+        } else if (j <= K && run == chk[j]) {
+          ## we still have blocks available and the current block is properly filled
+          res <- res + Recall(i + 1L, j + 1L, 0L)
+        }
+      }
+      ## option "#"
+      if (sym %in% c("#", "?")) {
+        if (j <= K && run < chk[j]) {
+          ## we can still fill the current block => add 1 to its length anc ontinue
+          res <- res + Recall(i + 1L, j, run + 1L)
+        }
+      }
+      memo[[key]] <<- res
+      res
+    }
+    dp(1L, 1L, 0L)
+  }
+
+  map_dbl(puzzle_data, ~ solve(.x$rpt, .x$chk)) %>%
+    sum()
+}
+res <- count_fixes_dp(new_puzzle_data)  
+print(res, digits = 16)
 ```
