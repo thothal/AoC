@@ -1,0 +1,209 @@
+---
+params:
+   task_nr: 13
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  text_block %>% 
+    str_remove("\n$") %>% 
+    str_split("\n\n") %>% 
+    extract2(1L) %>% 
+    str_split("\n") %>% 
+    map(~ str_split(.x, "") %>% 
+          do.call(rbind, .))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We loop through all inter column (row) positions, and compare the sub matrices. If they
+are identical we can return the properly scaled index. As we will need to come up with 
+new axes in part 2, we include an exclusion parameter, which avoids exiting the loop 
+too early.
+
+```{r get-solution-1}
+find_axis <- function(map, vertical = TRUE, exclude = -1L) {
+  n <- if_else(vertical, ncol(map), nrow(map))
+  f <- if_else(vertical, 1L, 100L)
+  if (!vertical) {
+    map <- t(map)
+  }
+  for (i in 1:(n - 1L)) {
+    k <- min(i, n - i)
+    if (i <= k) {
+      part_1 <- 1:i
+      part_2 <- (i + k):(i + 1L)
+    } else {
+      part_1 <- (i - k + 1L):i
+      part_2 <- n:(n - k + 1L)
+    }
+    if (identical(map[, part_1, drop = FALSE], 
+                  map[, part_2, drop = FALSE])) {
+      if (f * i != exclude) {
+        return(f * i)
+      }
+    }
+  }
+  NA_integer_
+}
+
+find_mirror_axis <- function(maps) {
+  wrapper <- function(map) {
+    res <- find_axis(map)
+    if (is.na(res)) {
+      res <- find_axis(map, FALSE)
+    }
+    res
+  }
+  map_int(maps, wrapper) %>% 
+    sum()
+}
+
+find_mirror_axis(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We use a brute force approach, replacing one element at a time and recalculating the
+mirror index. If it changes we return it, otherwise we continue. To avoid getting the
+same  (earlier) index, we use the exclusion parameter, which forces the workhors function
+to run until we found a *different* axis.
+
+```{r get-solution-2, cache = TRUE}
+fix_smudge <- function(maps) {
+  smudge <- function(map) {
+    n <- length(map)
+    orig <- find_axis(map)
+    if (is.na(orig)) {
+      orig <- find_axis(map, FALSE)
+    }
+    for (i in seq_len(n)) {
+      new_map <- map
+      new_map[i] <- if_else(new_map[i] == ".", "#", ".")
+      new <- find_axis(new_map, exclude = orig)
+      if (!is.na(new)) {
+        return(new)
+      }
+      new <- find_axis(new_map, FALSE, exclude = orig)
+      if (!is.na(new)) {
+        return(new)
+      }
+    }
+  }
+  map_int(maps, smudge) %>% 
+    sum()
+}
+
+fix_smudge(puzzle_data)
+```
