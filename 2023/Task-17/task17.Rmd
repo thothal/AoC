@@ -1,0 +1,274 @@
+---
+params:
+   task_nr: 17
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(collections)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  res <- text_block[nzchar(text_block)] %>% 
+    str_split("") %>% 
+    do.call(rbind, .)
+  storage.mode(res) <- "integer"
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+
+cat(puzzle[[1]] %>% 
+      str_replace_all("\\\\", "\\\\\\\\"))
+```
+
+### Solution
+
+We solve this using a Dijkstra algorithm with an extended state, including the direction
+and the umber of steps taken so far in this directions to honor the movement restricions.
+
+```{r get-solution-1, cache = TRUE}
+find_path <- function(map) {
+  nr <- nrow(map)
+  nc <- ncol(map)
+  goal <- matrix(dim(map), 1L, dimnames = list(NULL, c("row", "col")))
+  start <- cbind(row = 1L, col = 1L)
+  dirs <- rbind(
+    "^" = c(-1L, 0L),
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L),
+    "<" = c(0L, -1L)
+  )
+  dist <- array(Inf, dim = c(dim(map), 4L, 3L))
+  pq <- priority_queue()
+  for (dir in 1:4) {
+    state <- cbind(start, dir = dir, steps = 0L, cost =  0L)
+    dist[cbind(start, dir, 1L)] <- 0L
+    pq$push(state, 0L)
+  }
+  while (pq$size() > 0L) {
+    state <- pq$pop()
+    if (all(state[, 1:2] == goal)) {
+      return(state[, "cost"])
+    }
+    if (state[, "steps"] > 0L && state[, "cost"] > dist[state[, -5L, drop = FALSE]]) {
+      ## we reached this field already at lower costs => skip
+      next
+    }
+    if (state[, "steps"] < 3L && state[, "steps"] > 0L) {
+      ## walk straight
+      new_pos <- state[, 1:2, drop = FALSE] + dirs[state[, "dir"], ]
+      if (new_pos[, 1L] >= 1L && new_pos[, 1L] <= nr &&
+          new_pos[, 2L] >= 1L && new_pos[, 2L] <= nc) {
+        new_cost <- state[, "cost"] + map[new_pos]
+        idx <- cbind(new_pos, dir = state[, "dir"], steps = state[, "steps"] + 1L)
+        if (new_cost < dist[idx]) {
+          dist[idx] <- new_cost
+          pq$push(cbind(idx, cost = new_cost), -new_cost)
+        }
+      }
+    }
+    for (new_dir in 1:4) {
+      if (new_dir %% 2L == state[, "dir"] %% 2L) {
+        ## no straight or 180° turns
+        next
+      }
+      new_pos <- state[, 1:2, drop = FALSE] + dirs[new_dir, ]
+      if (new_pos[, 1L] >= 1L && new_pos[, 1L] <= nr &&
+          new_pos[, 2L] >= 1L && new_pos[, 2L] <= nc) {
+        new_cost <- state[, "cost"] + map[new_pos]
+        idx <- cbind(new_pos, dir = new_dir, steps = 1L)
+        if (new_cost < dist[idx]) {
+          dist[idx] <- new_cost
+          pq$push(cbind(idx, cost = new_cost), -new_cost)
+        }
+      }
+    }
+  }
+  NA_integer_
+}
+
+find_path(puzzle_data)
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We use the same algorithmic idea, but implement the new moving restrictions.
+
+```{r get-solution-2, cache = TRUE}
+find_path_ultra <- function(map) {
+  nr <- nrow(map)
+  nc <- ncol(map)
+  goal <- matrix(dim(map), 1L, dimnames = list(NULL, c("row", "col")))
+  start <- cbind(row = 1L, col = 1L)
+  dirs <- rbind(
+    "^" = c(-1L, 0L),
+    ">" = c(0L, 1L),
+    "v" = c(1L, 0L),
+    "<" = c(0L, -1L)
+  )
+  dist <- array(Inf, dim = c(dim(map), 4L, 10L))
+  pq <- priority_queue()
+  for (dir in 1:4) {
+    state <- cbind(start, dir = dir, steps = 0L, cost =  0L)
+    dist[cbind(start, dir, 1L)] <- 0L
+    pq$push(state, 0L)
+  }
+  r <- 0L
+  while (pq$size() > 0L) {
+    r <- r + 1
+    state <- pq$pop()
+    if (all(state[, 1:2] == goal)) {
+      return(state[, "cost"])
+    }
+    if (state[, "steps"] > 0L && state[, "cost"] > dist[state[, -5L, drop = FALSE]]) {
+      ## we reached this field already at lower costs => skip
+      next
+    }
+    if (state[, "steps"] < 10L && state[, "steps"] > 0L) {
+      ## walk straight
+      new_pos <- state[, 1:2, drop = FALSE] + dirs[state[, "dir"], ]
+      if (new_pos[, 1L] >= 1L && new_pos[, 1L] <= nr &&
+          new_pos[, 2L] >= 1L && new_pos[, 2L] <= nc) {
+        new_cost <- state[, "cost"] + map[new_pos]
+        idx <- cbind(new_pos, dir = state[, "dir"], steps = state[, "steps"] + 1L)
+        if (new_cost < dist[idx]) {
+          dist[idx] <- new_cost
+          pq$push(cbind(idx, cost = new_cost), -new_cost)
+        }
+      }
+    }
+    if (state[, "steps"] == 0L || state[, "steps"] >= 4L) {
+      for (new_dir in 1:4) {
+        if (new_dir %% 2L == state[, "dir"] %% 2L) {
+          ## no straight or 180° turns
+          next
+        }
+        new_pos <- state[, 1:2, drop = FALSE] + dirs[new_dir, ]
+        if (new_pos[, 1L] >= 1L && new_pos[, 1L] <= nr &&
+            new_pos[, 2L] >= 1L && new_pos[, 2L] <= nc) {
+          new_cost <- state[, "cost"] + map[new_pos]
+          idx <- cbind(new_pos, dir = new_dir, steps = 1L)
+          if (new_cost < dist[idx]) {
+            dist[idx] <- new_cost
+            pq$push(cbind(idx, cost = new_cost), -new_cost)
+          }
+        }
+      }
+    }
+  }
+  NA_integer_
+}
+
+find_path_ultra(puzzle_data)
+```
