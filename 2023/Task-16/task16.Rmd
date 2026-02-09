@@ -116,13 +116,30 @@ puzzle_data <- local({
 ### Description
 
 ```{r show-puzzle-a, echo = FALSE, results = "asis"}
-cat(puzzle[[1]])
+
+cat(puzzle[[1]] %>% 
+      str_replace_all("\\\\", "\\\\\\\\"))
 ```
 
 ### Solution
 
-```{r get-solution-1, cache = TRUE}
-count_energized_tiles <- function(mirrors) {
+We make use of matrix indexing. Whenever, we hit a mirror or a splitter we change the 
+direction and add another beam respectively. We also keep track of visited fields 
+(together with the direction) and revisit them only of we er coming with a different
+direction. We use a bitmask to store this information.
+
+```{r get-solution-1}
+set_bit <- function(bitmask, i) {
+  new_bit <- bitwShiftL(1L, i - 1L)
+  bitwOr(bitmask, new_bit) 
+}
+
+is_visited <- function(bitmask, i) {
+  new_bit <- bitwShiftL(1L, i - 1L)
+  bitwAnd(bitmask, new_bit) != 0L
+}
+
+count_energized_tiles <- function(mirrors, start = cbind(1L, 0L, 2L)) {
   dirs <- rbind(
     "^" = c(-1L, 0L),
     ">" = c(0L, 1L),
@@ -131,23 +148,52 @@ count_energized_tiles <- function(mirrors) {
   )
   nr <- nrow(mirrors)
   nc <- ncol(mirrors)
-  visited <- matrix(FALSE, nr, nc)
-  pos <- cbind(1L, 0L, 2L)
-  turns <- matrix
+  visited <- matrix(0L, nr, nc)
+  pos <- start
+  turns <- matrix(c(2L, 1L, 4L, 3L,
+                    4L, 3L, 2L, 1L,
+                    -1L, 0L, -1L, 0L,
+                    0L, -1L, 0L, -1L,
+                    0L, 0L, 0L, 0L),
+                  4L, 5L,
+                  dimnames = list(rownames(dirs), c("/", "\\", "-", "|", ".")))
   while (nrow(pos) > 0L) {
-    new_pos <- pos[, 1:2, drop = FALSE] + dirs[pos[, 3L], , drop = FALSE]
+    new_pos <- pos
+    new_pos[, 1:2] <- new_pos[, 1:2, drop = FALSE] + dirs[pos[, 3L], , drop = FALSE]
     new_pos <- new_pos[new_pos[, 1L] >= 1L & new_pos[, 1L] <= nr &
-                         new_pos[, 2L] >= 1L & new_pos[, 2L] <= nc, , drop = FALSE]
-    new_pos <- new_pos[!visited[new_pos], , drop = FALSE]
-    visited[new_pos] <- TRUE
-    tiles <- mirrors[new_pos]
+      new_pos[, 2L] >= 1L & new_pos[, 2L] <= nc, , drop = FALSE]
+    new <- !is_visited(visited[new_pos[, 1:2, drop = FALSE]], new_pos[, 3L])
+    new_pos <- new_pos[new, , drop = FALSE]
+    cur_dir <- new_pos[, 3L]
+    visited[new_pos[, 1:2, drop = FALSE]] <- set_bit(visited[new_pos[, 1:2, drop = FALSE]],
+                                                     cur_dir)
+    tiles <- mirrors[new_pos[, 1:2, drop = FALSE]]
+    pos <- pos[0L, , drop = FALSE]
     for (i in seq_along(tiles)) {
-      if (tiles[i] %in% c("/", "\\")) {
-        
+      turn <- turns[cur_dir[i], tiles[i]]
+      if (turn == -1L) {
+        if (cur_dir[i] %% 2L == 1L) {
+          new_pos[i, 3L] <- 2L
+          pos <- rbind(pos, new_pos[i , , drop = FALSE])
+          new_pos[i, 3L] <- 4L
+          pos <- rbind(pos, new_pos[i , , drop = FALSE])
+        } else {
+          new_pos[i, 3L] <- 1L
+          pos <- rbind(pos, new_pos[i , , drop = FALSE])
+          new_pos[i, 3L] <- 3L
+          pos <- rbind(pos, new_pos[i , , drop = FALSE])
+        }
+      } else if (turn > 0L) {
+        new_pos[i, 3L] <- turn
+        pos <- rbind(pos, new_pos[i, , drop = FALSE])
+      } else{
+        pos <- rbind(pos, new_pos[i, , drop = FALSE])
       }
     }
   }
+  sum(visited != 0L)
 }
+count_energized_tiles(puzzle_data)
 ```
 
 ## Part 2
@@ -160,96 +206,23 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the second part, brute force is out of question and we should use a smarter algorithm.
-Hence, we fall back to dynamic programming, where a state `(i, j, run)` is given by:
-
-* `i`: actual position in the string (from the beginning).
-* `j`: number of blocks already satisfying the checksum.
-* `run`: length of the current block.
-
-At each position we do the following:
-
-1. If the character is `.` or `?` we can replace it by a `.` and we need to check the 
-following points:
-  * If `run > 0` the actual block ends and it must fit **exactly** the current check sum,
-    i.e. `run == chk[j]`. Then we set `j++` and `run = 0`.
-  * If `run == 0` then we simply continue.
-1. If the character is `.` or `#` we can replace it by a `#` and we need to check the 
-following points:
-  * We are enlarging the current block (`run++`), which is only possibly if 
-    `run <= chk[j]` and `j < length(chk)` (the last condition means that there is at least
-    still one "open" block).
-    
-We stop the algorithm if `i == length(pattern) + 1L` and check if the current block (if we 
-are currently building one) is matching the last checksum and that all checksums were 
-"used". If this is the case we can return 1 and 0 otherwise.
-
-Additionally, we use memoisation to avoid recalculating known states.
+We loop through all possible starts and find the maximum number of energized tiles using
+the algorithm form part 1.
 
 ```{r get-solution-2, cache = TRUE}
-new_puzzle_data <- map(puzzle_data, function(grp) {
-  list(
-    rpt = c(rep(c(grp$rpt, "?"), 4L), grp$rpt),
-    chk = rep(grp$chk, 5L)
+find_best_starting_position <- function(mirrors) {
+  nr <- nrow(mirrors)
+  nc <- ncol(mirrors)
+  starts <- rbind(
+    cbind(1:nr, 0L, 2L),
+    cbind(1:nr, nc + 1L, 4L),
+    cbind(0L, 1:nc, 3L),
+    cbind(nr + 1L, 1:nc, 1L)
   )
-})
-
-count_fixes_dp <- function(puzzle_data) {
-  solve <- function(pattern, chk) {
-    memo <- new.env(parent = emptyenv())
-    N <- length(pattern)
-    K <- length(chk)
-    dp <- function(i, j, run) {
-      key <- paste(i, j, run, sep = "_")
-      if (exists(key, memo, inherits = FALSE)) {
-        return(memo[[key]])
-      }
-      if (i == N + 1L) {
-        ## we processed the last character in the pattern
-        if (run > 0L) {
-          ## if there is still an open block, check it
-          if (run == chk[j]) {
-            ## last block properly filled
-            j <- j + 1L
-          } else {
-            ## last block is not filled
-            memo[[key]] <<- 0
-            return(0)
-          }
-        }
-        ## j == K + 1L we filled all blocks
-        res <- if_else(j == K + 1L, 1L, 0L)
-        memo[[key]] <<- res
-        return(res)
-      }
-      res <- 0
-      sym <- pattern[i]
-      ## option "."
-      if (sym %in% c(".", "?")) {
-        if (run == 0L) {
-          ## we are not in a block currently => simply proceed with the next character
-          res <- res + Recall(i + 1L, j, 0L)
-        } else if (j <= K && run == chk[j]) {
-          ## we still have blocks available and the current block is properly filled
-          res <- res + Recall(i + 1L, j + 1L, 0L)
-        }
-      }
-      ## option "#"
-      if (sym %in% c("#", "?")) {
-        if (j <= K && run < chk[j]) {
-          ## we can still fill the current block => add 1 to its length anc ontinue
-          res <- res + Recall(i + 1L, j, run + 1L)
-        }
-      }
-      memo[[key]] <<- res
-      res
-    }
-    dp(1L, 1L, 0L)
-  }
-
-  map_dbl(puzzle_data, ~ solve(.x$rpt, .x$chk)) %>%
-    sum()
+  n <- nrow(starts)
+  res <- map_int(seq_len(n), ~ count_energized_tiles(mirrors, starts[.x, , drop = FALSE]))
+  max(res)
 }
-res <- count_fixes_dp(new_puzzle_data)  
-print(res, digits = 16)
+
+find_best_starting_position(puzzle_data)
 ```
