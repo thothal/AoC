@@ -92,8 +92,8 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
       str_split("\n") %>% 
       extract2(1L)
   }
-  rpts <- text_block[nzchar(text_block)] %>% 
-   str_split("") %>% 
+  text_block[nzchar(text_block)] %>% 
+    str_split("") %>% 
     do.call(rbind, .)
   
 }

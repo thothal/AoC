@@ -1870,8 +1870,8 @@ parse_puzzle_data &lt;- function(text_block = readClipboard()) {
       str_split(&quot;\n&quot;) %&gt;% 
       extract2(1L)
   }
-  rpts &lt;- text_block[nzchar(text_block)] %&gt;% 
-   str_split(&quot;&quot;) %&gt;% 
+  text_block[nzchar(text_block)] %&gt;% 
+    str_split(&quot;&quot;) %&gt;% 
     do.call(rbind, .)
   
 }

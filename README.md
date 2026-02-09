@@ -60,7 +60,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 14](https://thothal.github.io/AoC/2023_task14.html)
 - [x] [Day 15](https://thothal.github.io/AoC/2023_task15.html)
 - [x] [Day 16](https://thothal.github.io/AoC/2023_task16.html)
-- [ ] Day 17
+- [x] [Day 17](https://thothal.github.io/AoC/2023_task17.html)
 - [ ] Day 18
 - [ ] Day 19
 - [ ] Day 20
