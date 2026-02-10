@@ -1,0 +1,253 @@
+---
+params:
+   task_nr: 18
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  text_block[nzchar(text_block)] %>% 
+    str_remove_all("[()]") %>% 
+    str_split(" ") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("dir", "dist", "col")) %>% 
+    as_tibble() %>% 
+    mutate(dist = as.integer(dist),
+           col = str_remove(col, "^#"))
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We solve the first part by a brute-force algorithm, where we explicitly generate the 
+trench. Then, we flood the trench from the outside and count all non flooded elements
+to get the area of the lagoon.
+
+```{r get-solution-1}
+flood_cave <- function(cave) {
+  class(cave) <- "cave"
+  nr <- nrow(cave)
+  nc <- ncol(cave)
+  dirs <- rbind(
+    U = c(-1L, 0L),
+    R = c(0L, 1L),
+    D = c(1L, 0L),
+    L = c(0L, -1L)
+  )
+  pos <- rbind(
+    cbind(1L, 1:nc),
+    cbind(nr, 1:nc),
+    cbind(1:nr, 1L),
+    cbind(1:nr, nc)
+  )
+  visited <- matrix(FALSE, nr, nc)
+  pos <- pos[cave[pos] == ".", , drop = FALSE]
+  while (nrow(pos) > 0L) {
+    visited[pos] <- TRUE
+    cave[pos] <- "~"
+    new_pos <- map(1:4, function(r) {
+      t(t(pos) + dirs[r, ])
+    }) %>% 
+      do.call(rbind, .)
+    ok <- new_pos[, 1L] >= 1L & new_pos[, 1L] <= nr &
+      new_pos[, 2L] >= 1L & new_pos[, 2L] <= nc
+    new_pos <- new_pos[ok, , drop = FALSE]
+    pos <- new_pos[!visited[new_pos] & cave[new_pos] == ".", , drop = FALSE]
+    pos <- pos[!duplicated(pos), , drop = FALSE]
+      
+  }
+  cave
+}
+
+create_trench <- function(ops) {
+  n <- nrow(ops)
+  pos <- matrix(NA_integer_, n + 1L, 3L, dimnames = list(NULL, c("row", "col", "color")))
+  pos[1L, ] <- c(0L, 0L, NA_integer_)
+  dirs <- rbind(
+    U = c(-1L, 0L),
+    R = c(0L, 1L),
+    D = c(1L, 0L),
+    L = c(0L, -1L)
+  )
+  for (i in seq_len(n)) {
+    last_pos <- pos[i, , drop = FALSE]
+    op <- ops %>% 
+      slice(i) %>% 
+      as.list()
+    pos[i + 1L, 1:2] <- last_pos[, 1:2] + op$dist * dirs[op$dir, ]
+    pos[i + 1L, 3L] <- strtoi(op$col, 16L)
+  }
+  pos
+}
+
+calculate_lagoon_area <- function(ops) {
+  trench <- create_trench(ops)
+  mins <- apply(trench, 2L, min) - 1L
+  mins[3L] <- 0L
+  coords <- sweep(trench, 2, mins)
+  start <- coords[1L, ]
+  cave <- array(".", apply(coords[, 1:2], 2, max))
+  for (i in 2:nrow(coords)) {
+    end <- coords[i, ]
+    idx <- expand.grid(row = start[1L]:end[1L], col = start[2L]:end[2L]) %>% 
+      as.matrix()
+    cave[idx] <- "#"
+    start <- end
+  }
+  res <- flood_cave(cave)
+  sum(res != "~")
+}
+calculate_lagoon_area(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+Given the large number for part 2 brute force is not feasible anymore. Instead we use the
+[shoelace formula](https://en.wikipedia.org/wiki/Shoelace_formula) to calculate its area.
+The perimeter can also be easily derived from the coordinates.
+Then we use [Pick's theorem](https://en.wikipedia.org/wiki/Pick%27s_theorem) to count the 
+number of integer points within and on its boundary.
+
+
+```{r get-solution-2}
+calculate_lagoon_area_large <- function(ops) {
+  dirs <- c("0" = "R", "1" = "D", "2" = "L", "3" = "U")
+  ops <- ops %>% 
+    mutate(
+      dir = dirs[str_sub(col, -1L)],
+      dist = strtoi(str_sub(col, 1L, -2L), 16L)
+      )
+  trench <- create_trench(ops) 
+  n <- nrow(trench)
+  area <- perimeter <- 0L
+  storage.mode(trench) <- "numeric"
+  x1 <- trench[1L, 1L]
+  y1 <- trench[1L, 2L]
+  for (i in 2:n) {
+    x2 <- trench[i, 1L]
+    y2 <- trench[i, 2L]
+    area <- area + y1 * (x2 - x1)
+    perimeter <- perimeter + abs(x2 - x1) + abs(y2 - y1)
+    x1 <- x2
+    y1 <- y2
+  }
+  unname(abs(area) + perimeter / 2 + 1) ## pick's theorem
+}
+calculate_lagoon_area_large(puzzle_data) %>% 
+  print(digit = 16L)
+```
