@@ -110,14 +110,27 @@ parse_puzzle_data <- function(text_block = readClipboard()) {
     dflt <- str_remove_all(line, "^.+,|\\}$")
     mtch <- str_match_all(rule, "([xmas])([<>])(\\d+):(\\w+)") %>% 
       extract2(1L)
-    tibble(
-      id = nm,
-      val = mtch[, 2],
-      lwr = if_else(mtch[, 3L] == ">", as.integer(mtch[, 4]), NA_integer_),
-      upr = if_else(mtch[, 3L] == "<", as.integer(mtch[, 4]), NA_integer_),
-      target = mtch[, 5L],
-      dflt = dflt
+    n <- nrow(mtch)
+    res <- tibble(
+      id = paste(nm, 1:n, sep = "_"),
+      rule_nm = nm,
+      order = 1:n,
+      var = mtch[, 2L],
+      val = as.integer(mtch[, 4]) + (mtch[, 3L] == ">")
     )
+    res %>% 
+      mutate(
+        next_rule = lead(id) %>% 
+          coalesce(dflt),
+        target_true = if_else(mtch[, 3L] == ">", next_rule, mtch[, 5L]),
+        target_false = if_else(mtch[, 3L] == ">", mtch[, 5L], next_rule)
+      ) %>%
+      mutate(across(starts_with("target"), 
+                    ~ if_else(!str_detect(.x, "_\\d+$") & 
+                                !str_detect(.x, "^[AR]$"),
+                              paste0(.x, "_1"),
+                              .x))) %>% 
+      select(-next_rule)
   }
   rules <- text_block[1:(sep[1L] - 1L)]
   vals <- text_block[(sep[1L] + 1L):(length(text_block) - 1)] %>% 
@@ -159,6 +172,12 @@ cat(puzzle[[1]])
 
 ### Solution
 
+For the first part we constructed unevaluated `case_when` calls from the rules. We loop
+through all rules and apply them in the context of the data frame containing the piece
+values. The `case_when` statements return the next rule to apply. We continue this process 
+until each tile falls either in the `R` or `A` category. Eventually we build the checksum
+from the accepted pieces and return it.
+
 ```{r get-solution-1}
 sort_pieces <- function(factory) {
   pieces <- factory$vals
@@ -193,31 +212,89 @@ cat(puzzle[[2]])
 
 ### Solution
 
-Given the large number for part 2 brute force is not feasible anymore. Instead we use the
-[shoelace formula](https://en.wikipedia.org/wiki/Shoelace_formula) to calculate its area.
-The perimeter can also be easily derived from the coordinates.
-Then we use [Pick's theorem](https://en.wikipedia.org/wiki/Pick%27s_theorem) to count the 
-number of integer points within and on its boundary.
+For the second part, we first construct a graph from the rules. Each node has 2 children,
+one if the condition is `TRUE` and one if the condition is `FALSE`. (*N.B.* to avoid many
+`if` clauses we transformed all the comparisons to a less-than-x form, that is instead of 
+looking at `if x > 2 then A else B` we said `if x < 3 then B else A`).
 
+Once the graph is constructed, we sort it topologically and update the limits of allowed
+values for each node. These limits can be derived from the parent's limit as well as the
+receptive condition at the node.
+
+Eventually, we propagated all the intervals to `A` (and `R`), where we have to multiply
+their lenghts and add all productes from all parents of `A`. Since the intervals where of 
+the form `[lwr, upr)`, i.e. the upper limit was not part of the interval, we really just
+need to look at the diff and do not need to add `1`.
 
 ```{r get-solution-2}
-count_combs <- function(rules) {
-  pos <- "in"
-  nodes <- rules %>% 
-    distinct(id) %>% 
-    pull(id)
-  lims <- vector("list", length(nodes)) %>% 
-    set_names(nodes)
-  while (length(pos) > 0L) {
-    cur_pos <- pos[1L]
-    pos <- pos[-1L]
-    cur_rule <- rules %>% 
-      filter(id == cur_pos)
-    for (i in seq_len(nrow(cur_rule))) {
-      
-    }
-  }
+construct_graph <- function(rules) {
+  vertices <- rules %>%
+    mutate(
+      id,
+      label = paste0(id, ":\n", var, " < ", val),
+      var,
+      val,
+      .keep = "none"
+    )
+  vertices <- bind_rows(
+    vertices,
+    tibble(id = c("R", "A"), label = id, var = NA_character_, val = NA_integer_)
+  )
+  ## use c(rbind(.)) trick to interweave values
+  n <- nrow(rules)
+  edges <- tibble(
+    from = rep(rules$id, each = 2),
+    to = c(rbind(rules$target_true, rules$target_false)), 
+    label = rep(c("T", "F"), n),
+    result = rep(c(TRUE, FALSE), n)
+  )
+  graph_from_data_frame(edges, directed = TRUE, vertices)
 }
 
-count_combs(ex$rules_lims)
+count_combinations <- function(rules) {
+  G <- construct_graph(rules)
+  nodes <- topo_sort(G)
+  for (v in nodes) {
+    parents <- neighbors(G, v, "in")
+    if (length(parents) == 0L) {
+      ## start node
+      iv <- c(1L, 4001L)
+      V(G)[v]$lims <- list(list(x = iv, m = iv, a = iv, s = iv))
+    } else if (length(parents) == 1L) {
+      edge <- E(G)[parents %->% v]
+      V(G)[v]$lims <- parents$lims
+      iv <- parents$lims[[1L]][[parents$var]]
+      if (edge$result) {
+        new_iv <- c(iv[1L], min(iv[2L], parents$val))
+      } else {
+        new_iv <- c(max(iv[1L], parents$val), iv[2L])
+      }
+      V(G)[v]$lims[[1L]][[parents$var]] <- new_iv
+    } else {
+      V(G)[v]$cnt <- 0L
+      parents <- unique(parents)
+      for (p in parents) {
+        parent <- V(G)[p]
+        edges <- E(G)[parent %->% v]
+        for (e in edges) {
+          edge <- E(G)[e]
+          lims <- parent$lims[[1L]]
+          iv <- lims[[parent$var]]
+          if (edge$result) {
+            new_iv <- c(iv[1L], min(iv[2L], parent$val))
+          } else {
+            new_iv <- c(max(iv[1L], parent$val), iv[2L])
+          }
+          lims[[parent$var]] <- new_iv
+          n_cand <- map_dbl(lims, diff) %>% 
+            prod()
+          V(G)[v]$cnt <- V(G)[v]$cnt + n_cand
+        }
+      }
+    }
+  }
+  V(G)["A"]$cnt
+}
+count_combinations(puzzle_data$rules_lims) %>% 
+  print(digit = 16L)
 ```
