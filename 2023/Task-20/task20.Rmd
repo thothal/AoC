@@ -1,0 +1,259 @@
+---
+params:
+   task_nr: 20
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(numbers)
+library(collections)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  layout <- text_block[nzchar(text_block)] %>% 
+    str_split(" -> |, ")
+  nms <- map_chr(layout, 1L)
+  type <- if_else(str_detect(nms, "^[%&]"), str_sub(nms, 1L, 1L), nms)
+  nbs <- map2(layout, type, ~ list(nb = tail(.x, -1L), type = .y))
+  names(nbs) <- if_else(str_detect(nms, "^[%&]"), str_sub(nms, 2L), nms)
+  nbs
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We keep track about the state of each module. For flip-flops it is their power status (on
+or off) and for conjunction modules it is the last seen pulse per input. Then, we maintain
+a queue of next pulses to send and update the signal depending on the module type.
+
+*N.B. 1* In an earlier version we also kept a memo hash to recognize cycles and to shortcut
+them. However, neither for part 1 nor part 2 this s necessary, so we removed this bit.
+
+*N.B. 2* We allow for some additional functionality, which is only needed and explained 
+in part 2.
+
+
+```{r get-solution-1}
+count_pulses <- function(layout, nr_presses, stop_on_rx = FALSE) {
+  state <- imap(layout, function(mod, nm) {
+    if (mod$type == "broadcaster") {
+      c(state = FALSE)
+    } else if (mod$type == "%") {
+      c(state = FALSE)
+    } else if (mod$type == "&") {
+      inp <- keep(layout, ~ nm %in% .x$nb) %>% 
+        names()
+      rep(FALSE, length(inp)) %>% 
+        set_names(inp)
+    }
+  })
+  j <- 1L
+  pulse_cnt <- c(0L, 0L)
+  rx_parent <- keep(layout, ~ "rx" %in% .x$nb) %>% 
+    names()
+  rx_inputs <- state[[rx_parent]] %>% 
+    names()
+  
+  period <- last_seen <- rep(NA_integer_, length(rx_inputs)) %>% 
+    set_names(rx_inputs)
+  stable <- rep(FALSE, length(rx_inputs)) %>% 
+    set_names(rx_inputs)
+  
+  note_high <- function(sender, j) {
+    if (is.na(last_seen[[sender]])) {
+      # first High
+      last_seen[[sender]] <<- j
+    } else if (is.na(period[[sender]])) {
+      # second High -> first diff
+      period[[sender]] <<- j - last_seen[[sender]]
+      last_seen[[sender]] <<- j
+    } else {
+      # third or later high
+      d <- j - last_seen[[sender]]
+      if (d == period[[sender]]) {
+        stable[[sender]] <<- TRUE
+      } else {
+        ## if distance is varying - replace old info
+        period[[sender]] <<- d
+      }
+      last_seen[[sender]] <<- j
+    }
+  }
+  
+  while (j <= nr_presses) {
+    queue <- queue()
+    queue$push(c(broadcaster = FALSE))
+    while (queue$size() > 0L) {
+      signal <- queue$pop()
+      pulse_cnt[signal + 1L] <- pulse_cnt[signal + 1L] + 1L
+      nm <- names(signal)
+      if (nm %in% names(layout)) {
+        recv <- layout[[nm]]
+        nb <- recv$nb
+        n <- length(nb)
+        is_conjunction <- map_lgl(layout[nb], ~ !is.null(.x) && .x$type == "&")
+        cjs <- nb[is_conjunction]
+        send <- TRUE
+        if (recv$type == "%") {
+          if (!signal) {
+            ## flip-flop receives low pulse
+            state[[nm]]["state"] <- signal <- !state[[nm]]["state"]
+          } else {
+            ## flip-flop get high pulse don't send anything
+            send <- FALSE
+          }
+        } else if (recv$type == "&") {
+          signal <- !all(state[[nm]])
+        }
+        if (stop_on_rx) {
+          if (signal && send && length(nb) && nm %in% rx_inputs) {
+            note_high(nm, j)
+          }
+          if (all(stable)) {
+            return(reduce(period, LCM))
+          }
+        }
+        if (send) {
+          for (n in nb) {
+            el <- signal %>% 
+              set_names(n)
+            queue$push(el)
+          }
+          walk(cjs, function(cj) {
+            state[[cj]][nm] <<- signal
+          })
+        }
+      }
+    }
+    j <- j + 1
+  }
+  prod(pulse_cnt)
+}
+
+count_pulses(puzzle_data, 1000L) %>% 
+  print(digit = 16)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we note that the only module sending pulses to `rx` is a *conjunction*
+module. It sends the required `low` pulse, whenever all of its inputs are `high`. Thus, we
+look for the periodicity of those inputs and as soon as we identified the period (as soon 
+as 2 time differences between `high` pulses is constant) of all inputs, we simply need to 
+calculate the least common multiple of these periods to get the needed total length.
+
+```{r get-solution-2, cache = TRUE}
+count_pulses(puzzle_data, Inf, TRUE)
+```
