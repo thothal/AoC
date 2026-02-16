@@ -123,24 +123,12 @@ cat(puzzle[[1]])
 
 ### Solution
 
-The first part is rather straight forward. We use modulo arithmetic as a preparation for 
-part 2.
+The first part is rather straight forward. We place pieces using matrix indexing and let
+the pile sink by checking whether all spaces below te bottom row of a piece are empty. 
+Then, for counting the pieces which can be disintegrated safely, we remove one piece at a 
+time and check  whether any piece atop of it would move.
 
 ```{r get-solution-1}
-print.pile <- function(x, fold = NA) {
-  if (!is.na(fold)) {
-    y <- array(".", dim(x))
-    y[!is.na(x)] <- "#"
-    y <- apply(y, setdiff(1:3, fold), function(r) if_else(any(r == "#"), "#", "."))
-    apply(y, 1L, paste, collapse = "") %>% 
-      paste(collapse = "\n") %>% 
-      cat()
-    return(invisible(x))
-  } 
-  NextMethod("print")  
-  
-}
-
 build_pile <- function(bricks) {
   is_zero <- apply(bricks, 2L, \(c) any(c == 0L))
   bricks <- sweep(bricks, 2L, is_zero, `+`)
@@ -149,7 +137,6 @@ build_pile <- function(bricks) {
           max(dmax[2L], dmax[5L]),
           max(dmax[1L], dmax[4L]))
   pile <- array(NA_integer_, dd)
-  class(pile) <- "pile"
   n <- nrow(bricks)
   for (i in seq_len(n)) {
     brick <- bricks[i, , drop = TRUE]
@@ -161,13 +148,12 @@ build_pile <- function(bricks) {
   }
   tiles <- which(!is.na(pile), arr.ind = TRUE)
   tiles <- cbind(tiles, id = pile[tiles])
-  tiles <- tiles[order(-tiles[, 1L], tiles[, 4L]), ]
-  i <- 1L
-  n <- nrow(tiles)
+  ids <- tiles[order(-tiles[, 1L]), 4L] %>% 
+    unique()
+
   down <- c(1L, 0L, 0L)
-  while (i <= n) {
-    start_piece <- tiles[i, ]
-    piece <- tiles[tiles[, 4L] == tiles[i, 4L], , drop = FALSE]
+  for (id in ids) {
+    piece <- tiles[tiles[, 4L] == id, , drop = FALSE]
     if (!any(piece[, 1L] == dd[1L])) {
       start_pos <- piece[, 1:3, drop = FALSE]
       pos <- t(t(start_pos) + down)
@@ -179,40 +165,32 @@ build_pile <- function(bricks) {
       ## undo last move
       pos <- t(t(pos) - down)
       pile[start_pos] <- NA_integer_
-      pile[pos] <- tiles[i, 4L]
+      pile[pos] <- id
     }
-    i <- i + nrow(piece)
   }
   pile
 }
 
-play_jenga <- function(bricks) {
+play_jenga_single <- function(bricks) {
   pile <- build_pile(bricks)
   tiles <- which(!is.na(pile), arr.ind = TRUE)
   tiles <- cbind(tiles, id = pile[tiles])
-  tiles <- tiles[order(-tiles[, 1L], tiles[, 4L]), ]
-  i <- 1L
-  n <- nrow(tiles)
+  bottom_rows <- tapply(tiles[, 1L], tiles[, 4L], max)
+  ids <- tiles[order(-tiles[, 1L]), 4L] %>% 
+    unique()
   down <- c(1L, 0L, 0L)
   cnt <- 0L
-  while (i <= n) {
-    print(tiles[[i, 4L]])
-    start_piece <- tiles[i, ]
-    piece <- tiles[tiles[, 4L] == tiles[i, 4L], , drop = FALSE]
+  for (id in ids) {
+    piece <- tiles[tiles[, 4L] == id, , drop = FALSE]
     pile[piece[, 1:3, drop = FALSE]] <- NA_integer_
     top_row <- min(piece[, 1L])
     if (top_row > 1L) {
-      bottom_rows <- tapply(tiles[, 1L], tiles[, 4L], max)
       on_top <- which(bottom_rows == top_row - 1L) %>% 
         names() %>% 
         as.integer()
-      on_top <- bottom_rows[bottom_rows < nrow(pile)] %>% 
-        names() %>% 
-        as.integer() %>% 
-        setdiff(tiles[[i, 4L]])
       moved <- FALSE
-      for (id in on_top) {
-        top_piece <- tiles[tiles[, 4L] == id, , drop = FALSE]
+      for (top_id in on_top) {
+        top_piece <- tiles[tiles[, 4L] == top_id, , drop = FALSE]
         start_pos <- top_piece[, 1:3, drop = FALSE]
         pos <- t(t(start_pos) + down)
         bottom <- pos[pos[, 1L] == max(pos[, 1L]), , drop = FALSE]
@@ -226,14 +204,11 @@ play_jenga <- function(bricks) {
     } else {
       cnt <- cnt + 1L
     }
-    i <- i + nrow(piece)
   }
   cnt
 }
 
-play_jenga(puzzle_data) ## 392 too low
-
-
+play_jenga_single(puzzle_data)
 ```
 
 ## Part 2
@@ -246,98 +221,47 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the second part we observe that
-
-1. **Periodic world.** The map garden is a finite $W \times H$ tile that repeats 
-infinitely in all directions. Walkability at absolute coordinates $(x,y)$ is decided by 
-wrapping back to the base tile via $((y \bmod H), (x \bmod W))$.
-1. **Residue class matters (not touching the first border).** We do **not** rely on when a 
-wavefront “touches the first tile’s border”. What matters is the **residue class** of the 
-step count modulo the tile’s **stride $L$**. For a square tile with odd side length 
-(e.g., $131 \times 131$) and 4‑neighborhood moves, using $L=W=H$ works well. The start in 
-the geometric center gives especially clean behavior for one residue class, but the 
-method holds for every residue class.
-1. **Stride and residue subsequences.** Fix a residue $r \in \{0,\dots,L-1\}$ and consider 
-the subsequence of step counts 
-$$n \;=\; r + L \cdot k \quad (k = 0,1,2,\dots).$$
-Along this subsequence, the modulo‑tile “phase” (i.e., how moves align with the periodic 
-pattern) remains constant.
-1. **Quadratic law per residue class.** In 2D, the number of cells reachable after exactly 
-$n$ steps grows quadratically in the “shell index” $k$. Consequently, for each residue 
-$r$ there exists an exact quadratic polynomial
-$$f_r(k) \;=\; A_r\,k^2 + B_r\,k + C_r,$$
-such that $\#\text{reachable}(n) = f_r\big((n-r)/L\big)$ whenever 
-$n \equiv r \pmod L$.
-  > Practically: the leading term is quadratic (area‑like growth); lower‑order terms encode 
-  periodic effects and become constants once the residue class is fixed.
-
-1. **Determine coefficients with 3 supports.** To find $A_r,B_r,C_r$, simulate **three** 
-step counts within the **same residue class**:
-$$n_0 = r,\quad n_1 = r + L,\quad n_2 = r + 2L.$$
-Collect the exact counts $f_r(0), f_r(1), f_r(2)$ and perform a quadratic fit 
-(equivalently, check that the second finite difference $f(k+2) - 2f(k+1) + f(k)$
-is constant). If a residue class stabilizes a bit later, just use more supports 
-$k=0\ldots m$ and fit degree 2 once the second difference is constant.
-1. **Evaluate for any target $n$.** For a given $n$, compute $r = n \bmod L$ and 
-$k = (n - r)/L$. Evaluate $f_r(k)$ from the fitted polynomial and obtain the exact number 
-of cells reachable after exactly $n$ steps—without simulating up to $n$.
+For the seocnd part, we check if a pieces moves and if it does, we remove it altogether 
+and continue counting. We just have to make sure that we start removing neighboring pieces 
+from the bottom row onwards. This algo is not really optimized and takes a bit too long 
+for our taste but, it delivers the correct results.
 
 ```{r get-solution-2, cache = TRUE}
-walk_garden_infinite <- function(garden, n_steps, supports = 0:2) {
-  L <- LCM(nrow(garden), ncol(garden))
-  if (any(dim(garden) %% 2L == 0L)) {
-    L <- LCM(L, 2L)
-  }
-
-  r <- n_steps %% L
-  k <- (n_steps - r) / L
-  collect_y <- function(k_supports) {
-    x <- r + k_supports * L
-    y <- map_int(x, ~ walk_garden(garden, .x))
-    list(k = as.integer(k_supports), x = as.integer(x), y = as.integer64(y))
-  }
-  
-  is_stable <- function(k, y) {
-    if (length(k) < 3L) {
-      return(FALSE)
+play_jenga_multi <- function(bricks) {
+  pile <- build_pile(bricks)
+  tiles <- which(!is.na(pile), arr.ind = TRUE)
+  tiles <- cbind(tiles, id = pile[tiles])
+  bottom_rows <- tapply(tiles[, 1L], tiles[, 4L], max)
+  ids <- tiles[order(tiles[, 1L]), 4L] %>% 
+    unique()
+  down <- c(1L, 0L, 0L)
+  original_pile <- pile
+  cnt <- 0L
+  for (id in ids) {
+    piece <- tiles[tiles[, 4L] == id, , drop = FALSE]
+    pile[piece[, 1:3, drop = FALSE]] <- NA_integer_
+    top_row <- min(piece[, 1L])
+    if (top_row > 1L) {
+      on_top <- which(bottom_rows <= top_row - 1L) %>% 
+        names() %>% 
+        as.integer()
+      on_top_pos <- tiles[tiles[, 4L] %in% on_top, , drop = FALSE]
+      on_top <- on_top_pos[order(-on_top_pos[, 1L]), 4L] %>% 
+        unique()
+      for (top_id in on_top) {
+        top_piece <- tiles[tiles[, 4L] == top_id, , drop = FALSE]
+        start_pos <- top_piece[, 1:3, drop = FALSE]
+        pos <- t(t(start_pos) + down)
+        bottom <- pos[pos[, 1L] == max(pos[, 1L]), , drop = FALSE]
+        if (all(is.na(pile[bottom]))) {
+          cnt <- cnt + 1L
+          pile[top_piece[, 1:3, drop = FALSE]] <- NA_integer_
+        }
+      }
+      pile <- original_pile
     }
-    # Ensure k are consecutive integers (0,1,2,... or any contiguous range)
-    kd <- sort(k) %>% 
-      diff()
-    if (!all(kd == 1L)) {
-      return(FALSE)
-    }
-    y_num <- as.numeric(y)
-    d1 <- diff(y_num)
-    d2 <- diff(d1)
-    length(d2) >= 1L && all(abs(d2 - d2[1L]) < 0.5) 
   }
-
-  k_supports <- as.integer(supports) %>% 
-    unique() %>% 
-    sort()
-  cur <- collect_y(k_supports)
-
-  extra_used <- 0L
-  while (!is_stable(cur$k, cur$y)) {
-    if (length(k_supports) == 0L) {
-      next_k <- 0L
-    } else {
-      next_k <- max(k_supports) + 1L
-    }
-    k_supports <- c(k_supports, next_k)
-    cur <- collect_y(k_supports)
-    extra_used <- extra_used + 1L
-  }
-
-  y <- tail(cur$y, 3L)
-  x <- r + k_supports * L
-  
-  a <- (y[3L] - 2 * y[2L] + y[1L]) / 2
-  b <- (y[2L] - y[1L]) - a
-  c <- y[1L]
-  as.integer64(a * k ^ 2L + b * k + c)
+  cnt
 }
-
-walk_garden_infinite(puzzle_data, 26501365)
+play_jenga_multi(puzzle_data) #33189 too low
 ```
