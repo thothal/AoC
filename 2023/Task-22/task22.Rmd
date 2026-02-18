@@ -221,7 +221,7 @@ cat(puzzle[[2]])
 
 ### Solution
 
-For the seocnd part, we check if a pieces moves and if it does, we remove it altogether 
+For the second part, we check if a pieces moves and if it does, we remove it altogether 
 and continue counting. We just have to make sure that we start removing neighboring pieces 
 from the bottom row onwards. This algo is not really optimized and takes a bit too long 
 for our taste but, it delivers the correct results.
@@ -263,5 +263,5 @@ play_jenga_multi <- function(bricks) {
   }
   cnt
 }
-play_jenga_multi(puzzle_data) #33189 too low
+play_jenga_multi(puzzle_data)
 ```
