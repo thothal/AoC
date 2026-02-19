@@ -1,0 +1,270 @@
+---
+params:
+   task_nr: 24
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(pracma)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  res <- text_block[nzchar(text_block)] %>% 
+   str_extract_all("-?\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("px", "py", "pz", "vx", "vy", "vz"))
+  storage.mode(res) <- "numeric"
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The system defines a set of equations for each pair of hailstones. We can solve these 
+equations to find the collision point and check if it is within the specified range.
+
+```{r get-solution-1}
+get_collision_point <- function(v1, v2, p1, p2) {
+  M <- cbind(v1, -v2)
+  P <- matrix(p2 - p1, ncol = 1L)
+  if (kappa(M) < 1e12) {
+    cc <- solve(M, P)
+    if (all(cc >= 0)) {
+      return (matrix(p1 + cc[1L] * v1, ncol = 1L))
+    }
+  }
+  matrix(Inf, 2L, 1L)
+}
+
+count_colliding <- function(hailstorms, range) {
+  n <- nrow(hailstorms)
+  colliding <- matrix(FALSE, n, n)
+  for (i in seq_len(n - 1L)) {
+    for (j in seq(i + 1L, n)) {
+      p <- get_collision_point(hailstorms[i, 4:5], hailstorms[j, 4:5], 
+                               hailstorms[i, 1:2], hailstorms[j, 1:2])
+      if (all(p >= range[1L]) && all(p <= range[2L])) {
+        colliding[i, j] <- TRUE
+      }
+    }
+  }
+  sum(colliding)
+}
+
+count_colliding(puzzle_data, c(200000000000000, 400000000000000))
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+Each hailstone moves along the line given by
+
+$$H_i(t) = P_i +tV_i$$
+while the stone moves along the line given by
+
+$$R(t) = R_0 + tV_0$$
+where $R_0$ is the initial position of the rock and $V_0$ is its velocity, both vectors
+must be $R_0\in\mathbb{Z}^3$ and $V_0\in\{-1,0,1\}^3$. For each hailstone we can 
+derive the intersection point by
+$$
+R_0 + t_iR_v = P_i +t_iV_i  \Leftrightarrow R_0 - P_i = t_i(V_i - R_v)
+$$
+$t_i$ is unknown, but we observe that $R_0 - P_i$ must be parallel to $V_i - R_v$. This 
+can be expressed by using the cross product. The cross product of two parallel vectors 
+is zero, so we have
+$$
+(R_0 - P_i) \times (V_i - R_v) = 0
+$$
+This equation can be rewritten as:
+$$
+(R_0 - P_i) \times (V_i - R_v) = R_0 \times V_i - R_0 \times R_v - P_i \times V_i + 
+P_i \times R_v
+$$
+which includes the **non** linear term $R_0 \times R_v$. However, we can eliminate this 
+term by looking at all (in fact some are already efficient) different hailstones. For two 
+different hailstones $i$ and $j$ we have:
+$$
+\begin{aligned}
+(R_0 - P_i) \times (V_i - R_v) & = 0 \\
+(R_0 - P_j) \times (V_j - R_v) & = 0
+\end{aligned}
+$$
+
+We can subtract the second equation from the first one to get rid of the non linear term:
+
+$$
+\begin{aligned}
+R_0 \times V_i - P_i \times V_i + P_i \times R_v &= R_0 \times V_j - P_j \times V_j + P_j \times R_v\\
+R_0 \times (V_i - V_j) + R_v \times (P_i - P_j) &= P_i \times V_i - P_j \times V_j
+\end{aligned}
+$$
+On the LHS we have now only linear terms in $R_0$ and $R_v$ and on the RHS we have only 
+known values. We can write this as a linear system of equations and solve it to find 
+$R_0$ and $R_v$. We need to do this for at least three different pairs of hailstones to 
+get enough equations to solve for the six unknowns in $R_0$ and $R_v$.
+
+We can rewrite the cross product as a matrix multiplication to get a more compact
+representation of the equations. The cross product of two vectors $a$ and $b$ can be
+written as:
+$$
+a \times b = \begin{bmatrix}
+0 & -a_z & a_y \\
+a_z & 0 & -a_x \\
+-a_y & a_x & 0
+\end{bmatrix} \cdot b
+$$
+Now we have all the ingredients to solve the problem. We can create a matrix $A$ that 
+contains the coefficients of $R_0$ and $R_v$ and a vector $b$ that contains the known 
+values from the RHS of the equations. We can then solve the linear system $Ax = b$ 
+to find $R_0$ and $R_v$.
+
+```{r get-solution-2}
+solve_rock <- function(M) {
+  P <- M[, 1:3, drop = FALSE]
+  V <- M[, 4:6, drop = FALSE]
+  cp <- function(v) {
+    matrix(c(
+      0, -v[3], v[2],
+      v[3], 0, -v[1],
+      -v[2], v[1], 0
+    ), 3L, 3L, byrow = TRUE)
+  }
+  block_ij <- function(i, j) {
+    A1  <- V[i, ] - V[j, ]
+    A2  <- P[j, ] - P[i, ]
+    rhs <- cross(P[i, ], V[i, ]) - cross(P[j, ], V[j, ])
+    A <- cbind(cp(A1), cp(A2))
+    b <- -rhs
+    list(A = A, b = b)
+  }
+  A <- b <- NULL    
+  ## create equation system for all pairs of hailstones
+  all_pairs <- combn(nrow(P), 2L)
+  ## chose the first 6 pairs to create the system of equations, this 
+  ## should be enough to solve for the 6 unknowns
+  sample_n <- min(ncol(all_pairs), 6L)
+  for (i in seq_len(sample_n)) {
+    blk <- block_ij(all_pairs[1L, i], all_pairs[2L, i])
+    A <- rbind(A, blk$A)
+    b <- c(b, blk$b)
+  }
+  ## solve system
+  sol <- qr.solve(A, b)
+  R0 <- round(sol[1:3])
+  sum(R0)
+}
+
+solve_rock(puzzle_data) %>% 
+  print(digit = 16L)
+```
