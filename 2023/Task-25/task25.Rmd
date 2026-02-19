@@ -1,0 +1,167 @@
+---
+params:
+   task_nr: 25
+   year: 2023
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  text_block[nzchar(text_block)] %>% 
+    str_split(": ") %>% 
+    map(function(wires) {
+      x <- wires[[1L]]
+      y <- str_split(wires[[2L]], " ")[[1L]]
+      tibble(from = pmin(x, y), to = pmax(x, y))
+    }) %>% 
+    list_rbind() %>% 
+    distinct()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The design and implementation of the solution is based on the following idea: we can find 
+all possible cuts of the graph that separate node 1 from any other node and check if the 
+cut has value 3 (that is we cut exactly 3 edges). If it does, we can calculate the product
+of the number of nodes in the two resulting components and keep track of the best one.
+
+```{r get-solution-1}
+find_hot_wires <- function(wires) {
+  G <- graph_from_data_frame(wires, FALSE)
+  n <- vcount(G)
+  best <- -Inf
+  for (j in 2:n) {
+    cut <- min_cut(G, 1, j, rep(1L, ecount(G)), FALSE)
+    if (cut$value == 3L) {
+      card <- cut[-match(c("value", "cut"), names(cut))] %>% 
+        lengths() %>% 
+        prod()
+      if (card > best) {
+        best <- card
+      }
+    }
+  }
+  best
+} 
+find_hot_wires(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+
+Hohoho, again another year solved! One more year to go and I solved all of the backlog.
