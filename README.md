@@ -11,6 +11,24 @@ of the assignments where I explain how I came up with the solution (if at all).
 
 ## ToC
 
+### 2025
+
+- [x] [Day 1](https://thothal.github.io/AoC/2025_task1.html)
+- [ ] Day 2
+- [ ] Day 3
+- [ ] Day 4
+- [ ] Day 5
+- [ ] Day 6
+- [ ] Day 7
+- [ ] Day 8
+- [ ] Day 9
+- [ ] Day 10
+- [ ] Day 11
+- [ ] Day 12
+
+<details>
+<summary> Archive</summary>
+
 ### 2024
 
 - [x] [Day 1](https://thothal.github.io/AoC/2024_task1.html)
@@ -38,9 +56,6 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 23](https://thothal.github.io/AoC/2024_task23.html)
 - [x] [Day 24](https://thothal.github.io/AoC/2024_task24.html)
 - [x] [Day 25](https://thothal.github.io/AoC/2024_task25.html)
-
-<details>
-<summary> Archive</summary>
 
 ### 2023
 
