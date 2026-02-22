@@ -17,7 +17,7 @@ of the assignments where I explain how I came up with the solution (if at all).
 - [x] [Day 2](https://thothal.github.io/AoC/2025_task2.html)
 - [x] [Day 3](https://thothal.github.io/AoC/2025_task3.html)
 - [x] [Day 4](https://thothal.github.io/AoC/2025_task4.html)
-- [ ] Day 5
+- [x] [Day 5](https://thothal.github.io/AoC/2025_task5.html)
 - [ ] Day 6
 - [ ] Day 7
 - [ ] Day 8
