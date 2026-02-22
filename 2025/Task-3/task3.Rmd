@@ -1,0 +1,176 @@
+---
+params:
+   task_nr: 3
+   year: 2025
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  res <- text_block[nzchar(text_block)] %>% 
+    str_extract_all("\\d") %>% 
+    do.call(rbind, .)
+  storage.mode(res) <- "integer"
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use a recursive function where we loop through the positions of the digits from `9` to 
+`1`. If a position is in increasing order and there is still enuogh space for the 
+remaining digits we use it and repeat this process until all required batteries are found.
+
+```{r get-solution-1}
+find_max_joltage <- function(banks, nr_bat) {
+  find_joltage <- function(bank) {
+    digits <- 9:1
+    n <- length(bank)
+    positions_by_digit <- map(digits, ~ which(bank == .x))
+    backtrack <- function(selected_pos) {
+      remaining <- nr_bat - length(selected_pos)
+      if (remaining == 0L) {
+        return (selected_pos)
+      }
+      for (digit_positions in positions_by_digit) {
+        for (pos in digit_positions) {
+          enough_space <- (n - pos) >= (remaining - 1L)
+          increasing <- pos > max(c(selected_pos, -Inf))
+          if (enough_space && increasing) {
+            return(Recall(c(selected_pos, pos)))
+          }
+        }
+      }
+    }
+    res <- backtrack(integer(0L))
+    sum(bank[res] * 10 ^ ((nr_bat - 1L):0))
+  }
+  apply(banks, 1L, find_joltage) %>% 
+    sum()
+}
+find_max_joltage(puzzle_data, 2L)
+
+
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We simply need to call the function with a larger number of required batteries.
+
+```{r get-solution-2}
+find_max_joltage(puzzle_data, 12L) %>% 
+  print(digit = 12)
+```
