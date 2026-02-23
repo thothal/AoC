@@ -1,0 +1,242 @@
+---
+params:
+   task_nr: 6
+   year: 2025
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(kableExtra)
+library(tidyr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  text_block <- text_block[nzchar(text_block)]
+  ops <- str_detect(text_block, "[+*]")
+  spaces_pos <- text_block[!ops] %>% 
+    str_locate_all("\\s") %>% 
+    reduce(function(x, y) 
+      inner_join(as_tibble(x), as_tibble(y), by = c("start", "end"))) %>% 
+    as.matrix()
+  idx <- cbind(start = c(1L, spaces_pos[, 2L] + 1L),
+               end = c(spaces_pos[, 2L] - 1L, max(nchar(text_block[!ops]))))
+  calcs <- str_sub_all(text_block[!ops], idx) %>% 
+    transpose() %>% 
+    map(function(nrs) {
+      align <- if_else(str_detect(nrs, "^\\s"), "right", "left")
+      nrs <- as.integer(nrs)
+      n <- length(nrs)
+      c(
+        as.list(align) %>% 
+          set_names(paste0("align_", seq_len(n))),
+        as.list(nrs) %>% 
+          set_names(paste0("nr_", seq_len(n)))
+      ) %>% 
+        as_tibble()
+    }) %>% 
+    list_rbind()
+  ops <- text_block[ops] %>% 
+    str_extract_all("[+*]") %>% 
+    extract2(1L)
+  calcs %>% 
+    mutate(op = ops)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+The solution is pretty straight forward, loop over all rows and apply the function given 
+in column `op`. 
+
+*N.B.* In the parsing we already transposed the matrix, such that the exercises are now in
+the rows, while the operands in the columns. The operator is stored in its own column 
+`op`. We also kept track of the alignment for later user.
+
+```{r peek-input, echo = FALSE}
+puzzle_data %>% 
+  mutate(op = str_replace_all(op, c("\\+" = "\\\\+", "\\*" = "\\\\*"))) %>%
+  head(n = 10L) %>% 
+  select(-starts_with("align")) %>% 
+  kbl(escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>% 
+  column_spec(5L, monospace = TRUE)
+```
+
+
+```{r get-solution-1}
+solve_exercises <- function(exercises) {
+  exercises %>% 
+    mutate(res = pmap_dbl(select(., -starts_with("align")), function(..., op) {
+      if (op == "+") {
+        sum(c(...))
+      } else if (op == "*") {
+        prod(c(...))
+      }
+    }
+    )) %>% 
+    summarize(total = sum(res)) %>%
+    pull(total)
+}
+
+solve_exercises(puzzle_data) %>% 
+  print(digit = 12L)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+For the second part we need to transform each operand first, then apply the operator. For
+this we need to know whether the number was originally left or right aligned to collect
+the digits in the right order.
+
+```{r get-solution-2}
+solve_exercises_cephalopod <- function(exercises) {
+  align_ceph_numbers <- function(...) {
+    args <- list(...)
+    nrs <- str_detect(names(args), "^nr_")
+    nr_strings <- args[nrs] %>% 
+      unlist() %>% 
+      as.character() %>%
+      str_split("")
+    align <- args[!nrs]
+    ml <- lengths(nr_strings) %>% 
+      max()
+    nr_strings <- map2(nr_strings, align, function(nr, al) {
+      if (al == "right") {
+        c(rep(NA_character_, ml - length(nr)), nr)
+      } else {
+        c(nr, rep(NA_character_, ml - length(nr)))
+      }
+    })
+    nr_strings %>% 
+       transpose() %>% 
+       map_int(~ paste(.x[!is.na(.x)], collapse = "") %>% 
+             as.integer())
+  }
+  exercises %>% 
+    mutate(res = pmap_dbl(., function(..., op) {
+      ceph_nr <- align_ceph_numbers(...)
+      if (op == "+") {
+        sum(ceph_nr)
+      } else if (op == "*") {
+        prod(ceph_nr)
+      }
+    })) %>% 
+    summarize(total = sum(res)) %>%
+    pull(total)
+}
+
+solve_exercises_cephalopod(puzzle_data) %>% 
+  print(digit = 12L)
+```
