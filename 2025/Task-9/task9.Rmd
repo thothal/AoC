@@ -1,0 +1,205 @@
+---
+params:
+   task_nr: 9
+   year: 2025
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: NULL
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(sf)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  res <- text_block[nzchar(text_block)] %>% 
+    str_extract_all("\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("x", "y"))
+  storage.mode(res) <- "integer"
+  res
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We use brute force to check all pairs of tiles and compute the area of the rectangle they 
+would form. The largest area is returned as the solution.
+
+```{r get-solution-1}
+get_largest_rect <- function(tiles) {
+  dd <- apply(tiles, 2, dist)
+  max((dd[, 1L] + 1L) * (dd[, 2L] + 1L))
+}
+get_largest_rect(puzzle_data)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+We use `library(sf)` for a convenient way to check if a rectangle is fully covered by the 
+tiles. We only check rectangles that are larger than the current maximum area to avoid 
+expensive inside checks for smaller rectangles. If both points are on the same line, we 
+check if the corresponding line segment is covered by the tiles. Otherwise, we check if 
+the rectangle spanned by the two points is covered by the tiles. The largest area is
+returned as the solution.
+
+```{r get-solution-2, cache = TRUE}
+get_largest_rect_inside <- function(tiles) {
+  n <- nrow(tiles)
+  max_area <- -Inf
+  get_area <- function(P1, P2) {
+    prod(abs(P2 - P1) + 1L)
+  }
+  poly <- st_polygon(
+    list(
+      rbind(tiles, tiles[1L, , drop = FALSE])
+    )
+  ) %>% 
+    st_sfc()
+    
+  is_inside <- function(P1, P2) {
+    if (any(P1 == P2)) {
+      ## both points on same line => LINESTRING
+      shape <- st_linestring(rbind(P1, P2))
+    } else {
+      ## proper rectangle => POLYGON
+      TL <- c(min(P1[1L], P2[1L]), min(P1[2L], P2[2L]))
+      TR <- c(min(P1[1L], P2[1L]), max(P1[2L], P2[2L]))
+      BL <- c(max(P1[1L], P2[1L]), min(P1[2L], P2[2L]))
+      BR <- c(max(P1[1L], P2[1L]), max(P1[2L], P2[2L]))
+      shape <- st_polygon(
+        list(
+          rbind(TL, TR, BR, BL, TL)
+        )
+      )
+    }
+    st_covers(poly, shape, sparse = FALSE) %>% 
+      c()
+  }
+  for (i in 1:(n - 1L)) {
+    for (j in (i + 1L):n) {
+      P1 <- tiles[i, ]
+      P2 <- tiles[j, ]
+      area <- get_area(P1, P2)
+      if (area > max_area) {
+        ## test inside only if the area is larger than the current maximum
+        ## to avoid expensive inside checks
+        if (is_inside(P1, P2)) {
+          max_area <- area
+        }
+      }
+    }
+  }
+  max_area
+}
+get_largest_rect_inside(puzzle_data)
+```
