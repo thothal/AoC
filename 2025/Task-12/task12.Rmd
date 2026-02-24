@@ -1,0 +1,171 @@
+---
+params:
+   task_nr: 12
+   year: 2025
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  tiles_markers <- text_block[nzchar(text_block)] %>% 
+    str_which("^\\d:")
+  tiles <- map(tiles_markers, ~ str_split(
+    text_block[nzchar(text_block)][(.x + 1L):(.x + 3L)], "") %>% 
+      do.call(rbind, .))
+  rect_marker <- text_block[nzchar(text_block)] %>% 
+    str_which("^\\d+x\\d+:")
+  dims <- text_block[nzchar(text_block)][rect_marker] %>% 
+    str_extract_all("\\d+") %>% 
+    do.call(rbind, .) %>% 
+    set_colnames(c("w", "h", paste0("s", 0:5)))
+  storage.mode(dims) <- "integer"
+  list(tiles = tiles, dims = dims)
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+While this problem is NP hard in general, the given spaces are large enough to simply
+pack the gifts next to each other without event thinking to fit them tighter. To prove
+that we:
+
+1. Calculate the amount of `3x3` pieces that would fit into the given space.
+1. Compare this number to the amount of pieces we want to pack, if there are more `3x3`
+tiles available than the gifts to place, we know we can fit them trivially.
+1. Check if there are rectangles left, where there are theoretically enough spaces to
+fit all gifts, but the previous check fails. If there are none, we are done.
+
+```{r get-solution-1}
+check_space <- function(dim, tiles) {
+  tile_area <- map_int(tiles, ~ sum(.x == "#"))
+  cols <- dim[, "w"] %/% 3L
+  rows <- dim[, "h"] %/% 3L
+  needed <- rowSums(dim[, -(1:2)])
+  trivial_solutions <- sum(cols * rows >= needed)
+  area_available <- dim[, "w"] * dim[, "h"]
+  area_needed <- apply(dim[, -(1:2)], 1L, \(r) sum(r * tile_area))
+  wont_fit <- sum(area_available < area_needed)
+  stopifnot(trivial_solutions + wont_fit == nrow(dim))
+  trivial_solutions
+}
+
+check_space(puzzle_data$dims, puzzle_data$tiles)
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+Hohoho, finally I solved all puzzles from the backlog. For the first time I will be able
+to solve the puzzles in due time, so CU in Dec 2026!
