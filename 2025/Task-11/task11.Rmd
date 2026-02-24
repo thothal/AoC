@@ -1,0 +1,200 @@
+---
+params:
+   task_nr: 11
+   year: 2025
+title: '`r paste("<span>Task", params$task_nr, "<span class = \"back\"><a href = \"index.html\">", fontawesome::fa("home"), "</a></span></span>")`'
+author: 
+  name: "Thorn Thaler"
+  email: "thorn.thaler@thothal.at"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) {
+   year <- basename(dirname(dirname(inputFile)))
+   
+   o_file <- sprintf("%s_%s", year, 
+                     tools::file_path_sans_ext(basename(inputFile)))
+                     
+   rmarkdown::render(inputFile, encoding = encoding, 
+                     output_file = o_file, output_dir = here::here("docs"))
+   })
+output: 
+  rmdformats::downcute:
+    highlight: tango
+    use_bookdown: TRUE
+    mathjax: TRUE
+    lightbox: TRUE
+    gallery: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css custom-css, echo = FALSE}
+.page-content  .figure {
+  width: 100%;
+}
+
+.back {
+  font-size: 2rem;
+}
+
+.day-desc {
+  border: 2px dotted;
+  border-radius: 6px;
+  border-color: var(--blockquote-border-color);
+  padding: 0 20px;
+}
+```
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      dev.args = list(bg = "transparent"))
+## Define a function to write text in typewriter font
+tt <- function(x) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\texttt{%s}", as.character(x))
+  } else if (knitr::is_html_output()) {
+    sprintf("<tt>%s</tt>", as.character(x))
+  } else {
+    x
+  }
+}
+
+```
+
+# Setup
+
+## Libraries
+
+```{r libs, warning = FALSE}
+library(httr)
+library(xml2)
+library(magrittr)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(igraph)
+```
+
+## Retrieve Data from `r tt("AoC")`
+
+
+```{r get-data, cache = FALSE, messages = FALSE}
+session_cookie <- set_cookies(session = keyring::key_get("AoC-GitHub-Cookie"))
+base_url <- paste0("https://adventofcode.com/", params$year, "/day/", params$task_nr)
+puzzle <- GET(base_url,
+              session_cookie) %>% 
+  content(encoding = "UTF-8") %>% 
+  xml_find_all("///article") %>% 
+  lapply(as.character)
+
+parse_puzzle_data <- function(text_block = readClipboard()) {
+  if (length(text_block) == 1L) {
+    text_block <- text_block %>% 
+      str_split("\n") %>% 
+      extract2(1L)
+  }
+  text_block[nzchar(text_block)] %>% 
+    str_split(": |\\s") %>% 
+    map(~ tibble(from = .x[[1]], to = .x[-1])) %>% 
+    list_rbind()
+}
+
+puzzle_data <- local({
+  GET(paste0(base_url, "/input"),
+      session_cookie) %>% 
+    content(encoding = "UTF-8") %>% 
+    parse_puzzle_data()
+})
+```
+
+```{r example-data, eval = interactive(), echo = FALSE}
+```
+
+# Puzzle Day `r params$task_nr`
+
+## Part 1
+
+### Description
+
+```{r show-puzzle-a, echo = FALSE, results = "asis"}
+cat(puzzle[[1]])
+```
+
+### Solution
+
+We can solve the first part of the puzzle by first creating a directed graph from the 
+input data. Then we set the weight for the target node to 1 and all other nodes to NA.
+We can then iterate through the nodes in reverse topological order and set the weight of 
+each node to the sum of the weights of its outgoing neighbors. 
+Finally, we return the weight of the start node.
+
+```{r get-solution-1}
+count_paths <- function(G, start, goal) {
+  sg <- intersect(
+    subcomponent(G, start, mode = "out"),
+    subcomponent(G, goal, mode = "in")
+  )
+  if (length(sg) == 0) {
+    return(0L)
+  }
+  G <- induced_subgraph(G, sg)
+  V(G)$nr_path <- NA_real_
+  V(G)[goal]$nr_path <- 1
+  for (v in rev(topo_sort(G))) {
+    if (V(G)[v]$name != goal) {
+      V(G)[v]$nr_path <- sum(V(G)[neighbors(G, v, mode = "out")]$nr_path)
+    }
+  }
+  V(G)[start]$nr_path
+}
+
+G <- graph_from_data_frame(puzzle_data, directed = TRUE)
+count_paths(G, "you", "out")
+```
+
+## Part 2
+
+### Description
+
+```{r show-puzzle-b, echo = FALSE, results = "asis", eval = length(puzzle) > 1}
+cat(puzzle[[2]])
+```
+
+### Solution
+
+To count all paths which passes through both `fft` and `dac` we can use the 
+following formula: 
+$$
+\#(\text{svr} \to \text{fft}) \cdot 
+\#(\text{fft} \to \text{dac}) \cdot 
+\#(\text{dac} \to \text{out}) +
+\#(\text{svr} \to \text{dac}) \cdot 
+\#(\text{dac} \to \text{fft}) \cdot 
+\#(\text{fft} \to \text{out})
+$$
+That is we first count all paths between $\text{svr} \to \text{fft}$, 
+$\text{fft} \to \text{dac}$ and $\text{dac} \to \text{out}$ and multiply them. This counts
+all paths which passes first through `fft` and then through `dac`. We do the same for the
+paths which passes first through `dac` and then through `fft` and add the two results 
+together.
+
+```{r get-solution-2}
+count_paths_through <- function(G, path) {
+  stopifnot(length(path) == 4L)
+  start <- path[1L]
+  i1 <- path[2L]
+  i2 <- path[3L]
+  end <- path[4L]
+  
+  count_paths(G, start, i1) *
+    count_paths(G, i1, i2) *
+    count_paths(G, i2, end) +
+    count_paths(G, start, i2) *
+    count_paths(G, i2, i1) *
+    count_paths(G, i1, end)
+}
+
+count_paths_through(G, c("svr", "fft", "dac", "out")) %>% 
+  print(digits = 16L)
+
+```
